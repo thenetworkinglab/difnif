@@ -6,12 +6,97 @@
 ### http://creativecommons.org/license/by-sa/4.0/ or send a letter to Creative
 ### Commons, PO Box 1866, Mountain View, CA 94042, USA.
 
-### Clocks
+### Clock
 set_io clk_10m      49
 
-### Bus reset
+### Micro Channel bus
 set_io chreset_l    52
 
-### LED
+set_io cd_ds16_l    73
+set_io irq14_l      74
+set_io chrdy_l      75
+set_io made24       76
+set_io sbhe_l       78
+set_io s0           79
+set_io s1           80
+set_io cmd_l        81
+set_io a3           82
+set_io a2           83
+set_io arb3_o       84
+set_io arb2_o       85
+set_io arb1_o       87
+set_io arb0_o       88
+set_io burst_o_l    90
+set_io preempt_o_l  91
+set_io a1           93
+set_io m_io_l       94
+set_io a0           95
+set_io arb_gnt_l    96
+set_io tc_l         97
+set_io arb3         98
+set_io arb2         99
+set_io arb1         101
+set_io arb0         102
+set_io burst_l      104
+set_io preempt_l    105
+set_io cd_setup_l   106
+set_io addr_sel_l   107
+set_io d13          110
+set_io d11          112
+set_io d10          113
+set_io d7           114
+set_io d6           115
+set_io d5           116
+set_io d2           117
+set_io d0           118
+set_io d15          119
+set_io d14          120
+set_io d12          121
+set_io d9           122
+set_io d8           124
+set_io d4           125
+set_io d3           128
+set_io d1           129
+set_io data_dir     130
+
+
+### Teensy connections
+set_io tn35         141
+set_io tn30         142
+set_io tn36         143
+set_io tn29         144
+set_io tn37         10
+set_io tn38         11
+set_io tn27         12
+set_io tn26         15
+set_io tn39         16
+set_io tn40         17
+set_io tn41         18
+set_io tn13         19
+set_io tn12         20
+set_io tn14         21
+set_io tn11         22
+set_io tn15         23
+set_io tn10         24
+set_io tn16         25
+set_io tn17         26
+set_io tn18         28
+set_io tn19         29
+set_io tn20         31
+set_io tn21         32
+set_io tn22         33
+set_io tn23         34
+
+### LEDs
 set_io led0         37
 set_io led1         38
+
+### SD card
+set_io sd_clk       1
+set_io sd_cmd       2
+set_io sd_switch    3
+set_io sd_d1        4
+set_io sd_d0        7
+set_io sd_d3        8
+set_io sd_d2        9
+
