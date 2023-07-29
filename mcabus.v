@@ -35,13 +35,13 @@ module mcabus(
     input preempt_l,    // DMA preempt request input
     output [3:0]arb_o,  // DMA arbitration control line outputs
     output burst_o_l,   // DMA burst request output
-    output preempt_o_l, // DMA preempt request output
+    output preempt_o_l  // DMA preempt request output
     );
 
     wire test;
 
     assign cd_ds16_l = 1'b1; // FIXME
-    assign chrdy_l = 1'b1;
+    assign cd_chrdy_l = 1'b1;
     assign data_dir = 1'b0; // Read mode
     assign irq14_l = 1'b1;
     assign arb_o = 4'b1111;

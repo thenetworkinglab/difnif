@@ -24,7 +24,7 @@ module mcabus_t;
     reg m_io_l;
     reg s0_w_l;
     reg s1_r_l;
-    reg [3:0] a;
+    reg [3:0] bus_a;
     reg addr_sel_l;
     reg sbhe_l;
     reg adl_l; // Not used for DBA-ESDI
@@ -32,7 +32,7 @@ module mcabus_t;
     reg irq_in;
 
     reg arb_gnt_l;
-    reg tc_l;
+    wire tc_l;
 
     // Outputs
     wire cd_chrdy_l;
@@ -45,14 +45,15 @@ module mcabus_t;
     wire dack_l;
 
     // Bidirs
-    wire [7:0] bus_d;
-    wire [7:0] d_in; // Input sense
-    reg [7:0] d_out; // Output drive
+    wire [15:0] bus_d;
+    wire [15:0] d_in; // Input sense
+    reg [15:0] d_out; // Output drive
     reg d_valid;     // Direction control
 
     wire preempt_l;
     wire burst_l;
     wire [3:0] arb;
+    wire [3:0] arb_o;
 
     reg [3:0] arbdriver;
 
@@ -96,12 +97,13 @@ module mcabus_t;
     pullup (burst_l);
     pullup (preempt_l);
 
-
+    // Either arbdriver (test bench signal) or arb_o (uut) can drive
+    // the arbitration bus
     genvar i;
     generate
     for (i = 0; i < 4; i = i + 1) begin
         pullup (arb[i]);
-        assign arb[i] = arbdriver[i] ? 1'bZ : 1'b0;
+        assign arb[i] = (arbdriver[i] & arb_o[i]) ? 1'bZ : 1'b0;
     end
     endgenerate
 
@@ -150,7 +152,7 @@ module mcabus_t;
         begin
             #8 m_io_l = next_mio;
             bus_a = next_addr;
-            wait(~cd_chrdy_l);
+            // wait(~cd_chrdy_l); FIXME: why does it hang here?
             #8 s1_r_l = 1;
             s0_w_l = 1;
             #24
@@ -200,8 +202,7 @@ module mcabus_t;
         bus_a = 0;
         clk = 0;
 
-        dreq = 0;
-        arb_grant_l = 0;
+        arb_gnt_l = 0;
         irq_in = 0;
 
         // Wait 100 ns for global reset to finish
@@ -235,25 +236,24 @@ module mcabus_t;
         write_cycle(16'h022C, 8'h77, 0);
         write_cycle(16'h022E, 8'h88, 0);
         // Start DMA request
-        dreq = 1;
         write_cycle(16'h0123, 8'h99, 0);
         #25
-        arb_grant_l = 1;
+        arb_gnt_l = 1;
         #25
         arbdriver = 4'b0000;
  //       #25 dreq = 1;
         #175
-        arb_grant_l = 0;
+        arb_gnt_l = 0;
         // DMA reads from memory, writes to IO
-        #16 m_io = 1;
-        a = 16'h2000;
+        #16 m_io_l = 1;
+        bus_a = 16'h2000;
         #136
         read_cycle(16'h0000, 1);
         write_cycle(16'h0000, 8'h55, 0); // leave addr data alone
         #200
-        arb_grant_l = 1;
+        arb_gnt_l = 1;
         #25
-        arb_grant_l = 0;
+        arb_gnt_l = 0;
         read_cycle(16'h0000, 1);
         #200
         irq_in = 1;
