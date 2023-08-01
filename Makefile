@@ -9,7 +9,7 @@
 
 PROJ = difnif
 IMAGES = difnif_top
-SOURCES = difnif_top.v
+SOURCES = difnif_top.v mcabus.v
 PIN_DEF =  difnif.pcf
 DEVICE = hx8k
 ODIR = build

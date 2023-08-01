@@ -24,8 +24,8 @@ module mcabus_t;
     reg m_io_l;
     reg s0_w_l;
     reg s1_r_l;
-    reg [3:0] bus_a;
-    reg addr_sel_l;
+    reg [23:0] bus_a;
+    wire addr_sel_l;
     reg sbhe_l;
     reg adl_l; // Not used for DBA-ESDI
 
@@ -67,7 +67,7 @@ module mcabus_t;
         .m_io_l(m_io_l),
         .cd_setup_l(cd_setup_l),
         .addr_sel_l(addr_sel_l),
-        .bus_a(bus_a),
+        .bus_a(bus_a[3:0]),
         .sbhe_l(sbhe_l),
         .cd_ds16_l(cd_ds16_l),
         .cd_chrdy_l(cd_chrdy_l),
@@ -87,10 +87,14 @@ module mcabus_t;
         .preempt_o_l(preempt_o_l)
     );
 
+    // DBA-ESDI address decode
+    assign addr_sel_l = ~((cd_setup_l & (bus_a[23:4] == 20'h00351)) |
+                          (~cd_setup_l & (bus_a[23:4] == 20'h00010)));
 
     // Output data bus buffer
+    // TODO: Add data steering ?
     assign d_in = bus_d;
-    assign bus_d = (d_valid) ? d_out : 8'bZ;
+    assign bus_d = (d_valid) ? d_out : 16'bZ;
 
     // DMA stuff
     assign tc_l = 1'b1;
@@ -152,7 +156,7 @@ module mcabus_t;
         begin
             #8 m_io_l = next_mio;
             bus_a = next_addr;
-            // wait(~cd_chrdy_l); FIXME: why does it hang here?
+            wait(cd_chrdy_l);
             #8 s1_r_l = 1;
             s0_w_l = 1;
             #24
@@ -184,7 +188,7 @@ module mcabus_t;
     endtask
 
         // Clock FIXME
-    always #35 clk = ~clk;
+    always #20 clk = ~clk;
 
     initial begin
         $dumpfile("sim.vcd");
@@ -209,10 +213,13 @@ module mcabus_t;
         #100;
         chreset_l = 1;
         #16;
-        read_cycle(16'h0000, 1);
-        pos_read_cycle(16'h0000);
+        write_cycle(16'h3510, 8'hAA, 0);
+        write_cycle(16'h3511, 8'hBB, 0);
+        #100;
+        read_cycle(16'h3510, 1);
+        pos_read_cycle(16'h0100);
         read_cycle(16'h00aa, 1);
-        pos_read_cycle(16'h0001);
+        pos_read_cycle(16'h0101);
         read_cycle(16'h00bb, 1);
         pos_write_cycle(16'h0003, 8'b10110010); // Value here goes to POS 03
         pos_write_cycle(16'h0002, 8'h01); // Value here goes to POS 02
