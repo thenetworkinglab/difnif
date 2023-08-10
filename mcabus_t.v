@@ -44,18 +44,27 @@ module mcabus_t;
 
     wire dack_l;
 
+    wire made24 = 1'b1;
+
     // Bidirs
     wire [15:0] bus_d;
     wire [15:0] d_in; // Input sense
     reg [15:0] d_out; // Output drive
     reg d_valid;     // Direction control
 
+    reg preempt_driver;
+    reg burst_driver;
     wire preempt_l;
     wire burst_l;
+    wire preempt_o_l;
+    wire burst_o_l;
     wire [3:0] arb;
     wire [3:0] arb_o;
 
     reg [3:0] arbdriver;
+
+    wire cd_ds16_l;
+    wire data_dir; // FIXME use this to check for conflicts
 
     // Instantiate the Unit Under Test (UUT)
     mcabus uut (
@@ -67,6 +76,7 @@ module mcabus_t;
         .m_io_l(m_io_l),
         .cd_setup_l(cd_setup_l),
         .addr_sel_l(addr_sel_l),
+        .made24(made24),
         .bus_a(bus_a[3:0]),
         .sbhe_l(sbhe_l),
         .cd_ds16_l(cd_ds16_l),
@@ -86,6 +96,7 @@ module mcabus_t;
         .burst_o_l(preempt_o_l),
         .preempt_o_l(preempt_o_l)
     );
+
 
     // DBA-ESDI address decode
     assign addr_sel_l = ~((cd_setup_l & (bus_a[23:4] == 20'h00351)) |
@@ -110,6 +121,9 @@ module mcabus_t;
         assign arb[i] = (arbdriver[i] & arb_o[i]) ? 1'bZ : 1'b0;
     end
     endgenerate
+
+    assign burst_l = burst_driver & burst_o_l ? 1'bZ : 1'b0;
+    assign preempt_l = preempt_driver & preempt_o_l ? 1'bZ : 1'b0;
 
 
     task read_cycle;
@@ -144,6 +158,8 @@ module mcabus_t;
             mca_cycle(0, next_addr, 8'h00, 1, 1);
         end
     endtask
+
+    // TODO: Add sbhe_l and a0 for byte steering
 
     // Cycles start right after CMD goes low, when
     // m/io# and s0/s1 and address changes.
@@ -195,6 +211,8 @@ module mcabus_t;
         $dumpvars(0,mcabus_t);
         // Initialize Inputs
         arbdriver = 4'b1111;
+        burst_driver = 1'b1;
+        preempt_driver = 1'b1;
         d_valid = 0;
         cd_setup_l = 1;
         chreset_l = 0;
@@ -214,11 +232,14 @@ module mcabus_t;
         chreset_l = 1;
         #16;
         write_cycle(16'h0000, 8'h00, 0); // fixme
-        write_cycle(16'h3512, 8'hAA, 0);
-        write_cycle(16'h3513, 8'hBB, 0);
+        write_cycle(16'h3510, 8'hAA, 0);
+        write_cycle(16'h3511, 8'hBB, 0);
         #100;
-        read_cycle(16'h3510, 1);
-        write_cycle(16'h0000, 8'h00, 0);
+        read_cycle(16'h3510, 0);
+        read_cycle(16'h3511, 0);
+        read_cycle(16'h3512, 0);
+        write_cycle(16'h3512, 8'hEF, 0);
+        write_cycle(16'h0101, 8'h00, 0);
         pos_read_cycle(16'h0100);
         read_cycle(16'h00aa, 1);
         pos_read_cycle(16'h0101);

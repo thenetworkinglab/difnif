@@ -18,6 +18,7 @@ module mcabus(
     input m_io_l,       // memory / IO# transfer
     input cd_setup_l,   // Card setup mode
     input addr_sel_l,   // Card address selected
+    input made24,       // Memory address decode enable 24 bits
     input [3:0] bus_a,  // Truncated address bus (register select)
     input sbhe_l,       // With bus_a0, selects 8 or 16 bit transfer
     output cd_ds16_l,   // Assert low to request 16-bit transfer
@@ -43,86 +44,89 @@ module mcabus(
 
     wire test;
 
-
     // Test address latch
-    SB_IO #(
-        .PIN_TYPE(6'b0000_00), // No output, DDR style input
-        .PULLUP(1'b0)
-    ) s0_io_buf (
-        .PACKAGE_PIN(s0_w_l),
-        .INPUT_CLK(cmd_l),
-        .CLOCK_ENABLE(1'b1),
-        .OUTPUT_ENABLE(1'b0),
-        .D_IN_1(test2) // D_IN_1 is the falling edge latched, IN_0 is rising
-    );
+//    SB_IO #(
+//        .PIN_TYPE(6'b0000_00), // No output, DDR style input
+//        .PULLUP(1'b0)
+//    ) s0_io_buf (
+//        .PACKAGE_PIN(s0_w_l),
+//        .INPUT_CLK(cmd_l),
+//        .CLOCK_ENABLE(1'b1),
+//        .OUTPUT_ENABLE(1'b0),
+//        .D_IN_1(test2) // D_IN_1 is the falling edge latched, IN_0 is rising
+//    );
 
-    assign cd_ds16_l = 1'b1; // FIXME
     assign cd_chrdy_l = 1'b1;
-    assign data_dir = data_read;// & ~cmd_l; // Read mode; only when CMD is low.
     assign irq14_l = 1'b1;
     assign arb_o = 4'b1111;
     assign burst_o_l = 1'b1;
     assign preempt_o_l = 1'b1;
 
-    wire [15:0] data_out = 16'hABCD;
+    reg [15:0] data_out; //= 16'hABCD;
+
+    wire data_read;
+    wire addressed;
+    wire addressed_unlatched;
+
+    assign addressed = ~la_addr_sel_l & ~la_m_io_l & la_made24; // We only implement IO ports
+    assign addressed_unlatched = ~addr_sel_l & ~m_io_l & made24; // FIXME: maybe derive one from the other
 
     assign bus_d = data_dir ? data_out : 16'bZ;
+    assign data_read = ~la_rd_l & addressed;
+    assign data_dir = data_read & ~cmd_l; // Read mode; only when CMD is low.
 
-    wire data_read = ~la_rd_l; // FIXME, should only do this if addr decodes
+    // Data bus steering
+    // MCA uses signals a0, cd_ds16_l, sbhe_l
+    // Drive cd_ds16_l low only for register 0 and 1. This is purely combinational.
+    assign cd_ds16_l = ~(addressed_unlatched & bus_a[3:1] == 3'b000);
 
-    reg [1:0] cmdh;
-    wire cmd_rising;
-    wire cmd_falling;
+    // SBHE: useful really only when the host writes to us. Only write to the upper byte
+    // when this is asserted low.
+    // SBHE=1, A0=0: only write bits 7:0
+    // SBHE=0, A0=1: only write bits 15:8
+    // SBHE=0, A0=0: write bits 15:0
+    // SBHE=1, A0=1: invalid
 
-    reg sy_wr_l;
-    reg sy_rd_l;
-    reg sy_m_io_l;
-    reg [3:0] sy_addr;
+    // Produce a bufenl and bufenh signal?
+
+    // Note that POS registers can be 8 bit only, so that's nice.
+
+
 
     reg la_wr_l;
     reg la_rd_l;
     reg la_m_io_l;
+    reg la_cd_setup_l;
     reg [3:0] la_addr;
-
+    reg la_addr_sel_l;
     reg [15:0] la_data_in;
-    reg [15:0] sy_data_in;
+    reg la_made24;
 
-    // Sync up CMD
-    always @ (posedge clk)
-    begin
-        cmdh <= {cmdh[0], cmd_l};
+    // Latch a bunch of stuff
+    always @ (negedge cmd_l) begin
+        la_wr_l <= s0_w_l;
+        la_rd_l <= s1_r_l;
+        la_m_io_l <= m_io_l;
+        la_addr <= bus_a;
+        la_made24 <= made24;
+        la_addr_sel_l <= addr_sel_l;
+        la_data_in <= bus_d; // Note that data out needs to be ready by rising edge of CMD
+        la_cd_setup_l <= cd_setup_l;
     end
 
-    assign cmd_rising = cmdh == 2'b01;
-    assign cmd_falling = cmdh == 2'b10;
-//{cmdh, cmd_l} == 2'b10 etc;
-
-    assign test1 = cmd_rising;
- //   assign test2 = cmd_falling;
-
-    // Handle latching control signals
-    always @ (posedge clk)
-    begin
-            sy_wr_l <= s0_w_l;
-            sy_rd_l <= s1_r_l;
-            sy_m_io_l <= m_io_l;
-            sy_addr <= bus_a;
-            sy_data_in <= bus_d;
-    end
-
-    // Handle CMD rising and falling states
-    always @ (posedge clk)
-    begin
-        if (cmd_falling) begin
-            la_wr_l <= sy_wr_l;
-            la_rd_l <= sy_rd_l;
-            la_m_io_l <= sy_m_io_l;
-            la_addr <= sy_addr;
-        end
-        if (cmd_rising) begin
-            la_data_in <= sy_data_in;
-            la_wr_l <= 1; // Probably should resample the pin?
-            la_rd_l <= 1;
+    // Present data at the data output depending on the address
+    // FIXME data steering
+    always @ (*) begin
+        if (la_cd_setup_l == 1'b0) begin
+            case (la_addr)
+                3'b000    : data_out <= 16'hDF9F;
+                default     : data_out <= 16'hFFFF;
+            endcase
+        end else begin
+            case (la_addr)
+                3'b000      : data_out <= 16'hABCD;
+                default     : data_out <= 16'hFFFF;
+            endcase
         end
     end
 
