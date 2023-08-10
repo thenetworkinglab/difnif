@@ -43,9 +43,22 @@ module mcabus(
 
     wire test;
 
+
+    // Test address latch
+    SB_IO #(
+        .PIN_TYPE(6'b0000_00), // No output, DDR style input
+        .PULLUP(1'b0)
+    ) s0_io_buf (
+        .PACKAGE_PIN(s0_w_l),
+        .INPUT_CLK(cmd_l),
+        .CLOCK_ENABLE(1'b1),
+        .OUTPUT_ENABLE(1'b0),
+        .D_IN_1(test2) // D_IN_1 is the falling edge latched, IN_0 is rising
+    );
+
     assign cd_ds16_l = 1'b1; // FIXME
     assign cd_chrdy_l = 1'b1;
-    assign data_dir = data_read; // Read mode
+    assign data_dir = data_read;// & ~cmd_l; // Read mode; only when CMD is low.
     assign irq14_l = 1'b1;
     assign arb_o = 4'b1111;
     assign burst_o_l = 1'b1;
@@ -57,7 +70,7 @@ module mcabus(
 
     wire data_read = ~la_rd_l; // FIXME, should only do this if addr decodes
 
-    reg cmdh;
+    reg [1:0] cmdh;
     wire cmd_rising;
     wire cmd_falling;
 
@@ -77,14 +90,15 @@ module mcabus(
     // Sync up CMD
     always @ (posedge clk)
     begin
-        cmdh <= cmd_l;
+        cmdh <= {cmdh[0], cmd_l};
     end
 
-    assign cmd_rising = {cmdh, cmd_l} == 2'b01;
-    assign cmd_falling = {cmdh, cmd_l} == 2'b10;
+    assign cmd_rising = cmdh == 2'b01;
+    assign cmd_falling = cmdh == 2'b10;
+//{cmdh, cmd_l} == 2'b10 etc;
 
     assign test1 = cmd_rising;
-    assign test2 = cmd_falling;
+ //   assign test2 = cmd_falling;
 
     // Handle latching control signals
     always @ (posedge clk)
@@ -107,6 +121,8 @@ module mcabus(
         end
         if (cmd_rising) begin
             la_data_in <= sy_data_in;
+            la_wr_l <= 1; // Probably should resample the pin?
+            la_rd_l <= 1;
         end
     end
 

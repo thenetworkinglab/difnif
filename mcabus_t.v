@@ -213,10 +213,12 @@ module mcabus_t;
         #100;
         chreset_l = 1;
         #16;
-        write_cycle(16'h3510, 8'hAA, 0);
-        write_cycle(16'h3511, 8'hBB, 0);
+        write_cycle(16'h0000, 8'h00, 0); // fixme
+        write_cycle(16'h3512, 8'hAA, 0);
+        write_cycle(16'h3513, 8'hBB, 0);
         #100;
         read_cycle(16'h3510, 1);
+        write_cycle(16'h0000, 8'h00, 0);
         pos_read_cycle(16'h0100);
         read_cycle(16'h00aa, 1);
         pos_read_cycle(16'h0101);
