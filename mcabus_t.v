@@ -129,18 +129,20 @@ module mcabus_t;
     task read_cycle;
         input [15:0] next_addr;
         input next_mio;
+        input onebyte;
         begin
-            mca_cycle(next_mio, next_addr, 8'h00, 1, 0);
+            mca_cycle(next_mio, next_addr, 8'h00, 1, 0, onebyte);
         end
     endtask
 
     task write_cycle;
         input [15:0] next_addr;
-        input [7:0] din;
+        input [15:0] din;
         input next_mio;
+        input onebyte;
         begin
 
-            mca_cycle(next_mio, next_addr, din, 0, 0);
+            mca_cycle(next_mio, next_addr, din, 0, 0, onebyte);
         end
     endtask
 
@@ -148,14 +150,14 @@ module mcabus_t;
         input [15:0] next_addr;
         input [7:0] din;
         begin
-            mca_cycle(0, next_addr, din, 0, 1);
+            mca_cycle(0, next_addr, din, 0, 1, 1);
         end
     endtask
 
     task pos_read_cycle;
         input [15:0] next_addr;
         begin
-            mca_cycle(0, next_addr, 8'h00, 1, 1);
+            mca_cycle(0, next_addr, 8'h00, 1, 1, 1);
         end
     endtask
 
@@ -166,9 +168,10 @@ module mcabus_t;
     task mca_cycle;
         input next_mio;
         input [15:0] next_addr;
-        input [7:0] din;
+        input [15:0] din;
         input read;
         input pos;
+        input onebyte;
         begin
             #8 m_io_l = next_mio;
             bus_a = next_addr;
@@ -197,7 +200,11 @@ module mcabus_t;
             #24
             cmd_l = 0;
             if (~cd_ds16_l) begin
-                sbhe_l = 0;
+                if (next_addr[0]) begin
+                    sbhe_l = 0; //A0=1 means only high byte transferred
+                end else begin
+                    sbhe_l = onebyte;
+                end
             end else begin
                 sbhe_l = 1;
             end
@@ -237,42 +244,42 @@ module mcabus_t;
         #100;
         chreset_l = 1;
         #16;
-        write_cycle(16'h0000, 8'h00, 0); // fixme
-        write_cycle(16'h3510, 8'hAA, 0);
-        write_cycle(16'h3511, 8'hBB, 0);
+        write_cycle(16'h0000, 16'h0000, 0, 0); // fixme
+        write_cycle(16'h3510, 16'hCCAA, 0, 0); // write CCAA
+        write_cycle(16'h3511, 16'hBBDD, 0, 1);   // write upper byte to BB
         #100;
-        read_cycle(16'h3510, 0);
-        read_cycle(16'h3511, 0);
-        read_cycle(16'h3512, 0);
-        write_cycle(16'h3512, 8'hEF, 0);
-        write_cycle(16'h0101, 8'h00, 0);
+        read_cycle(16'h3510, 0, 0);
+        read_cycle(16'h3511, 0, 1);
+        read_cycle(16'h3512, 0, 1);
+        write_cycle(16'h3512, 16'hABEF, 0, 0);
+        write_cycle(16'h0101, 8'h00, 0, 1);
         pos_read_cycle(16'h0100);
-        read_cycle(16'h00aa, 1);
+        read_cycle(16'h00aa, 1, 1);
         pos_read_cycle(16'h0101);
-        read_cycle(16'h00bb, 1);
+        read_cycle(16'h00bb, 1, 1);
         pos_write_cycle(16'h0003, 8'b10110010); // Value here goes to POS 03
         pos_write_cycle(16'h0002, 8'h01); // Value here goes to POS 02
 
-        read_cycle(16'h0000, 1);
-        read_cycle(16'h0389, 0);
-        read_cycle(16'h0388, 0);
-        read_cycle(16'h0389, 0);
-        write_cycle(16'h0388, 8'hCC, 0);
-        write_cycle(16'h0389, 8'hDD, 0);
-        write_cycle(16'h0234, 8'hEE, 0);
-        write_cycle(16'h0200, 8'h11, 0);
-        write_cycle(16'h0220, 8'h22, 0);
+        read_cycle(16'h0000, 1, 1);
+        read_cycle(16'h0389, 0, 1);
+        read_cycle(16'h0388, 0, 1);
+        read_cycle(16'h0389, 0, 1);
+        write_cycle(16'h0388, 8'hCC, 0, 1);
+        write_cycle(16'h0389, 8'hDD, 0, 1);
+        write_cycle(16'h0234, 8'hEE, 0, 1);
+        write_cycle(16'h0200, 8'h11, 0, 1);
+        write_cycle(16'h0220, 8'h22, 0, 1);
 //        write_cycle(16'h0222, 8'h33, 0);
-        write_cycle(16'h0226, 8'h44, 0);
+        write_cycle(16'h0226, 8'h44, 0, 1);
 // Add delay here. FIXME: check cd_chrdy_l, wait as long as it is high.
 //        #200
 
-        write_cycle(16'h0228, 8'h55, 0);
-        write_cycle(16'h022A, 8'h66, 0);
-        write_cycle(16'h022C, 8'h77, 0);
-        write_cycle(16'h022E, 8'h88, 0);
+        write_cycle(16'h0228, 8'h55, 0, 1);
+        write_cycle(16'h022A, 8'h66, 0, 1);
+        write_cycle(16'h022C, 8'h77, 0, 1);
+        write_cycle(16'h022E, 8'h88, 0, 1);
         // Start DMA request
-        write_cycle(16'h0123, 8'h99, 0);
+        write_cycle(16'h0123, 8'h99, 0, 1);
         #25
         arb_gnt_l = 1;
         #25
@@ -284,13 +291,13 @@ module mcabus_t;
         #16 m_io_l = 1;
         bus_a = 16'h2000;
         #136
-        read_cycle(16'h0000, 1);
-        write_cycle(16'h0000, 8'h55, 0); // leave addr data alone
+        read_cycle(16'h0000, 1, 1);
+        write_cycle(16'h0000, 8'h55, 0, 1); // leave addr data alone
         #200
         arb_gnt_l = 1;
         #25
         arb_gnt_l = 0;
-        read_cycle(16'h0000, 1);
+        read_cycle(16'h0000, 1, 1);
         #200
         irq_in = 1;
         #200
