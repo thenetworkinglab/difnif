@@ -196,6 +196,11 @@ module mcabus_t;
             end
             #24
             cmd_l = 0;
+            if (~cd_ds16_l) begin
+                sbhe_l = 0;
+            end else begin
+                sbhe_l = 1;
+            end
             adl_l = 1;
             #8 s1_r_l = 1;
             s0_w_l = 1;
@@ -223,6 +228,7 @@ module mcabus_t;
         s1_r_l = 1;
         bus_a = 0;
         clk = 0;
+        sbhe_l = 1;
 
         arb_gnt_l = 0;
         irq_in = 0;

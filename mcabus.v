@@ -56,6 +56,8 @@ module mcabus(
 //        .D_IN_1(test2) // D_IN_1 is the falling edge latched, IN_0 is rising
 //    );
 
+    reg [15:0] reg_first = 16'h1234;
+
     assign cd_chrdy_l = 1'b1;
     assign irq14_l = 1'b1;
     assign arb_o = 4'b1111;
@@ -65,28 +67,22 @@ module mcabus(
     reg [15:0] data_out; //= 16'hABCD;
 
     wire data_read;
-    wire addressed;
+    reg addressed;
     wire addressed_unlatched;
 
-    assign addressed = ~la_addr_sel_l & ~la_m_io_l & la_made24; // We only implement IO ports
-    assign addressed_unlatched = ~addr_sel_l & ~m_io_l & made24; // FIXME: maybe derive one from the other
+    assign addressed_unlatched = ~addr_sel_l & ~m_io_l & made24;
 
     assign bus_d = data_dir ? data_out : 16'bZ;
-    assign data_read = ~la_rd_l & addressed;
+    assign data_read = ~la_rd_l & addressed & la_cd_setup_l; // no card setup! FIXME
     assign data_dir = data_read & ~cmd_l; // Read mode; only when CMD is low.
 
     // Data bus steering
     // MCA uses signals a0, cd_ds16_l, sbhe_l
     // Drive cd_ds16_l low only for register 0 and 1. This is purely combinational.
-    assign cd_ds16_l = ~(addressed_unlatched & bus_a[3:1] == 3'b000);
+    assign cd_ds16_l = ~(cd_setup_l & addressed_unlatched & bus_a[3:1] == 3'b000);
 
     // SBHE: useful really only when the host writes to us. Only write to the upper byte
     // when this is asserted low.
-    // SBHE=1, A0=0: only write bits 7:0
-    // SBHE=0, A0=1: only write bits 15:8
-    // SBHE=0, A0=0: write bits 15:0
-    // SBHE=1, A0=1: invalid
-
     // Produce a bufenl and bufenh signal?
 
     // Note that POS registers can be 8 bit only, so that's nice.
@@ -101,6 +97,7 @@ module mcabus(
     reg la_addr_sel_l;
     reg [15:0] la_data_in;
     reg la_made24;
+    reg la_sbhe_l;
 
     // Latch a bunch of stuff
     always @ (negedge cmd_l) begin
@@ -112,6 +109,16 @@ module mcabus(
         la_addr_sel_l <= addr_sel_l;
         la_data_in <= bus_d; // Note that data out needs to be ready by rising edge of CMD
         la_cd_setup_l <= cd_setup_l;
+        la_sbhe_l <= sbhe_l;
+        addressed <= addressed_unlatched;
+
+        // Data written to us on this edge
+        if (~s0_w_l & addressed_unlatched & cd_setup_l) begin
+            case (bus_a)
+                3'b000      : reg_first <= sbhe_l ? {reg_first[15:8], bus_d[7:0]} : bus_d;
+                3'b001      : reg_first <= sbhe_l ? reg_first : {bus_d[15:8], reg_first[7:0]};
+            endcase
+        end
     end
 
     // Present data at the data output depending on the address
@@ -124,7 +131,13 @@ module mcabus(
             endcase
         end else begin
             case (la_addr)
-                3'b000      : data_out <= 16'hABCD;
+                // 16-bit read from location 0.
+                // SBHE=0, A0=0: write bits 15:0 since upper 8 bits enabled.
+                // SBHE=1, A0=0: only write bits 7:0
+                3'b000      : data_out <= la_sbhe_l ? {8'hFF, reg_first[7:0]} : reg_first;
+                // SBHE=0, A0=1: only write bits 15:8
+                // SBHE=1, A0=1: invalid
+                3'b001      : data_out <= la_sbhe_l ? 16'hFFFF : {reg_first[15:8], 8'hFF};
                 default     : data_out <= 16'hFFFF;
             endcase
         end
