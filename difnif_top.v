@@ -81,7 +81,7 @@ module difnif_top(
         .burst_l(burst_l),
         .preempt_l(preempt_l),
         .arb_o(arb_o),
-        .burst_o_l(preempt_o_l),
+        .burst_o_l(burst_o_l),
         .preempt_o_l(preempt_o_l),
         .test1(sd_clk), // FIXME testing
         .test2(sd_cmd),

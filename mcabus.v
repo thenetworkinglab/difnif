@@ -81,9 +81,6 @@ module mcabus(
     // Drive cd_ds16_l low only for register 0 and 1. This is purely combinational.
     assign cd_ds16_l = ~(cd_setup_l & addressed_unlatched & bus_a[3:1] == 3'b000);
 
-    // SBHE: useful really only when the host writes to us. Only write to the upper byte
-    // when this is asserted low.
-    // Produce a bufenl and bufenh signal?
 
     // Note that POS registers can be 8 bit only, so that's nice.
 
@@ -113,6 +110,8 @@ module mcabus(
         addressed <= addressed_unlatched;
 
         // Data written to us on this edge
+        // SBHE: useful really only when the host writes to us. Only write to the upper byte
+        // when this is asserted low.
         if (~s0_w_l & addressed_unlatched & cd_setup_l) begin
             case (bus_a)
                 3'b000      : reg_first <= sbhe_l ? {reg_first[15:8], bus_d[7:0]} : bus_d;
