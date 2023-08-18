@@ -46,87 +46,67 @@ module mcabus(
 
     wire test;
 
-    // Test address latch
-//    SB_IO #(
-//        .PIN_TYPE(6'b0000_00), // No output, DDR style input
-//        .PULLUP(1'b0)
-//    ) s0_io_buf (
-//        .PACKAGE_PIN(s0_w_l),
-//        .INPUT_CLK(cmd_l),
-//        .CLOCK_ENABLE(1'b1),
-//        .OUTPUT_ENABLE(1'b0),
-//        .D_IN_1(test2) // D_IN_1 is the falling edge latched, IN_0 is rising
-//    );
-
-    reg [15:0] reg_first = 16'h1234;
-
+    // Unused signals (for now)
     assign cd_chrdy_l = 1'b1;
     assign irq14_l = 1'b1;
     assign arb_o = 4'b1111;
     assign burst_o_l = 1'b1;
     assign preempt_o_l = 1'b1;
 
-    reg [15:0] data_out; //= 16'hABCD;
+    // Registers
+    reg [15:0] reg_first = 16'h1234;
 
-    wire data_read;
-    reg addressed;
-    wire addressed_unlatched;
-
-    assign addressed_unlatched = ~addr_sel_l & ~m_io_l & ~chreset;
-    // MADE24 seems to be stuck low? not sure.
-
-    assign bus_d = data_dir ? data_out : 16'bZ;
-    assign data_read = ~la_rd_l & addressed & la_cd_setup_l; // no card setup! FIXME
-    assign data_dir = data_read & ~cmd_l; // Read mode; only when CMD is low.
+    // Only support IO ports. Only respond when not in reset.
+    wire addressed;
+    assign addressed = ~addr_sel_l & ~m_io_l & ~chreset;
 
     // Data bus steering
     // MCA uses signals a0, cd_ds16_l, sbhe_l
-    // Drive cd_ds16_l low only for register 0 and 1. This is purely combinational.
-    assign cd_ds16_l = ~(~chreset & cd_setup_l & addressed_unlatched & bus_a[3:1] == 3'b000);
-
-
+    // Drive cd_ds16_l low only for register 0/1 (SIFR/CIFR). This is purely combinational.
     // Note that POS registers can be 8 bit only, so that's nice.
+    assign cd_ds16_l = ~(cd_setup_l & addressed & bus_a[3:1] == 3'b000);
 
-
-
-    reg la_wr_l;
-    reg la_rd_l;
-    reg la_m_io_l;
+    // Logic latched on falling edge of CMD
+    // Also includes data being written to us.
     reg la_cd_setup_l;
     reg [3:0] la_addr;
-    reg la_addr_sel_l;
     reg [15:0] la_data_in;
     reg la_sbhe_l;
+    reg la_data_read;
 
-    // Latch a bunch of stuff
+    // Data input latches
     always @ (negedge cmd_l) begin
-        la_wr_l <= s0_w_l;
-        la_rd_l <= s1_r_l;
-        la_m_io_l <= m_io_l;
         la_addr <= bus_a;
-        la_addr_sel_l <= addr_sel_l;
         la_data_in <= bus_d; // Note that data out needs to be ready by rising edge of CMD
         la_cd_setup_l <= cd_setup_l;
         la_sbhe_l <= sbhe_l;
-        addressed <= addressed_unlatched;
+
+        la_data_read <= ~s1_r_l & addressed & cd_setup_l; // FIXME: remove cd_setup_l
 
         // Data written to us on this edge
         // SBHE: useful really only when the host writes to us. Only write to the upper byte
         // when this is asserted low.
-        if (~s0_w_l & addressed_unlatched & cd_setup_l & ~chreset) begin
+        if (~s0_w_l & addressed & cd_setup_l) begin
             case (bus_a)
                 3'b000      : reg_first <= sbhe_l ? {reg_first[15:8], bus_d[7:0]} : bus_d;
                 3'b001      : reg_first <= sbhe_l ? reg_first : {bus_d[15:8], reg_first[7:0]};
             endcase
         end
+        // TODO: Implement writeable POS registers
     end
 
-    // Present data at the data output depending on the address
-    // FIXME reset, other regs
+    // Data output: present data at the data output depending on the address
+    // This is qualified by the data output gate
+    reg [15:0] data_out;
+    assign bus_d = data_dir ? data_out : 16'bZ;
+    assign data_dir = la_data_read & ~cmd_l; // Read mode; only when CMD is low.
+
+    // Data output mux
     always @ (*) begin
         if (la_cd_setup_l == 1'b0) begin
             case (la_addr)
                 3'b000    : data_out <= 16'hDF9F;
+                // TODO: Add remaining POS registers
                 default     : data_out <= 16'hFFFF;
             endcase
         end else begin
@@ -138,6 +118,7 @@ module mcabus(
                 // SBHE=0, A0=1: only write bits 15:8
                 // SBHE=1, A0=1: invalid
                 3'b001      : data_out <= la_sbhe_l ? 16'hFFFF : {reg_first[15:8], 8'hFF};
+                // TODO: Add remaining registers
                 default     : data_out <= 16'hFFFF;
             endcase
         end
