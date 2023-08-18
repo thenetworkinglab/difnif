@@ -11,8 +11,11 @@ module difnif_top(
     // Clocks
     input clk_10m,
 
-    // Bus reset
+    // Unknown, FIXME better name
     input chreset_l,
+
+    // Bus reset
+    input chreset,
 
     // Micro Channel bus
     input cmd_l,        // Command clock
@@ -21,7 +24,6 @@ module difnif_top(
     input m_io_l,       // memory / IO# transfer
     input cd_setup_l,   // Card setup mode
     input addr_sel_l,   // Card address selected
-    input made24,       // Upper address bits
     input [3:0] bus_a,  // Truncated address bus (register select)
     input sbhe_l,       // With bus_a0, selects 8 or 16 bit transfer
     output cd_ds16_l,   // Assert low to request 16-bit transfer
@@ -57,6 +59,7 @@ module difnif_top(
 
     mcabus mca1 (
         .clk(clk),
+        .chreset(chreset),
         .chreset_l(chreset_l),
         .cmd_l(cmd_l),
         .s0_w_l(s0_w_l),
@@ -64,7 +67,6 @@ module difnif_top(
         .m_io_l(m_io_l),
         .cd_setup_l(cd_setup_l),
         .addr_sel_l(addr_sel_l),
-        .made24(made24),
         .bus_a(bus_a[3:0]),
         .sbhe_l(sbhe_l),
         .cd_ds16_l(cd_ds16_l),

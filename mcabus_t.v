@@ -18,6 +18,7 @@ module mcabus_t;
 
     // Inputs to module under test
     reg cd_setup_l;
+    reg chreset;
     reg chreset_l;
     reg clk;
     reg cmd_l;
@@ -44,8 +45,6 @@ module mcabus_t;
 
     wire dack_l;
 
-    wire made24 = 1'b1;
-
     // Bidirs
     wire [15:0] bus_d;
     wire [15:0] d_in; // Input sense
@@ -69,6 +68,7 @@ module mcabus_t;
     // Instantiate the Unit Under Test (UUT)
     mcabus uut (
         .clk(clk),
+        .chreset(chreset),
         .chreset_l(chreset_l),
         .cmd_l(cmd_l),
         .s0_w_l(s0_w_l),
@@ -76,7 +76,6 @@ module mcabus_t;
         .m_io_l(m_io_l),
         .cd_setup_l(cd_setup_l),
         .addr_sel_l(addr_sel_l),
-        .made24(made24),
         .bus_a(bus_a[3:0]),
         .sbhe_l(sbhe_l),
         .cd_ds16_l(cd_ds16_l),
@@ -227,7 +226,7 @@ module mcabus_t;
         preempt_driver = 1'b1;
         d_valid = 0;
         cd_setup_l = 1;
-        chreset_l = 0;
+        chreset = 1;
         adl_l = 1;
         cmd_l = 1;
         m_io_l = 0;
@@ -242,7 +241,7 @@ module mcabus_t;
 
         // Wait 100 ns for global reset to finish
         #100;
-        chreset_l = 1;
+        chreset = 0;
         #16;
         write_cycle(16'h0000, 16'h0000, 0, 0); // fixme
         write_cycle(16'h3510, 16'hCCAA, 0, 0); // write CCAA

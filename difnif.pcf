@@ -15,7 +15,7 @@ set_io chreset_l    52
 set_io cd_ds16_l    73
 set_io irq14_l      74
 set_io cd_chrdy_l   75
-set_io made24       76
+set_io chreset      76
 set_io sbhe_l       78
 set_io s0_w_l       79
 set_io s1_r_l       80

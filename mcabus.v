@@ -10,6 +10,9 @@
 `default_nettype none
 module mcabus(
     input clk,
+    input chreset,
+
+
     input chreset_l,
 
     input cmd_l,        // Command clock
@@ -18,7 +21,6 @@ module mcabus(
     input m_io_l,       // memory / IO# transfer
     input cd_setup_l,   // Card setup mode
     input addr_sel_l,   // Card address selected
-    input made24,       // Memory address decode enable 24 bits
     input [3:0] bus_a,  // Truncated address bus (register select)
     input sbhe_l,       // With bus_a0, selects 8 or 16 bit transfer
     output cd_ds16_l,   // Assert low to request 16-bit transfer
@@ -70,7 +72,8 @@ module mcabus(
     reg addressed;
     wire addressed_unlatched;
 
-    assign addressed_unlatched = ~addr_sel_l & ~m_io_l & made24;
+    assign addressed_unlatched = ~addr_sel_l & ~m_io_l & ~chreset;
+    // MADE24 seems to be stuck low? not sure.
 
     assign bus_d = data_dir ? data_out : 16'bZ;
     assign data_read = ~la_rd_l & addressed & la_cd_setup_l; // no card setup! FIXME
@@ -79,7 +82,7 @@ module mcabus(
     // Data bus steering
     // MCA uses signals a0, cd_ds16_l, sbhe_l
     // Drive cd_ds16_l low only for register 0 and 1. This is purely combinational.
-    assign cd_ds16_l = ~(cd_setup_l & addressed_unlatched & bus_a[3:1] == 3'b000);
+    assign cd_ds16_l = ~(~chreset & cd_setup_l & addressed_unlatched & bus_a[3:1] == 3'b000);
 
 
     // Note that POS registers can be 8 bit only, so that's nice.
@@ -93,7 +96,6 @@ module mcabus(
     reg [3:0] la_addr;
     reg la_addr_sel_l;
     reg [15:0] la_data_in;
-    reg la_made24;
     reg la_sbhe_l;
 
     // Latch a bunch of stuff
@@ -102,7 +104,6 @@ module mcabus(
         la_rd_l <= s1_r_l;
         la_m_io_l <= m_io_l;
         la_addr <= bus_a;
-        la_made24 <= made24;
         la_addr_sel_l <= addr_sel_l;
         la_data_in <= bus_d; // Note that data out needs to be ready by rising edge of CMD
         la_cd_setup_l <= cd_setup_l;
@@ -112,7 +113,7 @@ module mcabus(
         // Data written to us on this edge
         // SBHE: useful really only when the host writes to us. Only write to the upper byte
         // when this is asserted low.
-        if (~s0_w_l & addressed_unlatched & cd_setup_l) begin
+        if (~s0_w_l & addressed_unlatched & cd_setup_l & ~chreset) begin
             case (bus_a)
                 3'b000      : reg_first <= sbhe_l ? {reg_first[15:8], bus_d[7:0]} : bus_d;
                 3'b001      : reg_first <= sbhe_l ? reg_first : {bus_d[15:8], reg_first[7:0]};
@@ -121,7 +122,7 @@ module mcabus(
     end
 
     // Present data at the data output depending on the address
-    // FIXME data steering
+    // FIXME reset, other regs
     always @ (*) begin
         if (la_cd_setup_l == 1'b0) begin
             case (la_addr)
