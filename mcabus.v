@@ -44,7 +44,20 @@ module mcabus(
     output test2
     );
 
-    wire test;
+    // Writable registers
+    localparam REG_CIFR_L = 4'd0;
+    localparam REG_CIFR_H = 4'd1;
+    localparam REG_BCR = 4'd2;
+    localparam REG_ATN = 4'd3;
+
+    // Readable registers
+    localparam REG_SIFR_L = 4'd0;
+    localparam REG_SIFR_H = 4'd1;
+    localparam REG_BSR = 4'd2;
+    localparam REG_ISR = 4'd3;
+
+    // Read/write register
+    localparam REG_DREG = 4'd4;
 
     // Unused signals (for now)
     assign cd_chrdy_l = 1'b1;
@@ -54,7 +67,36 @@ module mcabus(
     assign preempt_o_l = 1'b1;
 
     // Registers
-    reg [15:0] reg_first = 16'h1234;
+    reg [15:0] reg_cifr = 16'h0000;
+    reg [7:0] reg_bcr = 8'h00;
+    reg [7:0] reg_atn = 8'h00;
+    reg [15:0] reg_sifr = 16'hA000;
+    wire [7:0] reg_bsr; // Assembled from assign statement
+    reg [7:0] reg_isr = 8'h00;
+    reg [7:0] reg_dreg = 8'h00;
+
+    // Flags
+    reg flag_busy = 1'b0; // FIXME: Should be directly controlled by MCU
+    reg flag_ci_full = 1'b0;
+    reg flag_si_full = 1'b1; // FIXME: should be 0
+    reg flag_int = 1'b0;
+
+    // Control lines
+    wire control_reset;
+    wire control_dma_enable;
+    wire control_int_enable;
+
+    // Basic Status Register
+    assign reg_bsr = {1'b0, 1'b0, 1'b0, flag_busy, flag_si_full, flag_ci_full, 1'b0, flag_int};
+
+    // Basic Control Register
+    assign control_reset = reg_bcr[7];      // Setting this bit resets the MCU
+    assign control_dma_enable = reg_bcr[1]; // Set to allow DMA operation
+    assign control_int_enable = reg_bcr[0]; // Set to allow the irq14 line to assert
+
+    /*
+     ** Microchannel Interface Implementation below **
+    */
 
     // Only support IO ports. Only respond when not in reset.
     wire addressed;
@@ -88,11 +130,33 @@ module mcabus(
         // when this is asserted low.
         if (~s0_w_l & addressed & cd_setup_l) begin
             case (bus_a)
-                3'b000      : reg_first <= sbhe_l ? {reg_first[15:8], bus_d[7:0]} : bus_d;
-                3'b001      : reg_first <= sbhe_l ? reg_first : {bus_d[15:8], reg_first[7:0]};
+                REG_CIFR_L  : reg_cifr <= sbhe_l ? {reg_cifr[15:8], bus_d[7:0]} : bus_d;
+                REG_CIFR_H  : reg_cifr <= sbhe_l ? reg_cifr : {bus_d[15:8], reg_cifr[7:0]};
+                REG_BCR     : reg_bcr  <= bus_d[7:0];
+                REG_ATN     : reg_atn  <= bus_d[7:0];
+                REG_DREG    : reg_dreg <= bus_d[7:0];
             endcase
         end
+
+        // Flag writes
+        if (~s0_w_l & addressed & cd_setup_l) begin
+            case (bus_a)
+                REG_CIFR_L : flag_ci_full <= 1'b1;
+                REG_CIFR_H : flag_ci_full <= 1'b1;
+                REG_ATN    : flag_busy <= 1'b1;
+            endcase
+        end
+
+        if (~s1_r_l & addressed & cd_setup_l) begin
+            case (bus_a)
+                REG_SIFR_L : flag_si_full <= 1'b0;
+                REG_SIFR_H : flag_si_full <= 1'b0;
+                REG_ISR    : flag_int <= 1'b0;
+            endcase
+        end
+
         // TODO: Implement writeable POS registers
+        // TODO: Implement register read and write triggers (mailbox flags)
     end
 
     // Data output: present data at the data output depending on the address
@@ -114,12 +178,14 @@ module mcabus(
                 // 16-bit read from location 0.
                 // SBHE=0, A0=0: write bits 15:0 since upper 8 bits enabled.
                 // SBHE=1, A0=0: only write bits 7:0
-                3'b000      : data_out <= la_sbhe_l ? {8'hFF, reg_first[7:0]} : reg_first;
+                REG_SIFR_L      : data_out <= la_sbhe_l ? {8'hFF, reg_sifr[7:0]} : reg_sifr;
                 // SBHE=0, A0=1: only write bits 15:8
                 // SBHE=1, A0=1: invalid
-                3'b001      : data_out <= la_sbhe_l ? 16'hFFFF : {reg_first[15:8], 8'hFF};
-                // TODO: Add remaining registers
-                default     : data_out <= 16'hFFFF;
+                REG_SIFR_H      : data_out <= la_sbhe_l ? 16'hFFFF : {reg_sifr[15:8], 8'hFF};
+                REG_BSR         : data_out <= reg_bsr;
+                REG_ISR         : data_out <= reg_isr;
+                REG_DREG        : data_out <= reg_dreg;
+                default         : data_out <= 16'hFFFF;
             endcase
         end
     end

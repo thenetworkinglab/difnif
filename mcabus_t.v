@@ -244,14 +244,18 @@ module mcabus_t;
         chreset = 0;
         #16;
         write_cycle(16'h0000, 16'h0000, 0, 0); // fixme
-        write_cycle(16'h3510, 16'hCCAA, 0, 0); // write CCAA
-        write_cycle(16'h3511, 16'hBBDD, 0, 1);   // write upper byte to BB
+//        write_cycle(16'h3510, 16'hCCAA, 0, 0); // write CCAA
+//        write_cycle(16'h3511, 16'hBBDD, 0, 1);   // write upper byte to BB
         #100;
-        read_cycle(16'h3510, 0, 0);
-        read_cycle(16'h3511, 0, 1);
         read_cycle(16'h3512, 0, 1);
-        write_cycle(16'h3512, 16'hABEF, 0, 0);
-        write_cycle(16'h0101, 8'h00, 0, 1);
+        write_cycle(16'h3513, 8'hCC, 0, 1);
+        read_cycle(16'h3512, 0, 1);
+        #100
+        write_cycle(16'h3510, 16'hABCD, 0, 0);
+        read_cycle(16'h3512, 0, 1);
+        read_cycle(16'h3510, 0, 0);
+        read_cycle(16'h3512, 0, 1);
+
         pos_read_cycle(16'h0100);
         read_cycle(16'h00aa, 1, 1);
         pos_read_cycle(16'h0101);
@@ -259,21 +263,7 @@ module mcabus_t;
         pos_write_cycle(16'h0003, 8'b10110010); // Value here goes to POS 03
         pos_write_cycle(16'h0002, 8'h01); // Value here goes to POS 02
 
-        read_cycle(16'h0000, 1, 1);
-        read_cycle(16'h0389, 0, 1);
-        read_cycle(16'h0388, 0, 1);
-        read_cycle(16'h0389, 0, 1);
-        write_cycle(16'h0388, 8'hCC, 0, 1);
-        write_cycle(16'h0389, 8'hDD, 0, 1);
-        write_cycle(16'h0234, 8'hEE, 0, 1);
-        write_cycle(16'h0200, 8'h11, 0, 1);
-        write_cycle(16'h0220, 8'h22, 0, 1);
-//        write_cycle(16'h0222, 8'h33, 0);
-        write_cycle(16'h0226, 8'h44, 0, 1);
-// Add delay here. FIXME: check cd_chrdy_l, wait as long as it is high.
-//        #200
-
-        write_cycle(16'h0228, 8'h55, 0, 1);
+       write_cycle(16'h0228, 8'h55, 0, 1);
         write_cycle(16'h022A, 8'h66, 0, 1);
         write_cycle(16'h022C, 8'h77, 0, 1);
         write_cycle(16'h022E, 8'h88, 0, 1);
