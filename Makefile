@@ -9,7 +9,7 @@
 
 PROJ = difnif
 IMAGES = difnif_top
-SOURCES = difnif_top.v mcabus.v
+SOURCES = difnif_top.v mcabus.v teensy.v
 PIN_DEF =  difnif.pcf
 DEVICE = hx8k
 ODIR = build
@@ -20,9 +20,7 @@ all: $(addprefix $(ODIR)/,$(addsuffix .rpt,$(IMAGES))) $(ODIR)/$(PROJ).binm
 
 # removed %.v
 $(ODIR)/%.json: $(SOURCES)
-	yosys -p 'synth_ice40 -top $(basename $(notdir $@)) -json $@' $(SOURCES) -E $(basename $(notdir $@)).d
-#	yosys -p 'synth_ice40 -top mda_top -json $@' $(SOURCES) -E $(DEPS)
-#	@echo yosys -p 'synth_ice40 -top isavideo -json $@' $^ -E $(DEPS)
+	yosys -p 'synth_ice40 -top $(basename $(notdir $@)) -json $@ -blif test.blif' $(SOURCES) -E $(basename $(notdir $@)).d
 	echo $@
 
 $(ODIR)/%.asc: $(ODIR)/%.json $(PIN_DEF)

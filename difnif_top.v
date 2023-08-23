@@ -46,11 +46,24 @@ module difnif_top(
     // SD card (temporarily used for testing)
     output sd_clk,
     output sd_cmd,
-
+    input sd_d0,
+    input sd_d1,
+    input sd_d2,
+    input sd_d3,
+    input sd_switch,
 
     // LEDs
     output led0,
-    output led1
+    output led1,
+
+    // Teensy
+    input tn_rd,
+    input tn_wr,
+    input [3:0]tn_addr,
+    inout [15:0]tn_d,
+    input tn29,
+    input tn30,
+    input tn35
     );
 
     reg[22:0] counter;
@@ -86,7 +99,17 @@ module difnif_top(
         .burst_o_l(burst_o_l),
         .preempt_o_l(preempt_o_l),
         .test1(sd_clk), // FIXME testing
-        .test2(sd_cmd),
+        .test2(sd_cmd)
+    );
+
+    teensy tn1 (
+        .tn_rd(tn_rd),
+        .tn_wr(tn_wr),
+        .tn_addr(tn_addr),
+        .tn_d(tn_d),
+        .tn29(tn29),
+        .tn30(tn30),
+        .tn35(tn35)
     );
 
     `ifdef SYNTHESIS
