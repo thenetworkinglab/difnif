@@ -20,10 +20,17 @@ module teensy(
 
     wire [15:0] tn_d_out;
 
+    reg [15:0] testreg = 16'HABCD;
+
     // Data outputs
     assign tn_d = tn_rd ? tn_d_out : 16'bZ;
 
-    assign tn_d_out = {12'b0, tn_addr[3:0]};
+    assign tn_d_out = (tn_addr == 4'H0) ? testreg : {12'b0, tn_addr[3:0]};
+
+    // Capture data on rising edge of tn_wr. Figure out clock sync later :blobsweat:
+    always @ (posedge tn_wr) begin
+        testreg <= tn_d;
+    end
 
 endmodule
 
