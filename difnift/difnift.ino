@@ -65,7 +65,13 @@ void loop() {
   // put your main code here, to run repeatedly:
   Serial.println("Hello3");
   delay(1000);
-  return;
+  //return;
+  d = portRead(1);
+  i = portRead(2);
+  Serial.print(d & 0xFF, HEX);
+  Serial.print(" ");
+  Serial.println(i & 0xFF, HEX);
+  
 //  for (i = 0; i < 16; i++) {
 //    d = portRead(i);
 //    Serial.print(d >> 12, HEX);
@@ -74,15 +80,15 @@ void loop() {
 //    Serial.println(d & 0xF, HEX);
 // }
 
-  for (i = 0; i <= 0xFFFF; i++) {
-    portWrite(0, i);
-    d = portRead(0);
+//  for (i = 0; i <= 0xFFFF; i++) {
+//    portWrite(0, i);
+//    d = portRead(0);
     //Serial.print(d >> 12, HEX);
     //Serial.print((d >> 8) & 0xF, HEX);
     //Serial.print((d >> 4) & 0xF, HEX);
     //Serial.println(d & 0xF, HEX);
-    if (i == 0) Serial.println("Looped back");
-    if (d != i) Serial.println("Mismatch");
-  }
+//    if (i == 0) Serial.println("Looped back");
+//    if (d != i) Serial.println("Mismatch");
+//  }
 
 }

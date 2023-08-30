@@ -70,6 +70,11 @@ module difnif_top(
     wire pll_lock;
     wire clk;
 
+    // Teensy registers and controls
+    wire [7:0] t_atn;
+    wire t_atn_full;
+    wire t_atn_read;
+
     mcabus mca1 (
         .clk(clk),
         .chreset(chreset),
@@ -99,7 +104,12 @@ module difnif_top(
         .burst_o_l(burst_o_l),
         .preempt_o_l(preempt_o_l),
         .test1(sd_clk), // FIXME testing
-        .test2(sd_cmd)
+        .test2(sd_cmd),
+
+        // Teensy connections
+        .t_atn(t_atn),
+        .t_atn_full(t_atn_full),
+        .t_atn_read(t_atn_read)
     );
 
     teensy tn1 (
@@ -109,7 +119,12 @@ module difnif_top(
         .tn_d(tn_d),
         .tn29(tn29),
         .tn30(tn30),
-        .tn35(tn35)
+        .tn35(tn35),
+
+        // Register interface
+        .t_atn(t_atn),
+        .t_atn_full(t_atn_full),
+        .t_atn_read(t_atn_read)
     );
 
     `ifdef SYNTHESIS

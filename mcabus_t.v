@@ -65,6 +65,8 @@ module mcabus_t;
     wire cd_ds16_l;
     wire data_dir; // FIXME use this to check for conflicts
 
+    reg t_atn_read;
+
     // Instantiate the Unit Under Test (UUT)
     mcabus uut (
         .clk(clk),
@@ -93,9 +95,10 @@ module mcabus_t;
         .preempt_l(preempt_l),
         .arb_o(arb_o),
         .burst_o_l(preempt_o_l),
-        .preempt_o_l(preempt_o_l)
-    );
+        .preempt_o_l(preempt_o_l),
 
+        .t_atn_read(t_atn_read)
+    );
 
     // DBA-ESDI address decode
     assign addr_sel_l = ~((cd_setup_l & (bus_a[23:4] == 20'h00351)) |
@@ -239,6 +242,8 @@ module mcabus_t;
         arb_gnt_l = 0;
         irq_in = 0;
 
+        t_atn_read = 0;
+
         // Wait 100 ns for global reset to finish
         #100;
         chreset = 0;
@@ -248,9 +253,12 @@ module mcabus_t;
 //        write_cycle(16'h3511, 16'hBBDD, 0, 1);   // write upper byte to BB
         #100;
         read_cycle(16'h3512, 0, 1);
-        write_cycle(16'h3513, 8'hCC, 0, 1);
+        write_cycle(16'h3513, 8'hCC, 0, 1); // Write to the ATN reg
         read_cycle(16'h3512, 0, 1);
         #100
+        t_atn_read = 1'b1;
+        #70                 // Toggle the read for the teensy
+        t_atn_read = 1'b0;
         write_cycle(16'h3510, 16'hABCD, 0, 0);
         read_cycle(16'h3512, 0, 1);
         read_cycle(16'h3510, 0, 0);

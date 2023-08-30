@@ -38,10 +38,23 @@ module mcabus(
     input preempt_l,    // DMA preempt request input
     output [3:0]arb_o,  // DMA arbitration control line outputs
     output burst_o_l,   // DMA burst request output
-    output preempt_o_l,  // DMA preempt request output
+    output preempt_o_l, // DMA preempt request output
 
     output test1,
-    output test2
+    output test2,
+
+    // Wiring from Teensy
+//    input [15:0] t_sifr, // Status data from Teensy
+//    input t_sifr_latch,  // Control line from Teensy
+//    input [7:0] t_isr,    // Interrupt data from Teensy
+//    input t_isr_latch,   // Control line from Teensy
+    
+//    output [15:0] t_cifr, // Command interface data to Teensy
+    output [7:0] t_atn,   // Attention data to Teensy
+//    output t_ci_full,
+    output t_atn_full,
+    input t_atn_read
+
     );
 
     // Writable registers
@@ -68,31 +81,87 @@ module mcabus(
 
     // Registers
     reg [15:0] reg_cifr = 16'h0000;
-    reg [7:0] reg_bcr = 8'h00;
     reg [7:0] reg_atn = 8'h00;
     reg [15:0] reg_sifr = 16'hA000;
-    wire [7:0] reg_bsr; // Assembled from assign statement
     reg [7:0] reg_isr = 8'h00;
+
+    //assign t_cifr = reg_cifr;
+    assign t_atn = reg_atn;
+
+    // FIXME: data register should be 16 bit (and do data steering)
     reg [7:0] reg_dreg = 8'h00;
 
     // Flags
-    reg flag_busy = 1'b0; // FIXME: Should be directly controlled by MCU
+    reg flag_busy = 1'b0;
+    reg flag_atn = 1'b0;
     reg flag_ci_full = 1'b0;
     reg flag_si_full = 1'b1; // FIXME: should be 0
     reg flag_int = 1'b0;
+
+    // Outputs to Teensy
+    //assign t_ci_full = flag_ci_full;
+    assign t_atn_full = flag_atn;
+
+    /*
+     ** Registers and handshaking interface **
+    */
+
+    wire mca_op;
+    assign mca_op = la_mca_op & ~cmd_l;
+
+    // Done in a different clock domain
+    always @ (posedge clk) begin
+        if (mca_op & ~la_s0_w_l & la_addr == REG_ATN) begin
+            flag_atn <= 1'b1;
+        end else begin
+            if (t_atn_read) begin
+                flag_atn <= 1'b0;
+            end
+        end
+/*
+        // MCA has priority
+        if (mca_op) begin
+            if (~la_s0_w_l) begin
+                case (la_addr)
+                    REG_CIFR_L : flag_ci_full <= 1'b1;
+                    REG_CIFR_H : flag_ci_full <= 1'b1;
+                    REG_ATN    : flag_atn <= 1'b1;
+                endcase
+            end
+
+            if (~la_s1_r_l) begin
+                case (la_addr)
+                    REG_SIFR_L : flag_si_full <= 1'b0;
+                    REG_SIFR_H : flag_si_full <= 1'b0;
+                    REG_ISR    : flag_int <= 1'b0;
+                endcase
+            end
+        end */
+    end
+
+    /*
+     ** Microchannel status registers **
+    */
+
+    wire [7:0] reg_bsr; // Assembled from assign statement
+    reg [7:0] reg_bcr = 8'h00;
 
     // Control lines
     wire control_reset;
     wire control_dma_enable;
     wire control_int_enable;
 
+
     // Basic Status Register
-    assign reg_bsr = {1'b0, 1'b0, 1'b0, flag_busy, flag_si_full, flag_ci_full, 1'b0, flag_int};
+    assign reg_bsr = {1'b0, 1'b0, 1'b0, flag_busy,
+                      flag_si_full, flag_ci_full, 1'b0, flag_int};
 
     // Basic Control Register
     assign control_reset = reg_bcr[7];      // Setting this bit resets the MCU
     assign control_dma_enable = reg_bcr[1]; // Set to allow DMA operation
-    assign control_int_enable = reg_bcr[0]; // Set to allow the irq14 line to assert
+    assign control_int_enable = reg_bcr[0]; // Set to en irq14 line to assert
+
+
 
     /*
      ** Microchannel Interface Implementation below **
@@ -116,13 +185,20 @@ module mcabus(
     reg la_sbhe_l;
     reg la_data_read;
 
+    reg la_mca_op;
+    reg la_s0_w_l;
+    reg la_s1_r_l;
+
     // Data input latches
     always @ (negedge cmd_l) begin
         la_addr <= bus_a;
         la_data_in <= bus_d; // Note that data out needs to be ready by rising edge of CMD
         la_cd_setup_l <= cd_setup_l;
         la_sbhe_l <= sbhe_l;
+        la_s0_w_l <= s0_w_l;
+        la_s1_r_l <= s1_r_l;
 
+        la_mca_op <= addressed & cd_setup_l;
         la_data_read <= ~s1_r_l & addressed & cd_setup_l; // FIXME: remove cd_setup_l
 
         // Data written to us on this edge
@@ -135,23 +211,6 @@ module mcabus(
                 REG_BCR     : reg_bcr  <= bus_d[7:0];
                 REG_ATN     : reg_atn  <= bus_d[7:0];
                 REG_DREG    : reg_dreg <= bus_d[7:0];
-            endcase
-        end
-
-        // Flag writes
-        if (~s0_w_l & addressed & cd_setup_l) begin
-            case (bus_a)
-                REG_CIFR_L : flag_ci_full <= 1'b1;
-                REG_CIFR_H : flag_ci_full <= 1'b1;
-                REG_ATN    : flag_busy <= 1'b1;
-            endcase
-        end
-
-        if (~s1_r_l & addressed & cd_setup_l) begin
-            case (bus_a)
-                REG_SIFR_L : flag_si_full <= 1'b0;
-                REG_SIFR_H : flag_si_full <= 1'b0;
-                REG_ISR    : flag_int <= 1'b0;
             endcase
         end
 
