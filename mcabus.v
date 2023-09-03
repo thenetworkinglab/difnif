@@ -44,16 +44,13 @@ module mcabus(
     output test2,
 
     // Wiring from Teensy
-//    input [15:0] t_sifr, // Status data from Teensy
-//    input t_sifr_latch,  // Control line from Teensy
-//    input [7:0] t_isr,    // Interrupt data from Teensy
-//    input t_isr_latch,   // Control line from Teensy
-    
-//    output [15:0] t_cifr, // Command interface data to Teensy
     output [7:0] t_atn,   // Attention data to Teensy
-//    output t_ci_full,
-    output t_atn_full,
-    input t_atn_read
+    output t_atn_full,    // So Teensy can tell when host writes it
+    input t_atn_read,     // So we can clear flag when Teensy reads it
+
+    input [7:0] t_isr_out, // Interrupt byte from Teensy
+    output t_isr_full,     // So Teensy can tell when host reads it
+    input t_isr_write      // So we can set flag when Teensy writes it
 
     );
 
@@ -83,9 +80,7 @@ module mcabus(
     reg [15:0] reg_cifr = 16'h0000;
     reg [7:0] reg_atn = 8'h00;
     reg [15:0] reg_sifr = 16'hA000;
-    reg [7:0] reg_isr = 8'h00;
 
-    //assign t_cifr = reg_cifr;
     assign t_atn = reg_atn;
 
     // FIXME: data register should be 16 bit (and do data steering)
@@ -96,11 +91,11 @@ module mcabus(
     reg flag_atn = 1'b0;
     reg flag_ci_full = 1'b0;
     reg flag_si_full = 1'b1; // FIXME: should be 0
-    reg flag_int = 1'b0;
+    reg flag_isr = 1'b0;
 
     // Outputs to Teensy
-    //assign t_ci_full = flag_ci_full;
     assign t_atn_full = flag_atn;
+    assign t_isr_full = flag_isr;
 
     /*
      ** Registers and handshaking interface **
@@ -118,25 +113,14 @@ module mcabus(
                 flag_atn <= 1'b0;
             end
         end
-/*
-        // MCA has priority
-        if (mca_op) begin
-            if (~la_s0_w_l) begin
-                case (la_addr)
-                    REG_CIFR_L : flag_ci_full <= 1'b1;
-                    REG_CIFR_H : flag_ci_full <= 1'b1;
-                    REG_ATN    : flag_atn <= 1'b1;
-                endcase
-            end
 
-            if (~la_s1_r_l) begin
-                case (la_addr)
-                    REG_SIFR_L : flag_si_full <= 1'b0;
-                    REG_SIFR_H : flag_si_full <= 1'b0;
-                    REG_ISR    : flag_int <= 1'b0;
-                endcase
+        if (mca_op & ~la_s1_r_l & la_addr == REG_ISR) begin
+            flag_isr <= 1'b0;
+        end else begin
+            if (t_isr_write) begin
+                flag_isr <= 1'b1;
             end
-        end */
+        end
     end
 
     /*
@@ -154,7 +138,7 @@ module mcabus(
 
     // Basic Status Register
     assign reg_bsr = {1'b0, 1'b0, 1'b0, flag_busy,
-                      flag_si_full, flag_ci_full, 1'b0, flag_int};
+                      flag_si_full, flag_ci_full, 1'b0, flag_isr};
 
     // Basic Control Register
     assign control_reset = reg_bcr[7];      // Setting this bit resets the MCU
@@ -242,7 +226,7 @@ module mcabus(
                 // SBHE=1, A0=1: invalid
                 REG_SIFR_H      : data_out <= la_sbhe_l ? 16'hFFFF : {reg_sifr[15:8], 8'hFF};
                 REG_BSR         : data_out <= reg_bsr;
-                REG_ISR         : data_out <= reg_isr;
+                REG_ISR         : data_out <= t_isr_out;
                 REG_DREG        : data_out <= reg_dreg;
                 default         : data_out <= 16'hFFFF;
             endcase

@@ -6,6 +6,11 @@
 #define ADDR2 11
 #define ADDR3 13
 
+#define REG_TEST 0
+#define REG_FLAGS 1
+#define REG_ATN 2
+#define REG_ISR 3
+
 const int portpin[] = {27, 26, 39, 38,
                         21, 20, 23, 22,
                         16, 17, 41, 40,
@@ -57,32 +62,78 @@ void setup() {
   pinMode(ADDR1, OUTPUT);
   pinMode(ADDR2, OUTPUT);
   pinMode(ADDR3, OUTPUT);
+
+  Serial.println("Press 'f' for flag register contents.");
+  Serial.println("Press 'a' for ATN register contents.");
+  Serial.println("Press 'i' to write to ISR and trig an interrupt.");
 }
 
+void print16hex(uint16_t val)
+{
+    Serial.print(val >> 12, HEX);
+    Serial.print((val >> 8) & 0xF, HEX);
+    Serial.print((val >> 4) & 0xF, HEX);
+    Serial.print(val & 0xF, HEX); 
+}
+
+uint8_t readhex()
+{
+  char d;
+  while(1) {
+    if (Serial.available() > 0) {
+      d = Serial.read();
+      if ((d >= 0x30) && (d <= 0x39)) {
+        return d - 0x30;
+      }
+      if ((d >= 0x41) && (d <= 0x46)) {
+        return d + 0xA - 0x41;
+      }
+      if ((d >= 0x61) && (d <= 0x66)) {
+        return d + 0xa - 0x61;
+      }
+    }
+  }
+}
+
+uint8_t read8()
+{
+  uint8_t d;
+  d = readhex();
+  Serial.print(d, HEX);
+  d = (d << 4) | readhex();
+  Serial.print(d & 0xF, HEX);
+  return d;
+}
 
 void loop() {
   uint16_t d, i;
+  uint8_t cmd;
   // put your main code here, to run repeatedly:
-  Serial.println("Hello3");
-  delay(1000);
-  //return;
-  d = portRead(1);
-  i = portRead(2);
-  Serial.print(d & 0xFF, HEX);
-  Serial.print(" ");
-  Serial.println(i & 0xFF, HEX);
-  
-//  for (i = 0; i < 16; i++) {
-//    d = portRead(i);
-//    Serial.print(d >> 12, HEX);
-//    Serial.print((d >> 8) & 0xF, HEX);
-//    Serial.print((d >> 4) & 0xF, HEX);
-//    Serial.println(d & 0xF, HEX);
-// }
+
+  if (Serial.available() > 0) {
+    cmd = Serial.read();
+
+    if (cmd == 'f') {
+      d = portRead(REG_FLAGS);
+      Serial.print("Flag reg: ");
+      Serial.println(d & 0xFF, HEX);
+    }
+    if (cmd == 'a') {
+      i = portRead(REG_ATN);
+      Serial.print("ATN reg: ");
+      Serial.println(i & 0xFF, HEX);
+    }
+    if (cmd == 'i') {
+      Serial.print("Enter data for ISR: ");
+      d = read8();
+      portWrite(REG_ISR, d);
+      Serial.println();
+    }
+  }
 
 //  for (i = 0; i <= 0xFFFF; i++) {
-//    portWrite(0, i);
-//    d = portRead(0);
+//    portWrite(REG_TEST, i);
+//    d = portRead(REG_TEST);
     //Serial.print(d >> 12, HEX);
     //Serial.print((d >> 8) & 0xF, HEX);
     //Serial.print((d >> 4) & 0xF, HEX);

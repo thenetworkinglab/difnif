@@ -74,6 +74,9 @@ module difnif_top(
     wire [7:0] t_atn;
     wire t_atn_full;
     wire t_atn_read;
+    wire [7:0] t_isr_out;
+    wire t_isr_full;
+    wire t_isr_write;
 
     mcabus mca1 (
         .clk(clk),
@@ -109,7 +112,10 @@ module difnif_top(
         // Teensy connections
         .t_atn(t_atn),
         .t_atn_full(t_atn_full),
-        .t_atn_read(t_atn_read)
+        .t_atn_read(t_atn_read),
+        .t_isr_out(t_isr_out),
+        .t_isr_full(t_isr_full),
+        .t_isr_write(t_isr_write)
     );
 
     teensy tn1 (
@@ -124,7 +130,10 @@ module difnif_top(
         // Register interface
         .t_atn(t_atn),
         .t_atn_full(t_atn_full),
-        .t_atn_read(t_atn_read)
+        .t_atn_read(t_atn_read),
+        .t_isr_out(t_isr_out),
+        .t_isr_full(t_isr_full),
+        .t_isr_write(t_isr_write)
     );
 
     `ifdef SYNTHESIS

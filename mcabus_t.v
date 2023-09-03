@@ -66,6 +66,8 @@ module mcabus_t;
     wire data_dir; // FIXME use this to check for conflicts
 
     reg t_atn_read;
+    reg t_isr_write;
+    reg [7:0] t_isr_out;
 
     // Instantiate the Unit Under Test (UUT)
     mcabus uut (
@@ -97,7 +99,9 @@ module mcabus_t;
         .burst_o_l(preempt_o_l),
         .preempt_o_l(preempt_o_l),
 
-        .t_atn_read(t_atn_read)
+        .t_atn_read(t_atn_read),
+        .t_isr_out(t_isr_out),
+        .t_isr_write(t_isr_write)
     );
 
     // DBA-ESDI address decode
@@ -243,6 +247,8 @@ module mcabus_t;
         irq_in = 0;
 
         t_atn_read = 0;
+        t_isr_write = 0;
+        t_isr_out = 8'H00;
 
         // Wait 100 ns for global reset to finish
         #100;

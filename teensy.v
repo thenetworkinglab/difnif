@@ -21,12 +21,17 @@ module teensy(
     // Connections to MCA interface
     input [7:0] t_atn,
     input t_atn_full,
-    output t_atn_read
+    output t_atn_read,
+
+    output [7:0] t_isr_out,
+    input t_isr_full,
+    output t_isr_write
     );
 
     localparam REG_TEST = 4'd0;
     localparam REG_FLAGS = 4'd1;
     localparam REG_ATN = 4'd2;
+    localparam REG_ISR = 4'd3;
 
     wire [15:0] tn_d_out;
 
@@ -34,8 +39,12 @@ module teensy(
 
     reg [15:0] testreg = 16'HABCD;
 
+    reg [7:0] t_isr;
+
+    assign t_isr_out = t_isr;
+
     // Flag register
-    assign flags = {15'H0, t_atn_full};
+    assign flags = {14'H0, t_isr_full, t_atn_full};
 
     // Data outputs
     assign tn_d = tn_rd ? tn_d_out : 16'bZ;
@@ -44,6 +53,7 @@ module teensy(
             REG_TEST   : tn_d_out <= testreg;
             REG_FLAGS  : tn_d_out <= flags;
             REG_ATN    : tn_d_out <= {8'H0, t_atn};
+            REG_ISR    : tn_d_out <= {8'H0, t_isr};
             default    : tn_d_out <= 16'H0;
         endcase
     end
@@ -53,11 +63,13 @@ module teensy(
     always @ (posedge tn_wr) begin
         case (tn_addr)
             REG_TEST   : testreg <= tn_d;
+            REG_ISR    : t_isr <= tn_d;
         endcase
     end
 
     // Used to set/clear handshaking flags
     assign t_atn_read = tn_rd & (tn_addr == REG_ATN);
+    assign t_isr_write = tn_wr & (tn_addr == REG_ISR);
 
 endmodule
 
