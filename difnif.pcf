@@ -88,11 +88,11 @@ set_io tn_addr[3]   19
 # Control pins
 set_io tn_rd        143
 set_io tn_wr        10
+set_io tn_int       144
 
 # Spares
 set_io tn35         141
 set_io tn30         142
-set_io tn29         144
 
 ### LEDs
 set_io led0         37

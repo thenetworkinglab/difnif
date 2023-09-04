@@ -1,6 +1,7 @@
 
 #define PIN_RD 36
 #define PIN_WR 37
+#define PIN_INT 29
 #define ADDR0 10
 #define ADDR1 12
 #define ADDR2 11
@@ -17,6 +18,8 @@ const int portpin[] = {27, 26, 39, 38,
                         21, 20, 23, 22,
                         16, 17, 41, 40,
                         15, 14, 18, 19};
+
+uint8_t oldint = 0;
 
 void setPortMode(uint8_t mode)
 {
@@ -60,12 +63,14 @@ void setup() {
   setPortMode(INPUT);
   pinMode(PIN_RD, OUTPUT);
   pinMode(PIN_WR, OUTPUT);
+  pinMode(PIN_INT, INPUT);
   pinMode(ADDR0, OUTPUT);
   pinMode(ADDR1, OUTPUT);
   pinMode(ADDR2, OUTPUT);
   pinMode(ADDR3, OUTPUT);
 
   Serial.println("Press 'f' for flag register contents.");
+  Serial.println("Press 'F' to set flag register.");
   Serial.println("Press 'a' for ATN register contents.");
   Serial.println("Press 'i' to write to ISR and trig an interrupt.");
   Serial.println("Press 'c' to read Command Interface Reg.");
@@ -125,12 +130,29 @@ uint16_t read16()
 
 void loop() {
   uint16_t d, i;
-  uint8_t cmd;
+  uint8_t cmd, t;
   // put your main code here, to run repeatedly:
+
+  // FIXME: make it an interrupt?
+  t = digitalReadFast(PIN_INT);
+  if (t != oldint) {
+    oldint = t;
+    if (t == 1) {
+      Serial.println("Interrupt asserted.");
+    }
+    if (t == 0) {
+      Serial.println("Interrupt deasserted.");
+    }
+  }
 
   if (Serial.available() > 0) {
     cmd = Serial.read();
-
+    if (cmd == 'F') {
+      Serial.print("Enter data for flags: ");
+      d = read8();
+      portWrite(REG_FLAGS, d);
+      Serial.println();
+    }
     if (cmd == 'f') {
       d = portRead(REG_FLAGS);
       Serial.print("Flag reg: ");

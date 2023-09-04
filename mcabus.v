@@ -58,8 +58,13 @@ module mcabus(
 
     input [15:0] t_sifr_out, // Status iface data from Teensy
     output t_sifr_full,      // So Teensy can tell when host reads it
-    input t_sifr_write       // So we can set flag when Teensy writes it
+    input t_sifr_write,      // So we can set flag when Teensy writes it
 
+    // Flags
+    output t_hard_reset,
+    input t_int_pending,
+    input t_cmd_in_progress,
+    input t_busy
     );
 
     // Writable registers
@@ -95,7 +100,6 @@ module mcabus(
     reg [7:0] reg_dreg = 8'h00;
 
     // Flags
-    reg flag_busy = 1'b0;
     reg flag_atn = 1'b0;
     reg flag_ci_full = 1'b0;
     reg flag_si_full = 1'b0;
@@ -158,17 +162,16 @@ module mcabus(
     reg [7:0] reg_bcr = 8'h00;
 
     // Control lines
-    wire control_reset;
     wire control_dma_enable;
     wire control_int_enable;
 
 
     // Basic Status Register
-    assign reg_bsr = {control_dma_enable, 1'b0, 1'b0, flag_busy,
+    assign reg_bsr = {control_dma_enable, t_int_pending, t_cmd_in_progress, t_busy,
                       flag_si_full, flag_ci_full, 1'b0, flag_isr};
 
     // Basic Control Register
-    assign control_reset = reg_bcr[7];      // Setting this bit resets the MCU
+    assign t_hard_reset = reg_bcr[7];      // Setting this bit resets the MCU
     // TODO: Make it so completing a DMA transfer
     // auto-clears the DMA enable
     assign control_dma_enable = reg_bcr[1]; // Set to allow DMA operation
