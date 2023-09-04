@@ -77,6 +77,12 @@ module difnif_top(
     wire [7:0] t_isr_out;
     wire t_isr_full;
     wire t_isr_write;
+    wire [15:0] t_cifr;
+    wire t_cifr_full;
+    wire t_cifr_read;
+    wire [15:0] t_sifr_out;
+    wire t_sifr_full;
+    wire t_sifr_write;
 
     mcabus mca1 (
         .clk(clk),
@@ -115,7 +121,13 @@ module difnif_top(
         .t_atn_read(t_atn_read),
         .t_isr_out(t_isr_out),
         .t_isr_full(t_isr_full),
-        .t_isr_write(t_isr_write)
+        .t_isr_write(t_isr_write),
+        .t_cifr(t_cifr),
+        .t_cifr_full(t_cifr_full),
+        .t_cifr_read(t_cifr_read),
+        .t_sifr_out(t_sifr_out),
+        .t_sifr_full(t_sifr_full),
+        .t_sifr_write(t_sifr_write)
     );
 
     teensy tn1 (
@@ -133,7 +145,13 @@ module difnif_top(
         .t_atn_read(t_atn_read),
         .t_isr_out(t_isr_out),
         .t_isr_full(t_isr_full),
-        .t_isr_write(t_isr_write)
+        .t_isr_write(t_isr_write),
+        .t_cifr(t_cifr),
+        .t_cifr_full(t_cifr_full),
+        .t_cifr_read(t_cifr_read),
+        .t_sifr_out(t_sifr_out),
+        .t_sifr_full(t_sifr_full),
+        .t_sifr_write(t_sifr_write)
     );
 
     `ifdef SYNTHESIS

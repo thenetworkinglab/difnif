@@ -10,6 +10,8 @@
 #define REG_FLAGS 1
 #define REG_ATN 2
 #define REG_ISR 3
+#define REG_CIFR 4
+#define REG_SIFR 5
 
 const int portpin[] = {27, 26, 39, 38,
                         21, 20, 23, 22,
@@ -66,6 +68,8 @@ void setup() {
   Serial.println("Press 'f' for flag register contents.");
   Serial.println("Press 'a' for ATN register contents.");
   Serial.println("Press 'i' to write to ISR and trig an interrupt.");
+  Serial.println("Press 'c' to read Command Interface Reg.");
+  Serial.println("Press 's' to write Status Interface Reg.");
 }
 
 void print16hex(uint16_t val)
@@ -105,6 +109,20 @@ uint8_t read8()
   return d;
 }
 
+uint16_t read16()
+{
+  uint16_t d;
+  d = readhex();
+  Serial.print(d, HEX);
+  d = (d << 4) | readhex();
+  Serial.print(d & 0xF, HEX);
+  d = (d << 4) | readhex();
+  Serial.print(d & 0xF, HEX);
+  d = (d << 4) | readhex();
+  Serial.print(d & 0xF, HEX);
+  return d;
+}
+
 void loop() {
   uint16_t d, i;
   uint8_t cmd;
@@ -127,6 +145,18 @@ void loop() {
       Serial.print("Enter data for ISR: ");
       d = read8();
       portWrite(REG_ISR, d);
+      Serial.println();
+    }
+    if (cmd == 'c') {
+      i = portRead(REG_CIFR);
+      Serial.print("CIFR reg: ");
+      print16hex(i);
+      Serial.println();
+    }
+    if (cmd == 's') {
+      Serial.print("Enter data for SIFR: ");
+      d = read16();
+      portWrite(REG_SIFR, d);
       Serial.println();
     }
   }

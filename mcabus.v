@@ -50,7 +50,15 @@ module mcabus(
 
     input [7:0] t_isr_out, // Interrupt byte from Teensy
     output t_isr_full,     // So Teensy can tell when host reads it
-    input t_isr_write      // So we can set flag when Teensy writes it
+    input t_isr_write,     // So we can set flag when Teensy writes it
+
+    output [15:0] t_cifr, // Command iface data to Teensy
+    output t_cifr_full,   // So Teensy can tell when host writes it
+    input t_cifr_read,    // So we can clear flag when Teensy reads it
+
+    input [15:0] t_sifr_out, // Status iface data from Teensy
+    output t_sifr_full,      // So Teensy can tell when host reads it
+    input t_sifr_write       // So we can set flag when Teensy writes it
 
     );
 
@@ -79,9 +87,9 @@ module mcabus(
     // Registers
     reg [15:0] reg_cifr = 16'h0000;
     reg [7:0] reg_atn = 8'h00;
-    reg [15:0] reg_sifr = 16'hA000;
 
     assign t_atn = reg_atn;
+    assign t_cifr = reg_cifr;
 
     // FIXME: data register should be 16 bit (and do data steering)
     reg [7:0] reg_dreg = 8'h00;
@@ -90,12 +98,14 @@ module mcabus(
     reg flag_busy = 1'b0;
     reg flag_atn = 1'b0;
     reg flag_ci_full = 1'b0;
-    reg flag_si_full = 1'b1; // FIXME: should be 0
+    reg flag_si_full = 1'b0;
     reg flag_isr = 1'b0;
 
     // Outputs to Teensy
     assign t_atn_full = flag_atn;
     assign t_isr_full = flag_isr;
+    assign t_cifr_full = flag_ci_full;
+    assign t_sifr_full = flag_si_full;
 
     /*
      ** Registers and handshaking interface **
@@ -121,6 +131,23 @@ module mcabus(
                 flag_isr <= 1'b1;
             end
         end
+
+        // FIXME: only trigger on a full 16 bit access
+        if (mca_op & ~la_s0_w_l & la_addr == REG_CIFR_L) begin
+            flag_ci_full <= 1'b1;
+        end else begin
+            if (t_cifr_read) begin
+                flag_ci_full <= 1'b0;
+            end
+        end
+
+        if (mca_op & ~la_s1_r_l & la_addr == REG_SIFR_L) begin
+            flag_si_full <= 1'b0;
+        end else begin
+            if (t_sifr_write) begin
+                flag_si_full <= 1'b1;
+            end
+        end
     end
 
     /*
@@ -137,11 +164,13 @@ module mcabus(
 
 
     // Basic Status Register
-    assign reg_bsr = {1'b0, 1'b0, 1'b0, flag_busy,
+    assign reg_bsr = {control_dma_enable, 1'b0, 1'b0, flag_busy,
                       flag_si_full, flag_ci_full, 1'b0, flag_isr};
 
     // Basic Control Register
     assign control_reset = reg_bcr[7];      // Setting this bit resets the MCU
+    // TODO: Make it so completing a DMA transfer
+    // auto-clears the DMA enable
     assign control_dma_enable = reg_bcr[1]; // Set to allow DMA operation
     assign control_int_enable = reg_bcr[0]; // Set to en irq14 line to assert
 
@@ -199,7 +228,6 @@ module mcabus(
         end
 
         // TODO: Implement writeable POS registers
-        // TODO: Implement register read and write triggers (mailbox flags)
     end
 
     // Data output: present data at the data output depending on the address
@@ -221,10 +249,10 @@ module mcabus(
                 // 16-bit read from location 0.
                 // SBHE=0, A0=0: write bits 15:0 since upper 8 bits enabled.
                 // SBHE=1, A0=0: only write bits 7:0
-                REG_SIFR_L      : data_out <= la_sbhe_l ? {8'hFF, reg_sifr[7:0]} : reg_sifr;
+                REG_SIFR_L      : data_out <= la_sbhe_l ? {8'hFF, t_sifr_out[7:0]} : t_sifr_out;
                 // SBHE=0, A0=1: only write bits 15:8
                 // SBHE=1, A0=1: invalid
-                REG_SIFR_H      : data_out <= la_sbhe_l ? 16'hFFFF : {reg_sifr[15:8], 8'hFF};
+                REG_SIFR_H      : data_out <= la_sbhe_l ? 16'hFFFF : {t_sifr_out[15:8], 8'hFF};
                 REG_BSR         : data_out <= reg_bsr;
                 REG_ISR         : data_out <= t_isr_out;
                 REG_DREG        : data_out <= reg_dreg;

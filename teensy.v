@@ -25,13 +25,23 @@ module teensy(
 
     output [7:0] t_isr_out,
     input t_isr_full,
-    output t_isr_write
+    output t_isr_write,
+
+    input [15:0] t_cifr,
+    input t_cifr_full,
+    output t_cifr_read,
+
+    output [15:0] t_sifr_out,
+    input t_sifr_full,
+    output t_sifr_write
     );
 
     localparam REG_TEST = 4'd0;
     localparam REG_FLAGS = 4'd1;
     localparam REG_ATN = 4'd2;
     localparam REG_ISR = 4'd3;
+    localparam REG_CIFR = 4'd4;
+    localparam REG_SIFR = 4'd5;
 
     wire [15:0] tn_d_out;
 
@@ -40,11 +50,15 @@ module teensy(
     reg [15:0] testreg = 16'HABCD;
 
     reg [7:0] t_isr;
+    reg [15:0] t_sifr;
 
     assign t_isr_out = t_isr;
+    assign t_sifr_out = t_sifr;
 
     // Flag register
-    assign flags = {14'H0, t_isr_full, t_atn_full};
+    assign flags = {12'H0,
+                    t_sifr_full, t_cifr_full,
+                    t_isr_full, t_atn_full};
 
     // Data outputs
     assign tn_d = tn_rd ? tn_d_out : 16'bZ;
@@ -54,22 +68,26 @@ module teensy(
             REG_FLAGS  : tn_d_out <= flags;
             REG_ATN    : tn_d_out <= {8'H0, t_atn};
             REG_ISR    : tn_d_out <= {8'H0, t_isr};
+            REG_SIFR   : tn_d_out <= t_sifr;
+            REG_CIFR   : tn_d_out <= t_cifr;
             default    : tn_d_out <= 16'H0;
         endcase
     end
-    //assign tn_d_out = (tn_addr == 4'H0) ? testreg : {12'b0, tn_addr[3:0]};
 
-    // Capture data on rising edge of tn_wr. Figure out clock sync later :blobsweat:
+    // Capture data on rising edge of tn_wr
     always @ (posedge tn_wr) begin
         case (tn_addr)
             REG_TEST   : testreg <= tn_d;
             REG_ISR    : t_isr <= tn_d;
+            REG_SIFR   : t_sifr <= tn_d;
         endcase
     end
 
     // Used to set/clear handshaking flags
     assign t_atn_read = tn_rd & (tn_addr == REG_ATN);
     assign t_isr_write = tn_wr & (tn_addr == REG_ISR);
+    assign t_cifr_read = tn_rd & (tn_addr == REG_CIFR);
+    assign t_sifr_write = tn_wr & (tn_addr == REG_SIFR);
 
 endmodule
 

@@ -68,6 +68,9 @@ module mcabus_t;
     reg t_atn_read;
     reg t_isr_write;
     reg [7:0] t_isr_out;
+    reg t_cifr_read;
+    reg [15:0] t_sifr_out;
+    reg t_sifr_write;
 
     // Instantiate the Unit Under Test (UUT)
     mcabus uut (
@@ -101,7 +104,10 @@ module mcabus_t;
 
         .t_atn_read(t_atn_read),
         .t_isr_out(t_isr_out),
-        .t_isr_write(t_isr_write)
+        .t_isr_write(t_isr_write),
+        .t_cifr_read(t_cifr_read),
+        .t_sifr_out(t_sifr_out),
+        .t_sifr_write(t_sifr_write)
     );
 
     // DBA-ESDI address decode
@@ -246,9 +252,13 @@ module mcabus_t;
         arb_gnt_l = 0;
         irq_in = 0;
 
+        // Teensy signals
         t_atn_read = 0;
         t_isr_write = 0;
         t_isr_out = 8'H00;
+        t_cifr_read = 0;
+        t_sifr_out = 16'H00;
+        t_sifr_write = 0;
 
         // Wait 100 ns for global reset to finish
         #100;
