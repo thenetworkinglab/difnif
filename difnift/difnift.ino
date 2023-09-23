@@ -31,11 +31,15 @@
 #define DEV_DRIVE 0
 
 // ATN commands
-#define ATN_COMMAND 1
-#define ATN_C_EOI 0xE2
-#define ATN_D_EOI 0x02
-#define ATN_ABORT 3
-#define ATN_RESET 0xE4
+#define ATN_COMMAND 0x1
+#define ATN_EOI     0x2
+#define ATN_ABORT   0x3
+#define ATN_RESET   0x4
+
+// ISR interrupt values
+#define ISR_RESET_OK 0xEA
+#define ISR_RESET_FAIL 0xFA
+#define ISR_ATN_ERROR 0x0F
 
 const int portpin[] = {27, 26, 39, 38,
                         21, 20, 23, 22,
@@ -68,7 +72,7 @@ uint16_t portRead(uint8_t address)
     digitalWriteFast(ADDR2, (address >> 2) & 1);
     digitalWriteFast(ADDR3, (address >> 3) & 1);
     digitalWriteFast(PIN_RD, 1);
-    delayMicroseconds(1);
+    delayMicroseconds(3);
     ret = GPIO6_PSR >> 16;
     // Grab port contents
     digitalWriteFast(PIN_RD, 0);
@@ -84,7 +88,7 @@ void portWrite(uint8_t address, uint16_t data)
     setPortMode(OUTPUT);
     GPIO6_DR = (GPIO6_DR & 0xFFFF) | (data << 16);
     digitalWriteFast(PIN_WR, 1);
-    delayMicroseconds(1);
+    delayMicroseconds(3);
     digitalWriteFast(PIN_WR, 0);
     setPortMode(INPUT);
 }
@@ -106,6 +110,7 @@ void setup() {
   Serial.println("Press 'a' for ATN register contents.");
   Serial.println("Press 'i' to write to ISR and trig an interrupt.");
   Serial.println("Press 'c' to read Command Interface Reg.");
+  Serial.println("Press 'C' for CIFR read loop test.");
   Serial.println("Press 's' to write Status Interface Reg.");
   Serial.println("Press 'G' to run the main loop.");
 }
@@ -171,11 +176,22 @@ uint8_t cmdBlockLen()
   return 2;
 }
 
+// Fills in basic info for the status block
 void startStatusBlock(uint8_t len, uint8_t dev, uint8_t code)
 {
   status_block[0] = (len << 8) | ((dev & 0x7) << 5) | (code & 0x1F);
   status_count = 0;
   status_max = len;
+}
+
+// Writes a word of the status block to the host
+void loadStatusBlock()
+{
+  status_max--;
+  portWrite(REG_SIFR, status_block[status_count]);
+  Serial.print("SIFR: count ");
+  Serial.println(status_count);
+  status_count++;
 }
 
 void setFlag(uint16_t flag)
@@ -206,9 +222,13 @@ void esdiReset()
   //
   // Do initialization tasks here
   //
-  portWrite(REG_ISR, 0xEA); // Success. Failure is 0xFA
+  clearFlag(_BV(FLAG_CMD_PROG)); // Clear any commands in progress
+  portRead(REG_CIFR); // Make sure command interface register is cleared
+  
+  portWrite(REG_ISR, ISR_RESET_OK); // Success. Failure is 0xFA
   // Load status data block
   startStatusBlock(1, DEV_CONTROLLER, 0); // Page 61
+  loadStatusBlock();
   pendInterrupt(PEND_INT_RESET);
 }
 
@@ -217,14 +237,35 @@ void esdiReset()
 void processCmdBlock()
 {
   // TODO
+  // Fill in the default Command Complete Status Block
+  startStatusBlock(7, (cmd_block[0] >> 5) & 0x7, cmd_block[0] & 0x1F);
+  status_block[1] = 0x0100; // command status, command error code
+  status_block[2] = 0x0000; // device status, device error code (was 1900)
+  status_block[3] = 0x0000; // por error code, test error code
+  status_block[4] = 0x0000; // diagnostic command (probably from last Run Diagnostics command)
+  status_block[5] = 0x0000; // Reserved
+  status_block[6] = 0x0000; // Reserved
 
+  
   // If command requires data transfer, probably need to
   // set up a state machine that runs in the main loop
 
   // After command, fill in the status block
   // then trigger a command complete interrupt
 
-  if (cmd_block[0] == 0x0614) { // Get diagnostic status block, drive 0
+  // 01 000010 000 00101
+  if ((cmd_block[0] & 0xC0FF) == 0x4005) { // Seek
+    // Do stuff?
+    Serial.println("SEEK COMMAND");
+    loadStatusBlock();
+    portWrite(REG_ISR, 0x01); // Command complete for drive
+    clearFlag(_BV(FLAG_CMD_PROG));
+    pendInterrupt(PEND_INT);
+  }
+
+  // 00 000110 000 10100
+  // Maybe just ignore option bits.
+  if ((cmd_block[0] & 0xC0FF) == 0x0014) { // Get diagnostic status block, drive 0
     // See page 58 and page 49
     startStatusBlock(7, DEV_DRIVE, 0x14);
     // These blocks are probably meant to be assembled from internal
@@ -236,12 +277,20 @@ void processCmdBlock()
     status_block[5] = 0x0000; // Reserved
     status_block[6] = 0x0000; // Reserved
 
+    loadStatusBlock(); // Load initial word of status block
     // Page 25
     portWrite(REG_ISR, 0x01); // Command complete for drive
     clearFlag(_BV(FLAG_CMD_PROG));
     pendInterrupt(PEND_INT);
   }
   
+}
+
+// Issues an attention error
+void AtnError(uint8_t atn_cmd)
+{
+  portWrite(REG_ISR, ISR_ATN_ERROR | (atn_cmd & 0xE0));
+  pendInterrupt(PEND_INT_RESET); // Clear busy bit when we get EOI.
 }
 
 // Processing loop for host register interface
@@ -255,11 +304,7 @@ void mainLoop() {
     // Host has read status block word and we have more to
     // push out
     if (status_max > 0 && !(flags & _BV(FLAG_SIFR_FULL))) {
-      status_max--;
-      portWrite(REG_SIFR, status_block[status_count]);
-      Serial.print("SIFR: count ");
-      Serial.println(status_count);
-      status_count++;
+      loadStatusBlock();
     }
 
     if (expect_cb && (flags & _BV(FLAG_CIFR_FULL))) {
@@ -284,9 +329,11 @@ void mainLoop() {
       Serial.print("ATN recieved: ");
       Serial.println(atn_cmd, HEX);
 
-      switch(atn_cmd) {
-        case ATN_D_EOI: // FIXME, handle these separately?
-        case ATN_C_EOI:
+      switch(atn_cmd & 0xF) {
+        case ATN_EOI: 
+          // FIXME, check Device Select bits
+          // since technically we can have an interrupt pending
+          // from both the controller and the drive at the same time.
           // Check if we have a pending interrupt
           if (int_pending == PEND_INT_RESET) {
             int_pending = 0;
@@ -300,17 +347,25 @@ void mainLoop() {
           }
           break;
         case ATN_RESET:
-          Serial.println("Soft reset received.");
-          esdiReset();
-          break;
+          if ((atn_cmd & 0xE0) == 0xE0) {
+            Serial.println("Soft reset received.");
+            esdiReset();
+            break;
+          } else {
+            AtnError(atn_cmd);
+          }
         case ATN_COMMAND:
           // Expect to receive command blocks
           setFlag(_BV(FLAG_BUSY));
+          portRead(REG_CIFR); // Ensure interface is empty
           expect_cb = 1;
           cmd_count = 0;
           break;
+        case ATN_ABORT:
+          // TODO: Process abort command
         default:
           Serial.println("Invalid command.");
+          AtnError(atn_cmd);
           break;
       }
     }
@@ -318,6 +373,46 @@ void mainLoop() {
   }
 }
 
+void CIFRTestLoop()
+{
+  uint16_t flags, d, d2;
+  uint8_t c = 0;
+  while(1) {
+    #if 1
+    flags = portRead(REG_FLAGS);
+    if (flags & _BV(FLAG_CIFR_FULL)) {
+      delay(200);
+      d = portRead(REG_CIFR);
+      if (d != d2) {
+        if (d != d2 + 1) {
+          Serial.print("Skipped from ");
+          Serial.print(d2, DEC);
+          Serial.print(" to ");
+          Serial.println(d, DEC);
+        }
+        d2 = d;
+      }
+    }
+    #else
+    d = portRead(REG_CIFR);
+    if (d != d2) {
+      if (d != d2 + 1) {
+        Serial.print("Skipped from ");
+        Serial.print(d2, DEC);
+        Serial.print(" to ");
+        Serial.println(d, DEC);
+      }
+      d2 = d;
+    }
+    //Serial.print(portRead(REG_CIFR), HEX);
+    //Serial.print(" ");
+    //if (c++ > 25) {
+    //  c = 0;
+    //  Serial.println();
+    //}
+    #endif
+  }
+}
 
 void loop() {
   uint16_t d, i;
@@ -365,6 +460,10 @@ void loop() {
       Serial.print("CIFR reg: ");
       print16hex(i);
       Serial.println();
+    }
+    if (cmd == 'C') {
+      Serial.println("CIFR test loop.");
+      CIFRTestLoop();
     }
     if (cmd == 's') {
       Serial.print("Enter data for SIFR: ");

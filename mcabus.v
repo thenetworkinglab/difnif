@@ -84,7 +84,6 @@ module mcabus(
 
     // Unused signals (for now)
     assign cd_chrdy_l = 1'b1;
-    assign irq14_l = 1'b1;
     assign arb_o = 4'b1111;
     assign burst_o_l = 1'b1;
     assign preempt_o_l = 1'b1;
@@ -92,6 +91,9 @@ module mcabus(
     // Registers
     reg [15:0] reg_cifr = 16'h0000;
     reg [7:0] reg_atn = 8'h00;
+
+    // Interrupt request line
+    assign irq14_l = !(flag_isr & control_int_enable);
 
     assign t_atn = reg_atn;
     assign t_cifr = reg_cifr;
