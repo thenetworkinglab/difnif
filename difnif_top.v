@@ -85,7 +85,6 @@ module difnif_top(
     wire t_sifr_write;
 
     wire t_hard_reset;
-    wire t_int_pending;
     wire t_cmd_in_progress;
     wire t_busy;
 
@@ -134,7 +133,6 @@ module difnif_top(
         .t_sifr_full(t_sifr_full),
         .t_sifr_write(t_sifr_write),
         .t_hard_reset(t_hard_reset),
-        .t_int_pending(t_int_pending),
         .t_cmd_in_progress(t_cmd_in_progress),
         .t_busy(t_busy)
     );
@@ -162,7 +160,6 @@ module difnif_top(
         .t_sifr_full(t_sifr_full),
         .t_sifr_write(t_sifr_write),
         .t_hard_reset(t_hard_reset),
-        .t_int_pending(t_int_pending),
         .t_cmd_in_progress(t_cmd_in_progress),
         .t_busy(t_busy)
     );

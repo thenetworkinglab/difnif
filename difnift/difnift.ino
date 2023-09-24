@@ -19,7 +19,6 @@
 #define FLAG_CIFR_FULL 2
 #define FLAG_SIFR_FULL 3
 #define FLAG_HARD_RESET 4
-#define FLAG_INT_PEND 5
 #define FLAG_CMD_PROG 6
 #define FLAG_BUSY 7
 
@@ -111,6 +110,7 @@ void setup() {
   Serial.println("Press 'i' to write to ISR and trig an interrupt.");
   Serial.println("Press 'c' to read Command Interface Reg.");
   Serial.println("Press 'C' for CIFR read loop test.");
+  Serial.println("Press 'S' for SIFR write loop test.");
   Serial.println("Press 's' to write Status Interface Reg.");
   Serial.println("Press 'G' to run the main loop.");
 }
@@ -211,8 +211,6 @@ void clearFlag(uint16_t flag)
 void pendInterrupt(uint8_t kind)
 {
   int_pending = kind;
-  // Set interrupt pending flag
-  setFlag(_BV(FLAG_INT_PEND));
 }
 
 // Reset procedure. Page 22.
@@ -339,11 +337,11 @@ void mainLoop() {
           if (int_pending == PEND_INT_RESET) {
             int_pending = 0;
             // Reset interrupt clears the busy flag
-            clearFlag(_BV(FLAG_INT_PEND) | _BV(FLAG_BUSY));
+            clearFlag(_BV(FLAG_BUSY));
             Serial.println("Cleared pending reset int.");
           } else if (int_pending != 0) {
             int_pending = 0;
-            clearFlag(_BV(FLAG_INT_PEND));
+            clearFlag(_BV(FLAG_BUSY));
             Serial.println("Cleared some other int.");
           }
           break;
@@ -375,6 +373,39 @@ void mainLoop() {
   }
 }
 
+void ATNTestLoop()
+{
+  uint16_t flags;
+  uint8_t c = 0;
+  uint8_t d, d2;
+  while (1) {
+    flags = portRead(REG_FLAGS);
+    if (flags & _BV(FLAG_ATN_FULL)) {
+      d = portRead(REG_ATN);
+      if (d != d2) {
+        if (d != d2 + 1) {
+          Serial.print("Skipped from ");
+          Serial.print(d2, DEC);
+          Serial.print(" to ");
+          Serial.println(d, DEC);
+        }
+        d2 = d;
+      }
+    }
+  }
+}
+
+void SIFRTestLoop()
+{
+  uint16_t flags, d = 0;
+  while(1) {
+    flags = portRead(REG_FLAGS);
+    if (!(flags & _BV(FLAG_SIFR_FULL))) { // Not full
+      portWrite(REG_SIFR, d++);
+    }
+  }
+}
+
 void CIFRTestLoop()
 {
   uint16_t flags, d, d2;
@@ -383,7 +414,7 @@ void CIFRTestLoop()
     #if 1
     flags = portRead(REG_FLAGS);
     if (flags & _BV(FLAG_CIFR_FULL)) {
-      delay(50);
+      delay(5);
       d = portRead(REG_CIFR);
       if (d != d2) {
         if (d != d2 + 1) {
@@ -466,6 +497,10 @@ void loop() {
     if (cmd == 'C') {
       Serial.println("CIFR test loop.");
       CIFRTestLoop();
+    }
+    if (cmd == 'S') {
+      Serial.println("SIFR test loop.");
+      SIFRTestLoop();
     }
     if (cmd == 's') {
       Serial.print("Enter data for SIFR: ");

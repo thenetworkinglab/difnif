@@ -41,7 +41,6 @@ module teensy(
 
     // Flags
     input t_hard_reset,
-    output t_int_pending,
     output t_cmd_in_progress,
     output t_busy
     );
@@ -72,12 +71,11 @@ module teensy(
     // Flag register
     assign flags_out = {8'H0,
                         t_busy, t_cmd_in_progress,
-                        t_int_pending, t_hard_reset,
+                        1'b0, t_hard_reset,
                         t_sifr_full, t_cifr_full,
                         t_isr_full, t_atn_full};
 
     // These bits in the flag reg are r/w
-    assign t_int_pending = flags_in[5];
     assign t_cmd_in_progress = flags_in[6];
     assign t_busy = flags_in[7];
 

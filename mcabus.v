@@ -62,7 +62,6 @@ module mcabus(
 
     // Flags
     output t_hard_reset,
-    input t_int_pending,
     input t_cmd_in_progress,
     input t_busy
     );
@@ -188,8 +187,8 @@ module mcabus(
 
 
     // Basic Status Register
-    assign reg_bsr = {control_dma_enable, t_int_pending, t_cmd_in_progress, t_busy,
-                      flag_si_full, flag_ci_full, 1'b0, flag_isr};
+    assign reg_bsr = {control_dma_enable, flag_isr, t_cmd_in_progress, t_busy,
+                      flag_si_full, flag_ci_full, 1'b0, flag_isr & control_int_enable};
 
     // Basic Control Register
     assign t_hard_reset = reg_bcr[7];      // Setting this bit resets the MCU

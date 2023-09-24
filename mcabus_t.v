@@ -72,7 +72,6 @@ module mcabus_t;
     reg [15:0] t_sifr_out;
     reg t_sifr_write;
 
-    reg t_int_pending;
     reg t_cmd_in_progress;
     reg t_busy;
 
@@ -112,7 +111,6 @@ module mcabus_t;
         .t_cifr_read(t_cifr_read),
         .t_sifr_out(t_sifr_out),
         .t_sifr_write(t_sifr_write),
-        .t_int_pending(t_int_pending),
         .t_cmd_in_progress(t_cmd_in_progress),
         .t_busy(t_busy)
     );
@@ -266,7 +264,6 @@ module mcabus_t;
         t_cifr_read = 0;
         t_sifr_out = 16'H00;
         t_sifr_write = 0;
-        t_int_pending = 0;
         t_cmd_in_progress = 0;
         t_busy = 0;
 
