@@ -86,7 +86,7 @@ module difnif_top(
 
     wire t_hard_reset;
     wire t_cmd_in_progress;
-    wire t_busy;
+    wire t_busy_clear;
 
     mcabus mca1 (
         .clk(clk),
@@ -134,7 +134,7 @@ module difnif_top(
         .t_sifr_write(t_sifr_write),
         .t_hard_reset(t_hard_reset),
         .t_cmd_in_progress(t_cmd_in_progress),
-        .t_busy(t_busy)
+        .t_busy_clear(t_busy_clear)
     );
 
     teensy tn1 (
@@ -161,7 +161,7 @@ module difnif_top(
         .t_sifr_write(t_sifr_write),
         .t_hard_reset(t_hard_reset),
         .t_cmd_in_progress(t_cmd_in_progress),
-        .t_busy(t_busy)
+        .t_busy_clear(t_busy_clear)
     );
     // 50MHz
     `ifdef SYNTHESIS

@@ -42,7 +42,7 @@ module teensy(
     // Flags
     input t_hard_reset,
     output t_cmd_in_progress,
-    output t_busy
+    output t_busy_clear
     );
 
     localparam REG_TEST = 4'd0;
@@ -68,16 +68,20 @@ module teensy(
     // Interrupt output
     assign tn_int = t_atn_full; // TODO: make this more complex
 
+    wire t_busy_bit;
+
     // Flag register
     assign flags_out = {8'H0,
-                        t_busy, t_cmd_in_progress,
+                        1'b1, t_cmd_in_progress, // Clear busy is active low
                         1'b0, t_hard_reset,
                         t_sifr_full, t_cifr_full,
                         t_isr_full, t_atn_full};
 
     // These bits in the flag reg are r/w
     assign t_cmd_in_progress = flags_in[6];
-    assign t_busy = flags_in[7];
+
+    // Clears the busy flag when bit is written to a '1'
+    assign t_busy_clear = tn_wr & (tn_addr == REG_FLAGS) & ~tn_d[7];
 
     // Data outputs
     assign tn_d = tn_rd ? tn_d_out : 16'bZ;

@@ -63,7 +63,7 @@ module mcabus(
     // Flags
     output t_hard_reset,
     input t_cmd_in_progress,
-    input t_busy
+    input t_busy_clear
     );
 
     // Writable registers
@@ -102,6 +102,7 @@ module mcabus(
 
     // Flags
     reg flag_atn = 1'b0;
+    reg flag_busy = 1'b0;
     reg flag_ci_full = 1'b0;
     reg flag_si_full = 1'b0;
     reg flag_isr = 1'b0;
@@ -123,12 +124,19 @@ module mcabus(
     reg [1:0] reg_atn_set;
 
     always @ (posedge clk) begin
-        reg_atn_set = {reg_atn_set[0], flag_atn_set};
+        reg_atn_set <= {reg_atn_set[0], flag_atn_set};
     end
 
     always @ (posedge clk) begin
         if ((reg_atn_set == 2'b01) || t_atn_read) begin
-            flag_atn = t_atn_read ? 1'b0 : 1'b1;
+            flag_atn <= t_atn_read ? 1'b0 : 1'b1;
+        end
+    end
+
+    // Busy flag: Set when ATN written to. Cleared by Teensy
+    always @ (posedge clk) begin
+        if ((reg_atn_set == 2'b01) || t_busy_clear) begin
+            flag_busy <= t_busy_clear? 1'b0 : 1'b1;
         end
     end
 
@@ -137,7 +145,7 @@ module mcabus(
     reg [1:0] reg_ci_full_set;
 
     always @ (posedge clk) begin
-        reg_ci_full_set = {reg_ci_full_set[0], flag_ci_full_set};
+        reg_ci_full_set <= {reg_ci_full_set[0], flag_ci_full_set};
     end
 
     always @ (posedge clk) begin
@@ -166,8 +174,8 @@ module mcabus(
     reg [1:0] reg_t_sifr_write;
 
     always @ (posedge clk) begin
-        reg_sifr_clear = {reg_sifr_clear[0], flag_sifr_clear};
-        reg_t_sifr_write = {reg_t_sifr_write[0], t_sifr_write};
+        reg_sifr_clear <= {reg_sifr_clear[0], flag_sifr_clear};
+        reg_t_sifr_write <= {reg_t_sifr_write[0], t_sifr_write};
     end
     // Clear register at end of MCA transaction
     // Set register when Teensy latches new value
@@ -190,7 +198,7 @@ module mcabus(
 
 
     // Basic Status Register
-    assign reg_bsr = {control_dma_enable, flag_isr, t_cmd_in_progress, t_busy,
+    assign reg_bsr = {control_dma_enable, flag_isr, t_cmd_in_progress, flag_busy,
                       flag_si_full, flag_ci_full, 1'b0, flag_isr & control_int_enable};
 
     // Basic Control Register

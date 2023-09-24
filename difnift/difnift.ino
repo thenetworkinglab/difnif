@@ -111,6 +111,7 @@ void setup() {
   Serial.println("Press 'c' to read Command Interface Reg.");
   Serial.println("Press 'C' for CIFR read loop test.");
   Serial.println("Press 'S' for SIFR write loop test.");
+  Serial.println("Press 'A' for ATN read loop test.");
   Serial.println("Press 's' to write Status Interface Reg.");
   Serial.println("Press 'G' to run the main loop.");
 }
@@ -216,13 +217,12 @@ void pendInterrupt(uint8_t kind)
 // Reset procedure. Page 22.
 void esdiReset()
 {
-  setFlag(_BV(FLAG_BUSY));
   //
   // Do initialization tasks here
   //
   clearFlag(_BV(FLAG_CMD_PROG)); // Clear any commands in progress
   portRead(REG_CIFR); // Make sure command interface register is cleared
-  
+  clearFlag(_BV(FLAG_BUSY));
   portWrite(REG_ISR, ISR_RESET_OK); // Success. Failure is 0xFA
   // Load status data block
   startStatusBlock(1, DEV_CONTROLLER, 0); // Page 61
@@ -323,7 +323,6 @@ void mainLoop() {
 
     // We have a waiting ATN command from the host.
     if (flags & _BV(FLAG_ATN_FULL)) {
-      setFlag(_BV(FLAG_BUSY));
       atn_cmd = portRead(REG_ATN);
       Serial.print("ATN recieved: ");
       Serial.println(atn_cmd, HEX);
@@ -355,7 +354,6 @@ void mainLoop() {
           }
         case ATN_COMMAND:
           // Expect to receive command blocks
-          setFlag(_BV(FLAG_BUSY));
           Serial.println("Set busy");
           portRead(REG_CIFR); // Ensure interface is empty
           expect_cb = 1;
@@ -377,10 +375,14 @@ void ATNTestLoop()
 {
   uint16_t flags;
   uint8_t c = 0;
-  uint8_t d, d2;
+  uint8_t d = 0;
+  uint8_t d2 = 0;;
+  Serial.println("Begin.");
+  clearFlag(_BV(FLAG_BUSY));
   while (1) {
     flags = portRead(REG_FLAGS);
     if (flags & _BV(FLAG_ATN_FULL)) {
+      Serial.println("ATN.");
       d = portRead(REG_ATN);
       if (d != d2) {
         if (d != d2 + 1) {
@@ -391,8 +393,13 @@ void ATNTestLoop()
         }
         d2 = d;
       }
+      clearFlag(_BV(FLAG_BUSY));
+      clearFlag(_BV(FLAG_BUSY));
+      clearFlag(_BV(FLAG_BUSY));
+      clearFlag(_BV(FLAG_BUSY));
     }
   }
+  Serial.println("???");
 }
 
 void SIFRTestLoop()
@@ -408,7 +415,9 @@ void SIFRTestLoop()
 
 void CIFRTestLoop()
 {
-  uint16_t flags, d, d2;
+  uint16_t flags;
+  uint16_t d = 0;
+  uint16_t d2 = 0;
   uint8_t c = 0;
   while(1) {
     #if 1
@@ -501,6 +510,10 @@ void loop() {
     if (cmd == 'S') {
       Serial.println("SIFR test loop.");
       SIFRTestLoop();
+    }
+    if (cmd == 'A') {
+      Serial.println("ATN test loop.");
+      ATNTestLoop();
     }
     if (cmd == 's') {
       Serial.print("Enter data for SIFR: ");
