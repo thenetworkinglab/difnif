@@ -166,7 +166,7 @@ module difnif_top(
         .t_cmd_in_progress(t_cmd_in_progress),
         .t_busy(t_busy)
     );
-
+    // 50MHz
     `ifdef SYNTHESIS
     SB_PLL40_PAD #(
         .FEEDBACK_PATH("SIMPLE"),

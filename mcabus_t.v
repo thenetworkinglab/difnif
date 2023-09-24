@@ -235,7 +235,7 @@ module mcabus_t;
     endtask
 
         // Clock FIXME
-    always #20 clk = ~clk;
+    always #10 clk = ~clk;
 
     initial begin
         $dumpfile("sim.vcd");

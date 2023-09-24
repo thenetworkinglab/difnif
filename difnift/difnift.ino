@@ -325,6 +325,7 @@ void mainLoop() {
 
     // We have a waiting ATN command from the host.
     if (flags & _BV(FLAG_ATN_FULL)) {
+      setFlag(_BV(FLAG_BUSY));
       atn_cmd = portRead(REG_ATN);
       Serial.print("ATN recieved: ");
       Serial.println(atn_cmd, HEX);
@@ -357,6 +358,7 @@ void mainLoop() {
         case ATN_COMMAND:
           // Expect to receive command blocks
           setFlag(_BV(FLAG_BUSY));
+          Serial.println("Set busy");
           portRead(REG_CIFR); // Ensure interface is empty
           expect_cb = 1;
           cmd_count = 0;
@@ -381,7 +383,7 @@ void CIFRTestLoop()
     #if 1
     flags = portRead(REG_FLAGS);
     if (flags & _BV(FLAG_CIFR_FULL)) {
-      delay(200);
+      delay(50);
       d = portRead(REG_CIFR);
       if (d != d2) {
         if (d != d2 + 1) {

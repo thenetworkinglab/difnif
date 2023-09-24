@@ -117,42 +117,61 @@ module mcabus(
      ** Registers and handshaking interface **
     */
 
-    wire mca_op;
-    assign mca_op = la_mca_op & ~cmd_l;
+    // ATN register full
+// FIXME: which gets priority? Right now I have the ATN code written twice.
+// This sort of implies that the MCA bus transaction is long enough that the bit gets set, cleared, then set again.
+    wire flag_atn_set = la_mca_op & ~la_s0_w_l & (la_addr == REG_ATN);
+    reg [1:0] reg_atn_set;
 
-    // Done in a different clock domain
     always @ (posedge clk) begin
-        if (mca_op & ~la_s0_w_l & la_addr == REG_ATN) begin
-            flag_atn <= 1'b1;
-        end else begin
-            if (t_atn_read) begin
-                flag_atn <= 1'b0;
-            end
-        end
+        reg_atn_set = {reg_atn_set[0], flag_atn_set};
+    end
 
-        if (mca_op & ~la_s1_r_l & la_addr == REG_ISR) begin
-            flag_isr <= 1'b0;
-        end else begin
-            if (t_isr_write) begin
-                flag_isr <= 1'b1;
-            end
+    always @ (posedge clk) begin
+        if ((reg_atn_set == 2'b01) || t_atn_read) begin
+            flag_atn = t_atn_read ? 1'b0 : 1'b1;
         end
+    end
 
-        // FIXME: only trigger on a full 16 bit access
-        if (mca_op & ~la_s0_w_l & la_addr == REG_CIFR_L) begin
-            flag_ci_full <= 1'b1;
-        end else begin
-            if (t_cifr_read) begin
-                flag_ci_full <= 1'b0;
-            end
+    // Command Interface Register Full
+    wire flag_ci_full_set = la_mca_op & ~la_s0_w_l & (la_addr == REG_CIFR_L);
+    reg [1:0] reg_ci_full_set;
+
+    always @ (posedge clk) begin
+        reg_ci_full_set = {reg_ci_full_set[0], flag_ci_full_set};
+    end
+
+    always @ (posedge clk) begin
+        if ((reg_ci_full_set == 2'b01) || t_cifr_read) begin
+            flag_ci_full <= t_cifr_read ? 1'b0 : 1'b1;
         end
+    end
 
-        if (mca_op & ~la_s1_r_l & la_addr == REG_SIFR_L) begin
-            flag_si_full <= 1'b0;
-        end else begin
-            if (t_sifr_write) begin
-                flag_si_full <= 1'b1;
-            end
+    // ISR register full
+    wire flag_isr_clear = la_mca_op & ~la_s1_r_l & (la_addr == REG_ISR);
+    reg [1:0] reg_isr_clear;
+
+    always @ (posedge clk) begin
+        reg_isr_clear = {reg_isr_clear[0], flag_isr_clear};
+    end
+
+    always @ (posedge clk) begin
+        if ((reg_isr_clear == 2'b10) || t_isr_write) begin
+            flag_isr <= t_isr_write ? 1'b1 : 1'b0;
+        end
+    end
+
+    // Status Interface Register Full
+    wire flag_sifr_clear = la_mca_op & ~la_s1_r_l & (la_addr == REG_SIFR_L);
+    reg [1:0] reg_sifr_clear;
+
+    always @ (posedge clk) begin
+        reg_sifr_clear = {reg_sifr_clear[0], flag_sifr_clear};
+    end
+
+    always @ (posedge clk) begin
+        if ((reg_sifr_clear == 2'b10) || t_sifr_write) begin
+            flag_si_full <= t_sifr_write ? 1'b1 : 1'b0;
         end
     end
 
