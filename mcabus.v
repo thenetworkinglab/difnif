@@ -163,14 +163,17 @@ module mcabus(
     // Status Interface Register Full
     wire flag_sifr_clear = la_mca_op & ~la_s1_r_l & (la_addr == REG_SIFR_L);
     reg [1:0] reg_sifr_clear;
+    reg [1:0] reg_t_sifr_write;
 
     always @ (posedge clk) begin
         reg_sifr_clear = {reg_sifr_clear[0], flag_sifr_clear};
+        reg_t_sifr_write = {reg_t_sifr_write[0], t_sifr_write};
     end
-
+    // Clear register at end of MCA transaction
+    // Set register when Teensy latches new value
     always @ (posedge clk) begin
-        if ((reg_sifr_clear == 2'b10) || t_sifr_write) begin
-            flag_si_full <= t_sifr_write ? 1'b1 : 1'b0;
+        if ((reg_sifr_clear == 2'b10) || (reg_t_sifr_write == 2'b01)) begin
+            flag_si_full <= (reg_t_sifr_write == 2'b01) ? 1'b1 : 1'b0;
         end
     end
 
