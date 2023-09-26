@@ -161,14 +161,16 @@ module mcabus(
     // ISR register full
     wire flag_isr_clear = la_mca_op & ~la_s1_r_l & (la_addr == REG_ISR);
     reg [1:0] reg_isr_clear;
+    reg [1:0] reg_t_isr_write;
 
     always @ (posedge clk) begin
-        reg_isr_clear = {reg_isr_clear[0], flag_isr_clear};
+        reg_isr_clear <= {reg_isr_clear[0], flag_isr_clear};
+        reg_t_isr_write <= {reg_t_isr_write[0], t_isr_write};
     end
 
     always @ (posedge clk) begin
-        if ((reg_isr_clear == 2'b10) || t_isr_write) begin
-            flag_isr <= t_isr_write ? 1'b1 : 1'b0;
+        if ((reg_isr_clear == 2'b10) || (reg_t_isr_write == 2'b01)) begin
+            flag_isr <= (reg_t_isr_write == 2'b01) ? 1'b1 : 1'b0;
         end
     end
 

@@ -112,6 +112,7 @@ void setup() {
   Serial.println("Press 'C' for CIFR read loop test.");
   Serial.println("Press 'S' for SIFR write loop test.");
   Serial.println("Press 'A' for ATN read loop test.");
+  Serial.println("Press 'I' for ISR write loop test.");
   Serial.println("Press 's' to write Status Interface Reg.");
   Serial.println("Press 'G' to run the main loop.");
 }
@@ -383,19 +384,30 @@ void ATNTestLoop()
     flags = portRead(REG_FLAGS);
     if (flags & _BV(FLAG_ATN_FULL)) {
       d = portRead(REG_ATN);
-      if (d != d2) {
-        if (d != d2 + 1) {
-          Serial.print("Skipped from ");
-          Serial.print(d2, DEC);
-          Serial.print(" to ");
-          Serial.println(d, DEC);
-        }
-        d2 = d;
+      if (d != d2 + 1) {
+        Serial.print("Skipped from ");
+        Serial.print(d2, DEC);
+        Serial.print(" to ");
+        Serial.println(d, DEC);
       }
+      d2 = d;
       clearFlag(_BV(FLAG_BUSY));
     }
   }
   Serial.println("???");
+}
+
+void ISRTestLoop()
+{
+  uint16_t flags;
+  uint8_t d = 0;
+  while(1) {
+    flags = portRead(REG_FLAGS);
+    if (!(flags & _BV(FLAG_ISR_FULL))) { // Not full
+      portWrite(REG_ISR, d++);
+    }
+  }
+  
 }
 
 void SIFRTestLoop()
@@ -419,17 +431,16 @@ void CIFRTestLoop()
     #if 1
     flags = portRead(REG_FLAGS);
     if (flags & _BV(FLAG_CIFR_FULL)) {
-      delay(5);
+      //delay(5);
       d = portRead(REG_CIFR);
-      if (d != d2) {
-        if (d != d2 + 1) {
-          Serial.print("Skipped from ");
-          Serial.print(d2, DEC);
-          Serial.print(" to ");
-          Serial.println(d, DEC);
-        }
-        d2 = d;
+
+      if (d != d2 + 1) {
+        Serial.print("Skipped from ");
+        Serial.print(d2, DEC);
+        Serial.print(" to ");
+        Serial.println(d, DEC);
       }
+      d2 = d;
     }
     #else
     d = portRead(REG_CIFR);
@@ -510,6 +521,10 @@ void loop() {
     if (cmd == 'A') {
       Serial.println("ATN test loop.");
       ATNTestLoop();
+    }
+    if (cmd == 'I') {
+      Serial.println("ISR test loop.");
+      ISRTestLoop();
     }
     if (cmd == 's') {
       Serial.print("Enter data for SIFR: ");
