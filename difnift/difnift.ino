@@ -382,7 +382,6 @@ void ATNTestLoop()
   while (1) {
     flags = portRead(REG_FLAGS);
     if (flags & _BV(FLAG_ATN_FULL)) {
-      Serial.println("ATN.");
       d = portRead(REG_ATN);
       if (d != d2) {
         if (d != d2 + 1) {
@@ -393,9 +392,6 @@ void ATNTestLoop()
         }
         d2 = d;
       }
-      clearFlag(_BV(FLAG_BUSY));
-      clearFlag(_BV(FLAG_BUSY));
-      clearFlag(_BV(FLAG_BUSY));
       clearFlag(_BV(FLAG_BUSY));
     }
   }

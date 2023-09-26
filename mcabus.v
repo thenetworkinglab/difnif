@@ -122,21 +122,25 @@ module mcabus(
 // This sort of implies that the MCA bus transaction is long enough that the bit gets set, cleared, then set again.
     wire flag_atn_set = la_mca_op & ~la_s0_w_l & (la_addr == REG_ATN);
     reg [1:0] reg_atn_set;
+    reg [1:0] reg_t_atn_read;
+    reg [1:0] reg_t_busy_clear;
 
     always @ (posedge clk) begin
         reg_atn_set <= {reg_atn_set[0], flag_atn_set};
+        reg_t_atn_read <= {reg_t_atn_read[0], t_atn_read};
+        reg_t_busy_clear <= {reg_t_busy_clear[0], t_busy_clear};
     end
 
     always @ (posedge clk) begin
-        if ((reg_atn_set == 2'b01) || t_atn_read) begin
-            flag_atn <= t_atn_read ? 1'b0 : 1'b1;
+        if ((reg_atn_set == 2'b01) || (reg_t_atn_read == 2'b10)) begin
+            flag_atn <= (reg_t_atn_read == 2'b10) ? 1'b0 : 1'b1;
         end
     end
 
     // Busy flag: Set when ATN written to. Cleared by Teensy
     always @ (posedge clk) begin
-        if ((reg_atn_set == 2'b01) || t_busy_clear) begin
-            flag_busy <= t_busy_clear? 1'b0 : 1'b1;
+        if ((reg_atn_set == 2'b01) || (reg_t_busy_clear == 2'b10)) begin
+            flag_busy <= (reg_t_busy_clear == 2'b10) ? 1'b0 : 1'b1;
         end
     end
 

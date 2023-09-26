@@ -73,7 +73,7 @@ module mcabus_t;
     reg t_sifr_write;
 
     reg t_cmd_in_progress;
-    reg t_busy;
+    reg t_busy_clear;
 
     // Instantiate the Unit Under Test (UUT)
     mcabus uut (
@@ -112,7 +112,7 @@ module mcabus_t;
         .t_sifr_out(t_sifr_out),
         .t_sifr_write(t_sifr_write),
         .t_cmd_in_progress(t_cmd_in_progress),
-        .t_busy(t_busy)
+        .t_busy_clear(t_busy_clear)
     );
 
     // DBA-ESDI address decode
@@ -265,7 +265,7 @@ module mcabus_t;
         t_sifr_out = 16'H00;
         t_sifr_write = 0;
         t_cmd_in_progress = 0;
-        t_busy = 0;
+        t_busy_clear = 0;
 
         // Wait 100 ns for global reset to finish
         #100;
