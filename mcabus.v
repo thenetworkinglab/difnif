@@ -147,14 +147,16 @@ module mcabus(
     // Command Interface Register Full
     wire flag_ci_full_set = la_mca_op & ~la_s0_w_l & (la_addr == REG_CIFR_L);
     reg [1:0] reg_ci_full_set;
+    reg [1:0] reg_t_cifr_read;
 
     always @ (posedge clk) begin
         reg_ci_full_set <= {reg_ci_full_set[0], flag_ci_full_set};
+        reg_t_cifr_read <= {reg_t_cifr_read[0], t_cifr_read};
     end
 
     always @ (posedge clk) begin
-        if ((reg_ci_full_set == 2'b01) || t_cifr_read) begin
-            flag_ci_full <= t_cifr_read ? 1'b0 : 1'b1;
+        if ((reg_ci_full_set == 2'b01) || (reg_t_cifr_read == 2'b10)) begin
+            flag_ci_full <= (reg_t_cifr_read == 2'b10) ? 1'b0 : 1'b1;
         end
     end
 
