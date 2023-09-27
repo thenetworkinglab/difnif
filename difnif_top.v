@@ -84,6 +84,12 @@ module difnif_top(
     wire t_sifr_full;
     wire t_sifr_write;
 
+    wire [15:0] t_dreg_out;
+    wire [15:0] t_dreg_in;
+    wire t_treq_set;
+    wire t_treq;
+    wire t_treq_16;
+
     wire t_hard_reset;
     wire t_cmd_in_progress;
     wire t_busy_clear;
@@ -134,7 +140,12 @@ module difnif_top(
         .t_sifr_write(t_sifr_write),
         .t_hard_reset(t_hard_reset),
         .t_cmd_in_progress(t_cmd_in_progress),
-        .t_busy_clear(t_busy_clear)
+        .t_busy_clear(t_busy_clear),
+        .t_dreg_out(t_dreg_out),
+        .t_dreg_in(t_dreg_in),
+        .t_treq_set(t_treq_set),
+        .t_treq(t_treq),
+        .t_treq_16(t_treq_16)
     );
 
     teensy tn1 (
@@ -161,7 +172,12 @@ module difnif_top(
         .t_sifr_write(t_sifr_write),
         .t_hard_reset(t_hard_reset),
         .t_cmd_in_progress(t_cmd_in_progress),
-        .t_busy_clear(t_busy_clear)
+        .t_busy_clear(t_busy_clear),
+        .t_dreg_out(t_dreg_out),
+        .t_dreg_in(t_dreg_in),
+        .t_treq_set(t_treq_set),
+        .t_treq(t_treq),
+        .t_treq_16(t_treq_16)
     );
     // 50MHz
     `ifdef SYNTHESIS

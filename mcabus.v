@@ -60,6 +60,12 @@ module mcabus(
     output t_sifr_full,      // So Teensy can tell when host reads it
     input t_sifr_write,      // So we can set flag when Teensy writes it
 
+    output [15:0] t_dreg_out, // DREG data to Teensy
+    input [15:0] t_dreg_in,   // DREG data from Teensy
+    input t_treq_set,         // Set by Teensy (flag bit)
+    output t_treq,            // So teensy can monitor flag status
+    output t_treq_16,         // Set by MCA bus transfer to indicate 16-bit
+
     // Flags
     output t_hard_reset,
     input t_cmd_in_progress,
@@ -96,9 +102,10 @@ module mcabus(
 
     assign t_atn = reg_atn;
     assign t_cifr = reg_cifr;
+    assign t_dreg_out = reg_dreg_write;
 
-    // FIXME: data register should be 16 bit (and do data steering)
-    reg [7:0] reg_dreg = 8'h00;
+    // Data register (MCA bus write direction only)
+    reg [15:0] reg_dreg_write = 16'h0000;
 
     // Flags
     reg flag_atn = 1'b0;
@@ -106,20 +113,22 @@ module mcabus(
     reg flag_ci_full = 1'b0;
     reg flag_si_full = 1'b0;
     reg flag_isr = 1'b0;
+    reg flag_treq = 1'b0;
+    reg flag_treq_16 = 1'b0;
 
     // Outputs to Teensy
     assign t_atn_full = flag_atn;
     assign t_isr_full = flag_isr;
     assign t_cifr_full = flag_ci_full;
     assign t_sifr_full = flag_si_full;
+    assign t_treq_16 = flag_treq_16;
+    assign t_treq = flag_treq;
 
     /*
      ** Registers and handshaking interface **
     */
 
     // ATN register full
-// FIXME: which gets priority? Right now I have the ATN code written twice.
-// This sort of implies that the MCA bus transaction is long enough that the bit gets set, cleared, then set again.
     wire flag_atn_set = la_mca_op & ~la_s0_w_l & (la_addr == REG_ATN);
     reg [1:0] reg_atn_set;
     reg [1:0] reg_t_atn_read;
@@ -193,6 +202,24 @@ module mcabus(
         end
     end
 
+    // Data register drequest
+    wire treq_clear = la_mca_op & (~la_s1_r_l || ~la_s0_w_l) & (la_addr == REG_DREG);
+    reg [1:0] reg_treq_clear;
+    reg [1:0] reg_treq_set;
+    // We can tell if it is an 8-bit or 16-bit transfer if la_sbhe_l is low
+    always @ (posedge clk) begin
+        reg_treq_clear <= {reg_treq_clear[0], treq_clear};
+        reg_treq_set <= {reg_treq_set[0], t_treq_set};
+    end
+    always @ (posedge clk) begin
+        if ((reg_treq_clear == 2'b10) || (reg_treq_set == 2'b10)) begin
+            flag_treq <= (reg_treq_set == 2'b10) ? 1'b1 : 1'b0;
+        end
+        if (reg_treq_clear == 2'b01) begin
+            flag_treq_16 <= ~la_sbhe_l;
+        end
+    end
+
     /*
      ** Microchannel status registers **
     */
@@ -207,7 +234,7 @@ module mcabus(
 
     // Basic Status Register
     assign reg_bsr = {control_dma_enable, flag_isr, t_cmd_in_progress, flag_busy,
-                      flag_si_full, flag_ci_full, 1'b0, flag_isr & control_int_enable};
+                      flag_si_full, flag_ci_full, flag_treq, flag_isr & control_int_enable};
 
     // Basic Control Register
     assign t_hard_reset = reg_bcr[7];      // Setting this bit resets the MCU
@@ -228,9 +255,14 @@ module mcabus(
 
     // Data bus steering
     // MCA uses signals a0, cd_ds16_l, sbhe_l
-    // Drive cd_ds16_l low only for register 0/1 (SIFR/CIFR). This is purely combinational.
+    // Drive cd_ds16_l for register 0/1 (SIFR/CIFR). Also for register 4 (low byte of DREG).
+    // Accessing the high byte of the DREG in 8-bit mode will not work (the Teensy transfers
+    // data either 8 bits or 16 bits at a time depending on SBHE)
+    // This is purely combinational.
     // Note that POS registers can be 8 bit only, so that's nice.
-    assign cd_ds16_l = ~(cd_setup_l & addressed & bus_a[3:1] == 3'b000);
+    assign cd_ds16_l = ~(cd_setup_l & addressed &
+                         ((bus_a[3:1] == 3'b000) |
+                          (bus_a[3:0] == 4'b0100)) );
 
     // Logic latched on falling edge of CMD
     // Also includes data being written to us.
@@ -265,7 +297,8 @@ module mcabus(
                 REG_CIFR_H  : reg_cifr <= sbhe_l ? reg_cifr : {bus_d[15:8], reg_cifr[7:0]};
                 REG_BCR     : reg_bcr  <= bus_d[7:0];
                 REG_ATN     : reg_atn  <= bus_d[7:0];
-                REG_DREG    : reg_dreg <= bus_d[7:0];
+                REG_DREG    : reg_dreg_write <= sbhe_l ? {reg_dreg_write[15:8], bus_d[7:0]} : bus_d;
+                // Doesn't make sense to access the high byte alone of REG_DREG
             endcase
         end
 
@@ -297,7 +330,7 @@ module mcabus(
                 REG_SIFR_H      : data_out <= la_sbhe_l ? 16'hFFFF : {t_sifr_out[15:8], 8'hFF};
                 REG_BSR         : data_out <= reg_bsr;
                 REG_ISR         : data_out <= t_isr_out;
-                REG_DREG        : data_out <= reg_dreg;
+                REG_DREG        : data_out <= la_sbhe_l ? {8'hFF, t_dreg_in[7:0]} : t_dreg_in;
                 default         : data_out <= 16'hFFFF;
             endcase
         end

@@ -75,6 +75,12 @@ module mcabus_t;
     reg t_cmd_in_progress;
     reg t_busy_clear;
 
+    wire [15:0] t_dreg_out;
+    reg [15:0] t_dreg_in;
+    reg t_treq_set;
+    wire t_treq;
+    wire t_treq_16;
+
     // Instantiate the Unit Under Test (UUT)
     mcabus uut (
         .clk(clk),
@@ -112,7 +118,13 @@ module mcabus_t;
         .t_sifr_out(t_sifr_out),
         .t_sifr_write(t_sifr_write),
         .t_cmd_in_progress(t_cmd_in_progress),
-        .t_busy_clear(t_busy_clear)
+        .t_busy_clear(t_busy_clear),
+
+        .t_dreg_out(t_dreg_out),
+        .t_dreg_in(t_dreg_in),
+        .t_treq_set(t_treq_set),
+        .t_treq(t_treq),
+        .t_treq_16(t_treq_16)
     );
 
     // DBA-ESDI address decode
@@ -266,14 +278,17 @@ module mcabus_t;
         t_sifr_write = 0;
         t_cmd_in_progress = 0;
         t_busy_clear = 0;
+        t_dreg_in = 16'H00;
+        t_treq_set = 0;
 
         // Wait 100 ns for global reset to finish
         #100;
         chreset = 0;
         #16;
         write_cycle(16'h0000, 16'h0000, 0, 0); // fixme
-//        write_cycle(16'h3510, 16'hCCAA, 0, 0); // write CCAA
-//        write_cycle(16'h3511, 16'hBBDD, 0, 1);   // write upper byte to BB
+        write_cycle(16'h3514, 16'hCCAA, 0, 0);
+        write_cycle(16'h0000, 16'h0000, 0, 0);
+        write_cycle(16'h3514, 16'hBBDD, 0, 1);
         #100;
         read_cycle(16'h3512, 0, 1);
         write_cycle(16'h3513, 8'hCC, 0, 1); // Write to the ATN reg

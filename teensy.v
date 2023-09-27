@@ -42,7 +42,14 @@ module teensy(
     // Flags
     input t_hard_reset,
     output t_cmd_in_progress,
-    output t_busy_clear
+    output t_busy_clear,
+
+    // Data register
+    input [15:0] t_dreg_out,
+    output [15:0] t_dreg_in,
+    output t_treq_set,
+    input t_treq,
+    input t_treq_16
     );
 
     localparam REG_TEST = 4'd0;
@@ -51,6 +58,7 @@ module teensy(
     localparam REG_ISR = 4'd3;
     localparam REG_CIFR = 4'd4;
     localparam REG_SIFR = 4'd5;
+    localparam REG_DREG = 4'd6;
 
     wire [15:0] tn_d_out;
 
@@ -61,9 +69,11 @@ module teensy(
 
     reg [7:0] t_isr;
     reg [15:0] t_sifr;
+    reg [15:0] t_dreg;
 
     assign t_isr_out = t_isr;
     assign t_sifr_out = t_sifr;
+    assign t_dreg_in = t_dreg;
 
     // Interrupt output
     assign tn_int = t_atn_full; // TODO: make this more complex
@@ -71,7 +81,7 @@ module teensy(
     wire t_busy_bit;
 
     // Flag register
-    assign flags_out = {8'H0,
+    assign flags_out = {6'h0, t_treq_16, t_treq,
                         1'b1, t_cmd_in_progress, // Clear busy is active low
                         1'b0, t_hard_reset,
                         t_sifr_full, t_cifr_full,
@@ -80,8 +90,11 @@ module teensy(
     // These bits in the flag reg are r/w
     assign t_cmd_in_progress = flags_in[6];
 
-    // Clears the busy flag when bit is written to a '1'
+    // Clears the busy flag when bit is written to a '0'
     assign t_busy_clear = tn_wr & (tn_addr == REG_FLAGS) & ~tn_d[7];
+
+    // Sets the transfer request flag when bit is written to a '1'
+    assign t_treq_set = tn_wr & (tn_addr == REG_FLAGS) & tn_d[5];
 
     // Data outputs
     assign tn_d = tn_rd ? tn_d_out : 16'bZ;
@@ -93,6 +106,7 @@ module teensy(
             REG_ISR    : tn_d_out <= {8'H0, t_isr};
             REG_SIFR   : tn_d_out <= t_sifr;
             REG_CIFR   : tn_d_out <= t_cifr;
+            REG_DREG   : tn_d_out <= t_dreg_out;
             default    : tn_d_out <= 16'H0;
         endcase
     end
@@ -104,6 +118,7 @@ module teensy(
             REG_FLAGS  : flags_in <= tn_d;
             REG_ISR    : t_isr <= tn_d;
             REG_SIFR   : t_sifr <= tn_d;
+            REG_DREG   : t_dreg <= tn_d;
         endcase
     end
 

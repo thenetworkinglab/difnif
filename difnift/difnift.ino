@@ -13,14 +13,18 @@
 #define REG_ISR 3
 #define REG_CIFR 4
 #define REG_SIFR 5
+#define REG_DREG 6
 
 #define FLAG_ATN_FULL 0
 #define FLAG_ISR_FULL 1
 #define FLAG_CIFR_FULL 2
 #define FLAG_SIFR_FULL 3
 #define FLAG_HARD_RESET 4
+#define FLAG_TREQ_SET 5
 #define FLAG_CMD_PROG 6
 #define FLAG_BUSY 7
+#define FLAG_TREQ_STATE 8
+#define FLAG_TRANSFER_16 9
 
 #define PEND_INT 1
 #define PEND_INT_RESET 2
@@ -113,6 +117,8 @@ void setup() {
   Serial.println("Press 'S' for SIFR write loop test.");
   Serial.println("Press 'A' for ATN read loop test.");
   Serial.println("Press 'I' for ISR write loop test.");
+  Serial.println("Press '1' for Teensy-to-host loop test.");
+  Serial.println("Press '2' for host-to-Teensy loop test.");
   Serial.println("Press 's' to write Status Interface Reg.");
   Serial.println("Press 'G' to run the main loop.");
 }
@@ -375,7 +381,6 @@ void mainLoop() {
 void ATNTestLoop()
 {
   uint16_t flags;
-  uint8_t c = 0;
   uint8_t d = 0;
   uint8_t d2 = 0;;
   Serial.println("Begin.");
@@ -421,12 +426,44 @@ void SIFRTestLoop()
   }
 }
 
+void DREGToHostTestLoop()
+{
+  uint16_t flags, d = 0;
+  while(1) {
+    flags = portRead(REG_FLAGS);
+    if (!(flags & _BV(FLAG_TREQ_STATE))) { // Nothing in data buffer
+      portWrite(REG_DREG, d++);
+      setFlag(_BV(FLAG_TREQ_SET)); // Tell host there is data
+    }
+  }
+}
+
+void DREGFromHostTestLoop()
+{
+  uint16_t flags, d, d2 = 0;
+  setFlag(_BV(FLAG_TREQ_SET)); // Tell host (initially) to send us data
+  while(1) {
+    flags = portRead(REG_FLAGS);
+    if (!(flags & _BV(FLAG_TREQ_STATE))) { // Host sent us data
+      d = portRead(REG_DREG);
+      if (d != d2 + 1) {
+        Serial.print("Skipped from ");
+        Serial.print(d2, DEC);
+        Serial.print(" to ");
+        Serial.println(d, DEC);
+      }
+      d2 = d;
+      setFlag(_BV(FLAG_TREQ_SET)); // Ready for more data
+    }
+  }
+}
+
 void CIFRTestLoop()
 {
   uint16_t flags;
   uint16_t d = 0;
   uint16_t d2 = 0;
-  uint8_t c = 0;
+  
   while(1) {
     #if 1
     flags = portRead(REG_FLAGS);
@@ -491,7 +528,7 @@ void loop() {
     if (cmd == 'f') {
       d = portRead(REG_FLAGS);
       Serial.print("Flag reg: ");
-      Serial.println(d & 0xFF, HEX);
+      Serial.println(d, HEX);
     }
     if (cmd == 'a') {
       i = portRead(REG_ATN);
@@ -525,6 +562,14 @@ void loop() {
     if (cmd == 'I') {
       Serial.println("ISR test loop.");
       ISRTestLoop();
+    }
+    if (cmd == '1') {
+      Serial.println("Teensy -> DREG -> host");
+      DREGToHostTestLoop();
+    }
+    if (cmd == '2') {
+      Serial.println("Teensy <- DREG <- host");
+      DREGFromHostTestLoop();
     }
     if (cmd == 's') {
       Serial.print("Enter data for SIFR: ");
