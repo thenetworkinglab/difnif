@@ -44,6 +44,8 @@
 #define ISR_RESET_FAIL 0xFA
 #define ISR_ATN_ERROR 0x0F
 
+#define ISR_DATA_XFER_RDY 0x0B
+
 const int portpin[] = {27, 26, 39, 38,
                         21, 20, 23, 22,
                         16, 17, 41, 40,
@@ -59,6 +61,15 @@ uint8_t cmd_count = 0;
 
 uint8_t int_pending = 0;
 uint8_t expect_cb = 0;
+
+uint8_t transfer_buffer[512];
+uint16_t transfer_count = 0;
+uint16_t transfer_index = 0;
+
+#define TS_IDLE 0
+#define TS_READ 1
+#define TS_WRITE 2
+uint8_t transfer_state = TS_IDLE;
 
 void setPortMode(uint8_t mode)
 {
@@ -230,6 +241,10 @@ void esdiReset()
   clearFlag(_BV(FLAG_CMD_PROG)); // Clear any commands in progress
   portRead(REG_CIFR); // Make sure command interface register is cleared
   clearFlag(_BV(FLAG_BUSY));
+  transfer_state = TS_IDLE;
+  //TODO: need to implement a way to clear the transfer request flag
+  expect_cb = 0;
+  
   portWrite(REG_ISR, ISR_RESET_OK); // Success. Failure is 0xFA
   // Load status data block
   startStatusBlock(1, DEV_CONTROLLER, 0); // Page 61
@@ -241,6 +256,7 @@ void esdiReset()
 // Page 24
 void processCmdBlock()
 {
+  uint16_t i;
   // TODO
   // Fill in the default Command Complete Status Block
   startStatusBlock(7, (cmd_block[0] >> 5) & 0x7, cmd_block[0] & 0x1F);
@@ -288,7 +304,59 @@ void processCmdBlock()
     clearFlag(_BV(FLAG_CMD_PROG));
     pendInterrupt(PEND_INT);
   }
-  
+
+  if ((cmd_block[0] & 0xC0FF) == (0x9 | 0xE0)) { // Get configs (controller)
+    startStatusBlock(6, (cmd_block[0] >> 5) & 0x7, cmd_block[0] & 0x1F);
+    status_block[1] = 0x0000; // Reserved
+    status_block[2] = 0x0001; // Firmware revision code, low word
+    status_block[3] = 0x3101; // buf_size1, revision code high byte, buffer size code (256 words)
+    status_block[4] = 0x0000; // buf_size2
+    status_block[5] = 0x0000; // Reserved
+    loadStatusBlock();
+    portWrite(REG_ISR, 0xE1); // Command complete for controller
+    clearFlag(_BV(FLAG_CMD_PROG));
+    pendInterrupt(PEND_INT);
+  }
+
+  if ((cmd_block[0] & 0xC0FF) == 0x4001) { // Read data (sector!)
+    Serial.println("Preparing sector.");
+    status_max = 0;
+    for (i = 0; i < 512; i++) {
+      transfer_buffer[i] = i & 0xFF;
+    }
+    portWrite(REG_ISR, ISR_DATA_XFER_RDY | (DEV_DRIVE << 5));
+    transfer_state = TS_READ;
+    transfer_count = cmd_block[1] * 512;
+    transfer_index = 0;
+    Serial.print("ReadData: ");
+    Serial.println(transfer_count, DEC);
+    // Do not pend interrupt since we do not expect EOI for this
+  }
+
+  if ((cmd_block[0] & 0xC0FF) == (0x10 | 0xE0)) { // Write attachment buffer
+    // cmd_block[1] = the block count, same for all data transfer commands
+    status_max = 0; // No status block
+    portWrite(REG_ISR, ISR_DATA_XFER_RDY | (DEV_CONTROLLER << 5));
+    setFlag(_BV(FLAG_TREQ_SET)); // Tell host (initially) to send us data
+    transfer_state = TS_WRITE;
+    transfer_count = cmd_block[1] * 512;
+    transfer_index = 0;
+    Serial.print("WriteAttachBuffer: ");
+    Serial.println(transfer_count, DEC);
+    // Do not pend interrupt since we do not expect EOI for this
+  }
+
+  if ((cmd_block[0] & 0xC0FF) == (0x11 | 0xE0)) { // Read attachment buffer
+    status_max = 0;
+    portWrite(REG_ISR, ISR_DATA_XFER_RDY | (DEV_CONTROLLER << 5));
+    transfer_state = TS_READ;
+    transfer_count = cmd_block[1] * 512;
+    transfer_index = 0;
+    Serial.print("ReadAttachBuffer: ");
+    Serial.println(transfer_count, DEC);
+    // Do not pend interrupt since we do not expect EOI for this
+  }
+
 }
 
 // Issues an attention error
@@ -303,6 +371,7 @@ void AtnError(uint8_t atn_cmd)
 void mainLoop() {
   uint16_t flags;
   uint8_t atn_cmd;
+  uint16_t d;
   while (1) {
     flags = portRead(REG_FLAGS);
 
@@ -310,6 +379,64 @@ void mainLoop() {
     // push out
     if (status_max > 0 && !(flags & _BV(FLAG_SIFR_FULL))) {
       loadStatusBlock();
+    }
+
+    if (transfer_state == TS_READ) {
+      if (!(portRead(REG_FLAGS) & _BV(FLAG_TREQ_STATE))) { // Nothing in data buffer
+        if (transfer_index < transfer_count) {
+          Serial.print("being read byte: ");
+          Serial.println(transfer_index, HEX);
+          d = transfer_buffer[transfer_index] | (transfer_buffer[transfer_index + 1] << 8);
+          transfer_index += 2;
+          portWrite(REG_DREG, d);
+          setFlag(_BV(FLAG_TREQ_SET)); // Tell host there is data
+        } else {
+          Serial.println("Done with read data transfer.");
+          transfer_state = TS_IDLE;
+          startStatusBlock(7, (cmd_block[0] >> 5) & 0x7, cmd_block[0] & 0x1F);
+          status_block[1] = 0x0100; // command status, command error code
+          status_block[2] = 0x0000; // device status, device error code (was 1900)
+          status_block[3] = 0x0000; // por error code, test error code
+          status_block[4] = 0x0000; // diagnostic command (probably from last Run Diagnostics command)
+          status_block[5] = 0x0000; // Reserved
+          status_block[6] = 0x0000; // Reserved
+
+          loadStatusBlock();
+          portWrite(REG_ISR, (cmd_block[0] & 0xE) | 0x1); // Command complete
+          clearFlag(_BV(FLAG_CMD_PROG));
+          pendInterrupt(PEND_INT);
+        }
+      }
+
+    }
+
+    if (transfer_state == TS_WRITE) {
+      if (!(portRead(REG_FLAGS) & _BV(FLAG_TREQ_STATE))) { // Host sent us data
+        Serial.print("being written byte: ");
+        Serial.println(transfer_index, HEX);
+        // FIXME: handle 8 or 16 bit transfers
+        d = portRead(REG_DREG);
+        transfer_buffer[transfer_index++] = d & 0xFF;
+        transfer_buffer[transfer_index++] = d >> 8;
+        if (transfer_index < transfer_count) {
+          setFlag(_BV(FLAG_TREQ_SET)); // Ready for more data
+        } else {
+          Serial.println("Done with write data transfer.");
+          transfer_state = TS_IDLE;
+          startStatusBlock(7, (cmd_block[0] >> 5) & 0x7, cmd_block[0] & 0x1F);
+          status_block[1] = 0x0100; // command status, command error code
+          status_block[2] = 0x0000; // device status, device error code (was 1900)
+          status_block[3] = 0x0000; // por error code, test error code
+          status_block[4] = 0x0000; // diagnostic command (probably from last Run Diagnostics command)
+          status_block[5] = 0x0000; // Reserved
+          status_block[6] = 0x0000; // Reserved
+
+          loadStatusBlock();
+          portWrite(REG_ISR, (cmd_block[0] & 0xE) | 0x1); // Command complete
+          clearFlag(_BV(FLAG_CMD_PROG)); // FIXME, should be cleared (in all commands?) when host sends EOI.
+          pendInterrupt(PEND_INT);
+        }
+      }
     }
 
     if (expect_cb && (flags & _BV(FLAG_CIFR_FULL))) {
@@ -320,8 +447,9 @@ void mainLoop() {
       Serial.println(cmd_block[cmd_count], HEX);
       cmd_count++;
       if ((cmd_count > 1) && (cmd_count == cmdBlockLen())) {
-        // We've gotten all the blocks
+        // Pg 14: [busy] is cleared upon completion of the command block transfer...
         clearFlag(_BV(FLAG_BUSY));
+        // Pg 14: This bit is set when all words of the command block have been received.
         setFlag(_BV(FLAG_CMD_PROG));
         processCmdBlock();
         expect_cb = 0;
@@ -451,6 +579,7 @@ void DREGFromHostTestLoop()
         Serial.print(d2, DEC);
         Serial.print(" to ");
         Serial.println(d, DEC);
+        Serial.println(flags, HEX);
       }
       d2 = d;
       setFlag(_BV(FLAG_TREQ_SET)); // Ready for more data
@@ -583,16 +712,4 @@ void loop() {
       mainLoop();
     }
   }
-
-//  for (i = 0; i <= 0xFFFF; i++) {
-//    portWrite(REG_TEST, i);
-//    d = portRead(REG_TEST);
-    //Serial.print(d >> 12, HEX);
-    //Serial.print((d >> 8) & 0xF, HEX);
-    //Serial.print((d >> 4) & 0xF, HEX);
-    //Serial.println(d & 0xF, HEX);
-//    if (i == 0) Serial.println("Looped back");
-//    if (d != i) Serial.println("Mismatch");
-//  }
-
 }
