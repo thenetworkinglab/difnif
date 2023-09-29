@@ -70,7 +70,9 @@ module mcabus(
     output t_hard_reset,
     input t_cmd_in_progress,
     input t_busy_clear,
-    input t_clear_all         // Clears all flag bits
+    input t_clear_all,        // Clears all flag bits
+
+    output [39:0] t_pos_regs
     );
 
     // Writable registers
@@ -253,6 +255,16 @@ module mcabus(
      ** Microchannel Interface Implementation below **
     */
 
+    // POS registers. FIXME: card ought to be disabled.
+    wire [15:0] reg_pos01 = 16'hDF9F;
+    reg [7:0] reg_pos2 = 8'b0_1_1110_0_1; // Default to card enabled, 3510, arb e, fairness on
+    reg [7:0] reg_pos3 = 8'b0_0_00_0000;
+    reg [7:0] reg_pos4 = 8'b00000_00_0;
+
+    wire card_enable = reg_pos2[0]; // FIXME: wire up card enable signal
+
+    assign t_pos_regs = {reg_pos4, reg_pos3, reg_pos2, reg_pos01};
+
     // Only support IO ports. Only respond when not in reset.
     wire addressed;
     assign addressed = ~addr_sel_l & ~m_io_l & ~chreset;
@@ -295,15 +307,23 @@ module mcabus(
         // Data written to us on this edge
         // SBHE: useful really only when the host writes to us. Only write to the upper byte
         // when this is asserted low.
-        if (~s0_w_l & addressed & cd_setup_l) begin
-            case (bus_a)
-                REG_CIFR_L  : reg_cifr <= sbhe_l ? {reg_cifr[15:8], bus_d[7:0]} : bus_d;
-                REG_CIFR_H  : reg_cifr <= sbhe_l ? reg_cifr : {bus_d[15:8], reg_cifr[7:0]};
-                REG_BCR     : reg_bcr  <= bus_d[7:0];
-                REG_ATN     : reg_atn  <= bus_d[7:0];
-                REG_DREG    : reg_dreg_write <= sbhe_l ? {reg_dreg_write[15:8], bus_d[7:0]} : bus_d;
-                // Doesn't make sense to access the high byte alone of REG_DREG
-            endcase
+        if (~s0_w_l & addressed) begin
+            if (cd_setup_l) begin
+                case (bus_a)
+                    REG_CIFR_L  : reg_cifr <= sbhe_l ? {reg_cifr[15:8], bus_d[7:0]} : bus_d;
+                    REG_CIFR_H  : reg_cifr <= sbhe_l ? reg_cifr : {bus_d[15:8], reg_cifr[7:0]};
+                    REG_BCR     : reg_bcr  <= bus_d[7:0];
+                    REG_ATN     : reg_atn  <= bus_d[7:0];
+                    REG_DREG    : reg_dreg_write <= sbhe_l ? {reg_dreg_write[15:8], bus_d[7:0]} : bus_d;
+                    // Doesn't make sense to access the high byte alone of REG_DREG
+                endcase
+            end else begin
+                case (bus_a)
+                    4'h2       : reg_pos2 <= bus_d[7:0];
+                    4'h3       : reg_pos3 <= bus_d[7:0];
+                    4'h4       : reg_pos4 <= bus_d[7:0];
+                endcase
+            end
         end
 
         // TODO: Implement writeable POS registers
@@ -319,8 +339,11 @@ module mcabus(
     always @ (*) begin
         if (la_cd_setup_l == 1'b0) begin
             case (la_addr)
-                3'b000    : data_out <= 16'hDF9F;
-                // TODO: Add remaining POS registers
+                4'h0    : data_out <= {8'hFF, reg_pos01[7:0]};
+                4'h1    : data_out <= {8'hFF, reg_pos01[15:8]};
+                4'h2    : data_out <= {8'hFF, reg_pos2};
+                4'h3    : data_out <= {8'hFF, reg_pos3};
+                4'h4    : data_out <= {8'hFF, reg_pos4};
                 default     : data_out <= 16'hFFFF;
             endcase
         end else begin

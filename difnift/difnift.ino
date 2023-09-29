@@ -14,6 +14,9 @@
 #define REG_CIFR 4
 #define REG_SIFR 5
 #define REG_DREG 6
+#define REG_POS01 7
+#define REG_POS23 8
+#define REG_POS4 9
 
 #define FLAG_ATN_FULL 0
 #define FLAG_ISR_FULL 1
@@ -280,6 +283,8 @@ void processCmdBlock()
   // After command, fill in the status block
   // then trigger a command complete interrupt
 
+  
+
   // 01 000010 000 00101
   if ((cmd_block[0] & 0xC0FF) == 0x4005) { // Seek
     // Do stuff?
@@ -320,6 +325,21 @@ void processCmdBlock()
     status_block[5] = 0x0000; // Reserved
     loadStatusBlock();
     portWrite(REG_ISR, 0xE1); // Command complete for controller
+    clearFlag(_BV(FLAG_CMD_PROG));
+    pendInterrupt(PEND_INT);
+  }
+
+  if ((cmd_block[0] & 0xC0FF) == (0xA | 0xE0)) { // Get POS information
+    startStatusBlock(5, (cmd_block[0] >> 5) & 0x7, cmd_block[0] & 0x1F);
+    i = portRead(REG_POS01);
+    status_block[1] = (i >> 8) | (i << 8);
+    i = portRead(REG_POS23);
+    status_block[2] = (i >> 8) | (i << 8);
+    i = portRead(REG_POS4);
+    status_block[3] = (i << 8) | 0xFF;
+    status_block[4] = 0xFFFF;
+    loadStatusBlock();
+    portWrite(REG_ISR, 0xE1);
     clearFlag(_BV(FLAG_CMD_PROG));
     pendInterrupt(PEND_INT);
   }
@@ -477,10 +497,12 @@ void mainLoop() {
           if (int_pending == PEND_INT_RESET) {
             int_pending = 0;
             // Reset interrupt clears the busy flag
+            clearFlag(_BV(FLAG_CMD_PROG));
             clearFlag(_BV(FLAG_BUSY));
             Serial.println("Cleared pending reset int.");
           } else if (int_pending != 0) {
             int_pending = 0;
+            clearFlag(_BV(FLAG_CMD_PROG));
             clearFlag(_BV(FLAG_BUSY));
             Serial.println("Cleared some other int.");
           }

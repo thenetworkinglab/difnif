@@ -50,7 +50,9 @@ module teensy(
     output [15:0] t_dreg_in,
     output t_treq_set,
     input t_treq,
-    input t_treq_16
+    input t_treq_16,
+
+    input [39:0] t_pos_regs
     );
 
     localparam REG_TEST = 4'd0;
@@ -60,6 +62,9 @@ module teensy(
     localparam REG_CIFR = 4'd4;
     localparam REG_SIFR = 4'd5;
     localparam REG_DREG = 4'd6;
+    localparam REG_POS01 = 4'd7;
+    localparam REG_POS23 = 4'd8;
+    localparam REG_POS4 = 4'd9;
 
     wire [15:0] tn_d_out;
 
@@ -111,6 +116,9 @@ module teensy(
             REG_SIFR   : tn_d_out <= t_sifr;
             REG_CIFR   : tn_d_out <= t_cifr;
             REG_DREG   : tn_d_out <= t_dreg_out;
+            REG_POS01  : tn_d_out <= t_pos_regs[15:0];
+            REG_POS23  : tn_d_out <= t_pos_regs[31:16];
+            REG_POS4   : tn_d_out <= t_pos_regs[39:32];
             default    : tn_d_out <= 16'H0;
         endcase
     end
