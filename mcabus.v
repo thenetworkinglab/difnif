@@ -69,7 +69,8 @@ module mcabus(
     // Flags
     output t_hard_reset,
     input t_cmd_in_progress,
-    input t_busy_clear
+    input t_busy_clear,
+    input t_clear_all         // Clears all flag bits
     );
 
     // Writable registers
@@ -96,6 +97,9 @@ module mcabus(
     // Registers
     reg [15:0] reg_cifr = 16'h0000;
     reg [7:0] reg_atn = 8'h00;
+
+    // Flag clear signal
+    wire clear_all = t_clear_all | t_hard_reset;
 
     // Interrupt request line
     assign irq14_l = !(flag_isr & control_int_enable);
@@ -141,15 +145,15 @@ module mcabus(
     end
 
     always @ (posedge clk) begin
-        if ((reg_atn_set == 2'b01) || (reg_t_atn_read == 2'b10)) begin
-            flag_atn <= (reg_t_atn_read == 2'b10) ? 1'b0 : 1'b1;
+        if ((reg_atn_set == 2'b01) || (reg_t_atn_read == 2'b10) || clear_all) begin
+            flag_atn <= clear_all ? 1'b0 : ((reg_t_atn_read == 2'b10) ? 1'b0 : 1'b1);
         end
     end
 
     // Busy flag: Set when ATN written to. Cleared by Teensy
     always @ (posedge clk) begin
-        if ((reg_atn_set == 2'b01) || (reg_t_busy_clear == 2'b10)) begin
-            flag_busy <= (reg_t_busy_clear == 2'b10) ? 1'b0 : 1'b1;
+        if ((reg_atn_set == 2'b01) || (reg_t_busy_clear == 2'b10) || clear_all) begin
+            flag_busy <= clear_all ? 1'b0 : ((reg_t_busy_clear == 2'b10) ? 1'b0 : 1'b1);
         end
     end
 
@@ -164,8 +168,8 @@ module mcabus(
     end
 
     always @ (posedge clk) begin
-        if ((reg_ci_full_set == 2'b01) || (reg_t_cifr_read == 2'b10)) begin
-            flag_ci_full <= (reg_t_cifr_read == 2'b10) ? 1'b0 : 1'b1;
+        if ((reg_ci_full_set == 2'b01) || (reg_t_cifr_read == 2'b10) || clear_all) begin
+            flag_ci_full <= clear_all ? 1'b0 : ((reg_t_cifr_read == 2'b10) ? 1'b0 : 1'b1);
         end
     end
 
@@ -180,8 +184,8 @@ module mcabus(
     end
 
     always @ (posedge clk) begin
-        if ((reg_isr_clear == 2'b10) || (reg_t_isr_write == 2'b01)) begin
-            flag_isr <= (reg_t_isr_write == 2'b01) ? 1'b1 : 1'b0;
+        if ((reg_isr_clear == 2'b10) || (reg_t_isr_write == 2'b01) || clear_all) begin
+            flag_isr <= clear_all ? 1'b0 : ((reg_t_isr_write == 2'b01) ? 1'b1 : 1'b0);
         end
     end
 
@@ -197,8 +201,8 @@ module mcabus(
     // Clear register at end of MCA transaction
     // Set register when Teensy latches new value
     always @ (posedge clk) begin
-        if ((reg_sifr_clear == 2'b10) || (reg_t_sifr_write == 2'b01)) begin
-            flag_si_full <= (reg_t_sifr_write == 2'b01) ? 1'b1 : 1'b0;
+        if ((reg_sifr_clear == 2'b10) || (reg_t_sifr_write == 2'b01) || clear_all) begin
+            flag_si_full <= clear_all ? 1'b0 : ((reg_t_sifr_write == 2'b01) ? 1'b1 : 1'b0);
         end
     end
 
@@ -212,11 +216,11 @@ module mcabus(
         reg_treq_set <= {reg_treq_set[0], t_treq_set};
     end
     always @ (posedge clk) begin
-        if ((reg_treq_clear == 2'b10) || (reg_treq_set == 2'b10)) begin
-            flag_treq <= (reg_treq_set == 2'b10) ? 1'b1 : 1'b0;
+        if ((reg_treq_clear == 2'b10) || (reg_treq_set == 2'b10) || clear_all) begin
+            flag_treq <= clear_all ? 1'b0 : ((reg_treq_set == 2'b10) ? 1'b1 : 1'b0);
         end
-        if (reg_treq_clear == 2'b01) begin
-            flag_treq_16 <= ~la_sbhe_l;
+        if ((reg_treq_clear == 2'b01) || clear_all) begin
+            flag_treq_16 <= clear_all ? 1'b0 : ~la_sbhe_l;
         end
     end
 

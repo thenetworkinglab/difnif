@@ -25,6 +25,7 @@
 #define FLAG_BUSY 7
 #define FLAG_TREQ_STATE 8
 #define FLAG_TRANSFER_16 9
+#define FLAG_CLEAR_ALL 10
 
 #define PEND_INT 1
 #define PEND_INT_RESET 2
@@ -238,17 +239,22 @@ void esdiReset()
   //
   // Do initialization tasks here
   //
+
+  // Make sure all handshaking flags are cleared
+  setFlag(_BV(FLAG_CLEAR_ALL));
+  delayMicroseconds(10);
+  Serial.print("in clear. flags: ");
+  Serial.println(portRead(REG_FLAGS), HEX);
+  clearFlag(_BV(FLAG_CLEAR_ALL));
   clearFlag(_BV(FLAG_CMD_PROG)); // Clear any commands in progress
-  portRead(REG_CIFR); // Make sure command interface register is cleared
-  clearFlag(_BV(FLAG_BUSY));
-  transfer_state = TS_IDLE;
-  //TODO: need to implement a way to clear the transfer request flag
-  expect_cb = 0;
   
-  portWrite(REG_ISR, ISR_RESET_OK); // Success. Failure is 0xFA
-  // Load status data block
-  startStatusBlock(1, DEV_CONTROLLER, 0); // Page 61
+  transfer_state = TS_IDLE;
+  expect_cb = 0;
+
+  // Generate reset complete interrupt
+  startStatusBlock(1, DEV_CONTROLLER, 0); // Page 61: load status block data
   loadStatusBlock();
+  portWrite(REG_ISR, ISR_RESET_OK); // Success. Failure is 0xFA
   pendInterrupt(PEND_INT_RESET);
 }
 

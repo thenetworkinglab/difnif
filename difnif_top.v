@@ -93,6 +93,7 @@ module difnif_top(
     wire t_hard_reset;
     wire t_cmd_in_progress;
     wire t_busy_clear;
+    wire t_clear_all;
 
     mcabus mca1 (
         .clk(clk),
@@ -145,7 +146,8 @@ module difnif_top(
         .t_dreg_in(t_dreg_in),
         .t_treq_set(t_treq_set),
         .t_treq(t_treq),
-        .t_treq_16(t_treq_16)
+        .t_treq_16(t_treq_16),
+        .t_clear_all(t_clear_all)
     );
 
     teensy tn1 (
@@ -177,7 +179,8 @@ module difnif_top(
         .t_dreg_in(t_dreg_in),
         .t_treq_set(t_treq_set),
         .t_treq(t_treq),
-        .t_treq_16(t_treq_16)
+        .t_treq_16(t_treq_16),
+        .t_clear_all(t_clear_all)
     );
     // 50MHz
     `ifdef SYNTHESIS

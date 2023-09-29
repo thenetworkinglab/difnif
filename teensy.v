@@ -43,6 +43,7 @@ module teensy(
     input t_hard_reset,
     output t_cmd_in_progress,
     output t_busy_clear,
+    output t_clear_all,
 
     // Data register
     input [15:0] t_dreg_out,
@@ -81,7 +82,8 @@ module teensy(
     wire t_busy_bit;
 
     // Flag register
-    assign flags_out = {6'h0, t_treq_16, t_treq,
+    assign flags_out = {5'h0, t_clear_all,
+                        t_treq_16, t_treq,
                         1'b1, t_cmd_in_progress, // Clear busy is active low
                         1'b0, t_hard_reset,
                         t_sifr_full, t_cifr_full,
@@ -89,6 +91,8 @@ module teensy(
 
     // These bits in the flag reg are r/w
     assign t_cmd_in_progress = flags_in[6];
+    assign t_clear_all = flags_in[10]; // ATN, BUSY, CI FULL, ISR, SI FULL, TREQ, TREQ_16
+    // Note: Does not clear CmdInProgress
 
     // Clears the busy flag when bit is written to a '0'
     assign t_busy_clear = tn_wr & (tn_addr == REG_FLAGS) & ~tn_d[7];

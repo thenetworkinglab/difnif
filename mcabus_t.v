@@ -81,6 +81,8 @@ module mcabus_t;
     wire t_treq;
     wire t_treq_16;
 
+    reg t_clear_all;
+
     // Instantiate the Unit Under Test (UUT)
     mcabus uut (
         .clk(clk),
@@ -124,7 +126,8 @@ module mcabus_t;
         .t_dreg_in(t_dreg_in),
         .t_treq_set(t_treq_set),
         .t_treq(t_treq),
-        .t_treq_16(t_treq_16)
+        .t_treq_16(t_treq_16),
+        .t_clear_all(t_clear_all)
     );
 
     // DBA-ESDI address decode
@@ -280,6 +283,7 @@ module mcabus_t;
         t_busy_clear = 0;
         t_dreg_in = 16'H00;
         t_treq_set = 0;
+        t_clear_all = 0;
 
         // Wait 100 ns for global reset to finish
         #100;
