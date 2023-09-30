@@ -42,6 +42,7 @@ module mcabus(
 
     output test1,
     output test2,
+    input test3,
 
     // Wiring from Teensy
     output [7:0] t_atn,   // Attention data to Teensy
@@ -92,9 +93,7 @@ module mcabus(
 
     // Unused signals (for now)
     assign cd_chrdy_l = 1'b1;
-    assign arb_o = 4'b1111;
     assign burst_o_l = 1'b1;
-    assign preempt_o_l = 1'b1;
 
     // Registers
     reg [15:0] reg_cifr = 16'h0000;
@@ -209,7 +208,9 @@ module mcabus(
     end
 
     // Data register drequest
-    wire treq_clear = la_mca_op & (~la_s1_r_l || ~la_s0_w_l) & (la_addr == REG_DREG);
+    wire treq_clear = (la_mca_op & (~la_s1_r_l || ~la_s0_w_l) & (la_addr == REG_DREG)) |
+                      la_dma_selected; // IO r/w of DREG *or* dma operation
+
     reg [1:0] reg_treq_clear;
     reg [1:0] reg_treq_set;
     // We can tell if it is an 8-bit or 16-bit transfer if la_sbhe_l is low
@@ -262,8 +263,62 @@ module mcabus(
     reg [7:0] reg_pos4 = 8'b00000_00_0;
 
     wire card_enable = reg_pos2[0]; // FIXME: wire up card enable signal
+    wire [3:0] arb_level = reg_pos2[5:2]; // DMA arbitration level
 
     assign t_pos_regs = {reg_pos4, reg_pos3, reg_pos2, reg_pos01};
+
+
+    // DMA
+    // arb_o = 4 outputs to drive arbitration bus
+    // arb = 4 inputs to monitor status of arb bus
+    // preempt_o_l = output to drive preempt signal
+    // preempt_l = input to monitor preempt signal
+    // burst_o_l = output to drive burst signal
+    // burst_l = input to monitor burst signal
+    // arb_gnt_l = input to monitor arbitration and grant cycle
+    // tc_l = input to monitor for last cycle in burst
+
+    wire dma_requested = control_dma_enable & flag_treq; // FIXME: & card_enable
+    //wire dma_requested = test3; // & cmd_l? FIXME: & card_enable
+    reg dma_cycle = 1'b0; // latch is set when we are in a dma cycle
+    wire arb_won;
+
+    wire [3:0] arb_comp;
+    wire [3:0] arb_output;
+
+    genvar i;
+    generate
+        for (i = 0; i < 4; i = i + 1) begin:m
+            assign arb_o[i] = ~(arb_won | (dma_cycle & arb_gnt_l)) | arb_output[i];
+            assign arb_comp[i] = ~arb_level[i] | arb[i];
+        end
+    endgenerate
+
+    assign arb_output[3] = arb_level[3];
+    assign arb_output[2] = arb_level[2] | ~arb_comp[3];
+    assign arb_output[1] = arb_level[1] | ~arb_comp[3] | ~arb_comp[2];
+    assign arb_output[0] = arb_level[0] | ~arb_comp[3] | ~arb_comp[2] | ~arb_comp[1];
+
+    assign arb_won =  dma_cycle & arb_comp[3] & arb_comp[2] & arb_comp[1] & arb_comp[0];
+    reg la_arb_won = 1'b0;
+
+    //FIXME: may need to prevent DMA access during our own IO ops.
+
+    always @ (negedge arb_gnt_l) begin
+        la_arb_won <= arb_won;
+    end
+
+    // DMA cycle begins and ends when arb/gnt pulses high.
+    always @ (posedge arb_gnt_l) begin
+        dma_cycle <= dma_requested;
+    end
+
+    // Deassert preempt as soon as we win arbitration
+    assign preempt_o_l = ~(dma_requested & ~la_arb_won);
+
+    // dma_selected acts like another address select. This should enable access
+    // by the bus to the DREG.
+    wire dma_selected = la_arb_won & ~m_io_l & ~arb_gnt_l;
 
     // Only support IO ports. Only respond when not in reset.
     wire addressed;
@@ -278,7 +333,7 @@ module mcabus(
     // Note that POS registers can be 8 bit only, so that's nice.
     assign cd_ds16_l = ~(cd_setup_l & addressed &
                          ((bus_a[3:1] == 3'b000) |
-                          (bus_a[3:0] == 4'b0100)) );
+                          (bus_a[3:0] == 4'b0100)) | dma_selected);
 
     // Logic latched on falling edge of CMD
     // Also includes data being written to us.
@@ -292,6 +347,8 @@ module mcabus(
     reg la_s0_w_l;
     reg la_s1_r_l;
 
+    reg la_dma_selected;
+
     // Data input latches
     always @ (negedge cmd_l) begin
         la_addr <= bus_a;
@@ -302,21 +359,27 @@ module mcabus(
         la_s1_r_l <= s1_r_l;
 
         la_mca_op <= addressed & cd_setup_l;
-        la_data_read <= ~s1_r_l & addressed & cd_setup_l; // FIXME: remove cd_setup_l
+        la_data_read <= ~s1_r_l & (addressed | dma_selected) & cd_setup_l; // FIXME: remove cd_setup_l
+        la_dma_selected <= dma_selected;
 
         // Data written to us on this edge
         // SBHE: useful really only when the host writes to us. Only write to the upper byte
         // when this is asserted low.
-        if (~s0_w_l & addressed) begin
+        if (~s0_w_l & (addressed | dma_selected)) begin
             if (cd_setup_l) begin
-                case (bus_a)
-                    REG_CIFR_L  : reg_cifr <= sbhe_l ? {reg_cifr[15:8], bus_d[7:0]} : bus_d;
-                    REG_CIFR_H  : reg_cifr <= sbhe_l ? reg_cifr : {bus_d[15:8], reg_cifr[7:0]};
-                    REG_BCR     : reg_bcr  <= bus_d[7:0];
-                    REG_ATN     : reg_atn  <= bus_d[7:0];
-                    REG_DREG    : reg_dreg_write <= sbhe_l ? {reg_dreg_write[15:8], bus_d[7:0]} : bus_d;
-                    // Doesn't make sense to access the high byte alone of REG_DREG
-                endcase
+                if (~dma_selected) begin
+                    case (bus_a)
+                        REG_CIFR_L  : reg_cifr <= sbhe_l ? {reg_cifr[15:8], bus_d[7:0]} : bus_d;
+                        REG_CIFR_H  : reg_cifr <= sbhe_l ? reg_cifr : {bus_d[15:8], reg_cifr[7:0]};
+                        REG_BCR     : reg_bcr  <= bus_d[7:0];
+                        REG_ATN     : reg_atn  <= bus_d[7:0];
+                        REG_DREG    : reg_dreg_write <= sbhe_l ? {reg_dreg_write[15:8], bus_d[7:0]} : bus_d;
+                        // Doesn't make sense to access the high byte alone of REG_DREG
+                    endcase
+                end else begin
+                    // DMA ignores address
+                    reg_dreg_write <= sbhe_l ? {reg_dreg_write[15:8], bus_d[7:0]} : bus_d;
+                end
             end else begin
                 case (bus_a)
                     4'h2       : reg_pos2 <= bus_d[7:0];
@@ -347,19 +410,23 @@ module mcabus(
                 default     : data_out <= 16'hFFFF;
             endcase
         end else begin
-            case (la_addr)
-                // 16-bit read from location 0.
-                // SBHE=0, A0=0: write bits 15:0 since upper 8 bits enabled.
-                // SBHE=1, A0=0: only write bits 7:0
-                REG_SIFR_L      : data_out <= la_sbhe_l ? {8'hFF, t_sifr_out[7:0]} : t_sifr_out;
-                // SBHE=0, A0=1: only write bits 15:8
-                // SBHE=1, A0=1: invalid
-                REG_SIFR_H      : data_out <= la_sbhe_l ? 16'hFFFF : {t_sifr_out[15:8], 8'hFF};
-                REG_BSR         : data_out <= reg_bsr;
-                REG_ISR         : data_out <= t_isr_out;
-                REG_DREG        : data_out <= la_sbhe_l ? {8'hFF, t_dreg_in[7:0]} : t_dreg_in;
-                default         : data_out <= 16'hFFFF;
-            endcase
+            if (~la_dma_selected) begin
+                case (la_addr)
+                    // 16-bit read from location 0.
+                    // SBHE=0, A0=0: write bits 15:0 since upper 8 bits enabled.
+                    // SBHE=1, A0=0: only write bits 7:0
+                    REG_SIFR_L      : data_out <= la_sbhe_l ? {8'hFF, t_sifr_out[7:0]} : t_sifr_out;
+                    // SBHE=0, A0=1: only write bits 15:8
+                    // SBHE=1, A0=1: invalid
+                    REG_SIFR_H      : data_out <= la_sbhe_l ? 16'hFFFF : {t_sifr_out[15:8], 8'hFF};
+                    REG_BSR         : data_out <= reg_bsr;
+                    REG_ISR         : data_out <= t_isr_out;
+                    REG_DREG        : data_out <= la_sbhe_l ? {8'hFF, t_dreg_in[7:0]} : t_dreg_in;
+                    default         : data_out <= 16'hFFFF;
+                endcase
+            end else begin
+                data_out <= la_sbhe_l ? {8'hFF, t_dreg_in[7:0]} : t_dreg_in;
+            end
         end
     end
 

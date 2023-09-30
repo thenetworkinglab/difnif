@@ -410,7 +410,7 @@ void mainLoop() {
     if (transfer_state == TS_READ) {
       if (!(portRead(REG_FLAGS) & _BV(FLAG_TREQ_STATE))) { // Nothing in data buffer
         if (transfer_index < transfer_count) {
-          Serial.print("being read byte: ");
+          Serial.print("being read at index: ");
           Serial.println(transfer_index, HEX);
           d = transfer_buffer[transfer_index] | (transfer_buffer[transfer_index + 1] << 8);
           transfer_index += 2;
@@ -438,10 +438,12 @@ void mainLoop() {
 
     if (transfer_state == TS_WRITE) {
       if (!(portRead(REG_FLAGS) & _BV(FLAG_TREQ_STATE))) { // Host sent us data
-        Serial.print("being written byte: ");
-        Serial.println(transfer_index, HEX);
-        // FIXME: handle 8 or 16 bit transfers
         d = portRead(REG_DREG);
+        Serial.print("being written at index: ");
+        Serial.print(transfer_index, HEX);
+        Serial.print("data: ");
+        // FIXME: handle 8 or 16 bit transfers
+        Serial.println(d, HEX);
         transfer_buffer[transfer_index++] = d & 0xFF;
         transfer_buffer[transfer_index++] = d >> 8;
         if (transfer_index < transfer_count) {

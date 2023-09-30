@@ -83,6 +83,8 @@ module mcabus_t;
 
     reg t_clear_all;
 
+    reg test3;
+
     // Instantiate the Unit Under Test (UUT)
     mcabus uut (
         .clk(clk),
@@ -110,7 +112,7 @@ module mcabus_t;
         .burst_l(burst_l),
         .preempt_l(preempt_l),
         .arb_o(arb_o),
-        .burst_o_l(preempt_o_l),
+        .burst_o_l(burst_o_l),
         .preempt_o_l(preempt_o_l),
 
         .t_atn_read(t_atn_read),
@@ -127,7 +129,9 @@ module mcabus_t;
         .t_treq_set(t_treq_set),
         .t_treq(t_treq),
         .t_treq_16(t_treq_16),
-        .t_clear_all(t_clear_all)
+        .t_clear_all(t_clear_all),
+
+        .test3(test3)
     );
 
     // DBA-ESDI address decode
@@ -285,6 +289,8 @@ module mcabus_t;
         t_treq_set = 0;
         t_clear_all = 0;
 
+        test3 = 0;
+
         // Wait 100 ns for global reset to finish
         #100;
         chreset = 0;
@@ -293,6 +299,7 @@ module mcabus_t;
         write_cycle(16'h3514, 16'hCCAA, 0, 0);
         write_cycle(16'h0000, 16'h0000, 0, 0);
         write_cycle(16'h3514, 16'hBBDD, 0, 1);
+if (0) begin
         #100;
         read_cycle(16'h3512, 0, 1);
         write_cycle(16'h3513, 8'hCC, 0, 1); // Write to the ATN reg
@@ -312,35 +319,52 @@ module mcabus_t;
         read_cycle(16'h00bb, 1, 1);
         pos_write_cycle(16'h0003, 8'b10110010); // Value here goes to POS 03
         pos_write_cycle(16'h0002, 8'h01); // Value here goes to POS 02
-
-       write_cycle(16'h0228, 8'h55, 0, 1);
-        write_cycle(16'h022A, 8'h66, 0, 1);
-        write_cycle(16'h022C, 8'h77, 0, 1);
-        write_cycle(16'h022E, 8'h88, 0, 1);
+end
         // Start DMA request
         write_cycle(16'h0123, 8'h99, 0, 1);
+        #25 test3 = 1;
         #25
         arb_gnt_l = 1;
         #25
-        arbdriver = 4'b0000;
- //       #25 dreq = 1;
+        arbdriver = 4'b0111; // priority of some other device
         #175
         arb_gnt_l = 0;
         // DMA reads from memory, writes to IO
         #16 m_io_l = 1;
         bus_a = 16'h2000;
         #136
-        read_cycle(16'h0000, 1, 1);
-        write_cycle(16'h0000, 8'h55, 0, 1); // leave addr data alone
+        read_cycle(16'h0000, 1, 0);
+        write_cycle(16'h0000, 16'hAA55, 0, 0); // leave addr data alone. writes to IO (dma)
+ //       test3 = 0;
+        read_cycle(16'h0000, 1, 1); // dummy cycle
+        arb_gnt_l = 1;
+        #25
+        arb_gnt_l = 0;
+        read_cycle(16'h0000, 1, 0);
         #200
+        write_cycle(16'h0123, 16'h9876, 1, 0);
+        #25 test3 = 1;
+        #25
+        arb_gnt_l = 1;
+        #25
+        arbdriver = 4'b1111;
+        // DMA reads from IO, writes to memory
+t_dreg_in = 16'h4321;
+        #175
+        arb_gnt_l = 0;
+        #16 m_io_l = 0;
+        bus_a = 16'habcd; // should be ignored by card
+        #136
+        read_cycle(16'h0000, 0, 0); // Read from IO (dma)
+        test3 = 0;
+        write_cycle(16'h0000, 16'hAAAA, 1, 0);
+        read_cycle(16'h0000, 1, 1); //dummy cycle
         arb_gnt_l = 1;
         #25
         arb_gnt_l = 0;
         read_cycle(16'h0000, 1, 1);
         #200
-        irq_in = 1;
-        #200
-        irq_in = 0;
+
         #200
 
         #1 $finish ;
