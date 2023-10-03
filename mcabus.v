@@ -209,7 +209,7 @@ module mcabus(
 
     // Data register drequest
     wire treq_clear = (la_mca_op & (~la_s1_r_l || ~la_s0_w_l) & (la_addr == REG_DREG)) |
-                      la_dma_selected; // IO r/w of DREG *or* dma operation
+                      (la_dma_selected & ~cmd_l); // IO r/w of DREG *or* dma operation (qual'd by CMD)
 
     reg [1:0] reg_treq_clear;
     reg [1:0] reg_treq_set;

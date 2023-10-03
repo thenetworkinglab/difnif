@@ -320,13 +320,27 @@ if (0) begin
         pos_write_cycle(16'h0003, 8'b10110010); // Value here goes to POS 03
         pos_write_cycle(16'h0002, 8'h01); // Value here goes to POS 02
 end
+        // More dummy cycles so we don't accidentally clear transfer req
+        read_cycle(16'h0000, 0, 1);
+        read_cycle(16'h0000, 0, 1);
+
+        // Set transfer request flag
+        t_treq_set = 1;
+        #75
+        t_treq_set = 0;
+
         // Start DMA request
-        write_cycle(16'h0123, 8'h99, 0, 1);
+        write_cycle(16'h3512, 8'h2, 0, 1);
+        write_cycle(16'h0000, 8'h0, 0, 0);
+
+// Write DMA enable to teensy regs
+        
+
         #25 test3 = 1;
         #25
         arb_gnt_l = 1;
         #25
-        arbdriver = 4'b0111; // priority of some other device
+        arbdriver = 4'b1111; // priority of some other device
         #175
         arb_gnt_l = 0;
         // DMA reads from memory, writes to IO
@@ -336,6 +350,11 @@ end
         read_cycle(16'h0000, 1, 0);
         write_cycle(16'h0000, 16'hAA55, 0, 0); // leave addr data alone. writes to IO (dma)
  //       test3 = 0;
+// Delay for arb gnt
+        #160
+        cmd_l = 1;
+        #130
+        arb_gnt_l = 1;
         read_cycle(16'h0000, 1, 1); // dummy cycle
         arb_gnt_l = 1;
         #25
