@@ -410,14 +410,15 @@ void mainLoop() {
     if (transfer_state == TS_READ) {
       if (!(portRead(REG_FLAGS) & _BV(FLAG_TREQ_STATE))) { // Nothing in data buffer
         if (transfer_index < transfer_count) {
-          Serial.print("being read at index: ");
-          Serial.println(transfer_index, HEX);
+          //Serial.print("being read at index: ");
+          //Serial.println(transfer_index, HEX);
           d = transfer_buffer[transfer_index] | (transfer_buffer[transfer_index + 1] << 8);
           transfer_index += 2;
           portWrite(REG_DREG, d);
           setFlag(_BV(FLAG_TREQ_SET)); // Tell host there is data
         } else {
-          Serial.println("Done with read data transfer.");
+          Serial.println("Done with read data transfer. Last index ");
+          Serial.println(transfer_index, HEX);
           transfer_state = TS_IDLE;
           startStatusBlock(7, (cmd_block[0] >> 5) & 0x7, cmd_block[0] & 0x1F);
           status_block[1] = 0x0100; // command status, command error code
@@ -439,17 +440,20 @@ void mainLoop() {
     if (transfer_state == TS_WRITE) {
       if (!(portRead(REG_FLAGS) & _BV(FLAG_TREQ_STATE))) { // Host sent us data
         d = portRead(REG_DREG);
-        Serial.print("being written at index: ");
-        Serial.print(transfer_index, HEX);
-        Serial.print("data: ");
         // FIXME: handle 8 or 16 bit transfers
-        Serial.println(d, HEX);
+        //Serial.print("being written at index: ");
+        //Serial.print(transfer_index, HEX);
+        //Serial.print("data: ");
+        //Serial.println(d, HEX);
         transfer_buffer[transfer_index++] = d & 0xFF;
         transfer_buffer[transfer_index++] = d >> 8;
         if (transfer_index < transfer_count) {
           setFlag(_BV(FLAG_TREQ_SET)); // Ready for more data
         } else {
-          Serial.println("Done with write data transfer.");
+          Serial.println("Done with write data transfer. Last index ");
+          Serial.print(transfer_index, HEX);
+          Serial.print("data: ");
+          Serial.println(d, HEX);
           transfer_state = TS_IDLE;
           startStatusBlock(7, (cmd_block[0] >> 5) & 0x7, cmd_block[0] & 0x1F);
           status_block[1] = 0x0100; // command status, command error code

@@ -361,6 +361,21 @@ end
         arb_gnt_l = 0;
         read_cycle(16'h0000, 1, 0);
         #200
+
+        // More dummy cycles so we don't accidentally clear transfer req
+        read_cycle(16'h0000, 0, 1);
+        read_cycle(16'h0000, 0, 1);
+
+        // Set transfer request flag
+        t_treq_set = 1;
+        #75
+        t_treq_set = 0;
+
+        // Start DMA request
+        write_cycle(16'h3512, 8'h2, 0, 1);
+        write_cycle(16'h0000, 8'h0, 0, 0);
+
+
         write_cycle(16'h0123, 16'h9876, 1, 0);
         #25 test3 = 1;
         #25
