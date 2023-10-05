@@ -349,47 +349,9 @@ void processCmdBlock()
   // then trigger a command complete interrupt
 
   switch (cmd_no_opt) {
-    case 0x4005: // Seek
-      Serial.println("SEEK COMMAND");
-      doISR(0x01); // Command complete for drive
-      prepDefaultSB();
-      break;
-
-    case 0x0014: // Get Diagnostic Status Block, drive 0
-      // See page 58 and page 49
-      doISR(0x01); // Command complete for drive. Page 25
-      prepDefaultSB();
-      status_block[3] = 0x0000; // por error code, test error code
-      status_block[4] = 0x0000; // diagnostic command (probably from last Run Diagnostics command)
-      status_block[5] = 0x0000; // Reserved
-      status_block[6] = 0x0000; // Reserved
-      break;
-
-    case (DEV_CONTROLLER  | 0x9): // Get Configuration (controller)
-      doISR(DEV_CONTROLLER  | 0x1); // Command complete for controller
-      startStatusBlock(6, cmd_block[0]);
-      status_block[1] = 0x0000; // Reserved
-      status_block[2] = 0x0001; // Firmware revision code, low word
-      status_block[3] = 0x3101; // buf_size1, revision code high byte, buffer size code (256 words)
-      status_block[4] = 0x0000; // buf_size2
-      status_block[5] = 0x0000; // Reserved
-      break;
-
-    case (DEV_CONTROLLER | 0xA): // Get POS information
-      doISR(DEV_CONTROLLER | 0x1);
-      startStatusBlock(5, cmd_block[0]);
-      i = portRead(REG_POS01);
-      status_block[1] = (i >> 8) | (i << 8);
-      i = portRead(REG_POS23);
-      status_block[2] = (i >> 8) | (i << 8);
-      i = portRead(REG_POS4);
-      status_block[3] = (i << 8) | 0xFF;
-      status_block[4] = 0xFFFF;
-      break;
-
-    case 0x4001: // Read data (sector)
+    case 0x4001: // Read data (sector) page 41
       Serial.println("Preparing sector.");
-      status_max = 0;
+      status_max = 0; // No status data
       for (i = 0; i < 512; i++) {
         transfer_buffer[i] = i & 0xFF;
       }
@@ -403,7 +365,93 @@ void processCmdBlock()
       // Do not pend interrupt since we do not expect EOI for this
       return;
 
-    case (0xE0 | 0x10): // Write attachment buffer
+    case 0x4002: // Write data (sector) page 48
+    case 0x4004: // Write with verify (page 49)
+      status_max = 0; // No status data
+      // TODO: Validate RBA?
+      doISR(DEV_DRIVE | ISR_DATA_XFER_RDY);
+      transfer_state = TS_WRITE;
+      transfer_count = cmd_block[1] * 512;
+      transfer_index = 0;
+      Serial.print("WriteData: ");
+      Serial.println(transfer_count, DEC);
+      // Do not pend interrupt since we do not expect EOI for this
+      return;
+
+    case 0x4003: // Read Verify (page 42)
+      Serial.println("Read verify.");
+      doISR(0x01);
+      prepDefaultSB();
+      // cmd_block[1] = number of blocks requested
+      // cmd_block[2], cmd_block[3] = RBA, low and high
+      break;
+
+    case 0x4005: // Seek (page 44)
+      Serial.println("SEEK COMMAND");
+      doISR(0x01); // Command complete for drive
+      prepDefaultSB();
+      break;
+
+    case 0x0006: // Park head
+      Serial.println("Park head");
+      doISR(0x01);
+      prepDefaultSB();
+      break;
+
+    case (DEV_CONTROLLER | 0x7):
+    case 0x7: // Get command complete status
+      Serial.println("CmdComplete Status");
+      portWrite(REG_ISR, 0x01); // Manually trigger ISR. Retain and send existing status block
+      break;
+
+    case (DEV_CONTROLLER | 0x8):
+    case 0x8: // Get device status
+      Serial.println("Get Device Status");
+      startStatusBlock(3, cmd_block[0]);
+      status_block[1] = 0x0000;
+      status_block[2] = (sb_dev_status << 8) | sb_dev_error; // TODO: error codes depend on drive/controller
+      doISR(0x01);
+      break;
+
+    case 0x9: // Get Configuration (Drive) (page 37, 55)
+      Serial.println("Get config, drive");
+      // Check bit 11 (cmd_block[0] & _BV(11)) for 0=physical or 1=pseudo
+      startStatusBlock(6, cmd_block[0]);
+      status_block[1] = 0x0; // FIXME, status bits should be what?
+      status_block[2] = 0x0; // Low word number of RBAs
+      status_block[3] = 0x0; // High word number of RBAs
+      status_block[4] = 0x0; // Number of cylinders
+      status_block[5] = 0x0; // Sectors per track, tracks per cylinder
+      doISR(0x01);
+      break;
+
+    case (DEV_CONTROLLER  | 0x9): // Get Configuration (controller) (page 37, 56)
+      Serial.println("Get config, controller");
+      doISR(DEV_CONTROLLER  | 0x1); // Command complete for controller
+      startStatusBlock(6, cmd_block[0]);
+      status_block[1] = 0x0000; // Reserved
+      status_block[2] = 0x0001; // Firmware revision code, low word
+      status_block[3] = 0x3101; // buf_size1, revision code high byte, buffer size code (256 words)
+      status_block[4] = 0x0000; // buf_size2
+      status_block[5] = 0x0000; // Reserved
+      break;
+
+    case (DEV_CONTROLLER | 0xA): // Get POS information (page 39)
+      Serial.println("Get POS info");
+      doISR(DEV_CONTROLLER | 0x1);
+      startStatusBlock(5, cmd_block[0]);
+      i = portRead(REG_POS01);
+      status_block[1] = (i >> 8) | (i << 8);
+      i = portRead(REG_POS23);
+      status_block[2] = (i >> 8) | (i << 8);
+      i = portRead(REG_POS4);
+      status_block[3] = (i << 8) | 0xFF;
+      status_block[4] = 0xFFFF;
+      break;
+
+    //case 0x400B: // Translate RBA, seldom used, really only for low level format (page 47)
+
+    case (DEV_CONTROLLER | 0x10): // Write attachment buffer (page 48)
       // cmd_block[1] = the block count, same for all data transfer commands
       status_max = 0; // No status block
       doISR(DEV_CONTROLLER | ISR_DATA_XFER_RDY);
@@ -417,8 +465,8 @@ void processCmdBlock()
       // Do not pend interrupt since we do not expect EOI for this
       return;
 
-    case (0xE0 | 0x11): // Read attachment buffer
-      status_max = 0;
+    case (DEV_CONTROLLER | 0x11): // Read attachment buffer (page 41)
+      status_max = 0; // No status block
       doISR(DEV_CONTROLLER | ISR_DATA_XFER_RDY);
       transfer_state = TS_READ;
       transfer_count = cmd_block[1] * 512;
@@ -428,6 +476,75 @@ void processCmdBlock()
       Serial.println(transfer_count, DEC);
       // Do not pend since we do not expect EOI for this
       return;
+
+    case 0x0012: // Run diagnostic test (page 43)
+      // Test number is in cmd_block[1]
+      // TODO: perform a test, set a code, whatever
+      doISR(0x01); // Command complete for drive.
+      prepDefaultSB();
+      break;
+
+    case (DEV_CONTROLLER | 0x0012): // Run diagnostic test (page 43)
+      // Test number is in cmd_block[1]
+      // TODO: perform a test, set a code, whatever
+      doISR(0x01); // Command complete for drive.
+      prepDefaultSB();
+      break;
+
+    case 0x0014: // Get Diagnostic Status Block, drive 0 (page 37)
+      // See page 58 and page 49
+      doISR(0x01); // Command complete for drive. Page 25
+      prepDefaultSB();
+      status_block[3] = 0x0000; // por error code, test error code
+      status_block[4] = 0x0000; // diagnostic command (probably from last Run Diagnostics command)
+      status_block[5] = 0x0000; // Reserved
+      status_block[6] = 0x0000; // Reserved
+      break;
+
+    case 0x0015: // Get Manufacturing Header (page 38)
+      Serial.println("Preparing manufacturing header.");
+      status_max = 0; // No status data
+
+      // TODO: fill in manufacturing header (see page 72)
+      strncpy((char *)transfer_buffer, "DEFECT", 6);
+      transfer_buffer[6] = 0x0; transfer_buffer[7] = 0x0;
+      transfer_buffer[8] = 0x0;
+      transfer_buffer[9] = 0xff;
+      //Drive bar code number
+      //Drive manufacturing date
+      //Use a blank defect map
+      
+      doISR(DEV_DRIVE | ISR_DATA_XFER_RDY);
+      transfer_state = TS_READ;
+      transfer_count = cmd_block[1] * 512;
+      transfer_index = 0;
+      // TODO: Validate transfer count or trigger a command error!
+      Serial.print("ReadMfgHdr: ");
+      Serial.println(transfer_count, DEC);
+      // Do not pend interrupt since we do not expect EOI for this
+      return;
+
+    // case 0x0016: Format unit not supported
+    // case 0x0017: Format prepare not supported
+    
+    case 0x401A: // Set Max RBA (page 44)
+      // Max RBA is in cmd_block[2] and cmd_block[3]
+      // TODO: what to do about this?
+      doISR(0x01); // Command complete for drive. Page 25
+      prepDefaultSB();
+      break;
+    
+    case (DEV_CONTROLLER | 0x401B): // Set power saving mode (page 40)
+      // cmd_block[3] contains idle to standby timeout value. We don't care about that.
+      doISR(0x01); // Command complete for drive. Page 25
+      prepDefaultSB();
+      break;
+    
+    case (DEV_CONTROLLER | 0x001C): // Power conservation command (page 39)
+      // cmd_block[1] contains the power mode requested. We don't care about that.
+      doISR(0x01);
+      prepDefaultSB();
+      break;
 
     default:
       Serial.print("Unknown command ");
@@ -514,7 +631,7 @@ void mainLoop() {
           status_block[6] = 0x0000; // Number of blocks required to recover error
           loadStatusBlock();
           
-          doISR((cmd_block[0] & 0xE) | 0x1); // Command complete
+          doISR((cmd_block[0] & ATN_DEV_MASK) | 0x1); // Command complete
           pendInterrupt(PEND_INT);
         }
       }
@@ -553,7 +670,7 @@ void mainLoop() {
           status_block[6] = 0x0000; // Number of blocks required to recover error
           loadStatusBlock();
 
-          doISR((cmd_block[0] & 0xE) | 0x1); // Command complete
+          doISR((cmd_block[0] & ATN_DEV_MASK) | 0x1); // Command complete
           pendInterrupt(PEND_INT);
         }
       }
