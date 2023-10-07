@@ -1,3 +1,5 @@
+#include <SD.h>
+
 
 // Pin definitions
 #define PIN_RD 36
@@ -107,6 +109,16 @@ uint8_t sb_dev_error = 0;
 uint8_t sb_por_error = 0;
 uint8_t sb_test_error = 0;
 
+// SD card stuff
+SdFs sd;
+FsFile file; 
+bool has_sdcard;
+uint32_t disk_size = 0; // In sectors/RBAs
+
+uint32_t current_rba = 0;
+uint32_t rba_transfer_count = 0;
+
+
 // Set 16-bit data port direction
 void setPortMode(uint8_t mode)
 {
@@ -162,6 +174,12 @@ void setup() {
   pinMode(ADDR2, OUTPUT);
   pinMode(ADDR3, OUTPUT);
 
+  if (!sd.begin(SdioConfig(FIFO_SDIO))) {
+    Serial.println("No SD card found.");
+    has_sdcard = false;
+  }
+  has_sdcard = true;
+
   Serial.println("Press 'f' for flag register contents.");
   Serial.println("Press 'F' to set flag register.");
   Serial.println("Press 'a' for ATN register contents.");
@@ -174,9 +192,58 @@ void setup() {
   Serial.println("Press '1' for Teensy-to-host loop test.");
   Serial.println("Press '2' for host-to-Teensy loop test.");
   Serial.println("Press 's' to write Status Interface Reg.");
+  Serial.println("Hit 'q' to run the SD card filesystem test.");
   Serial.println("Press 'G' to run the main loop.");
 }
 
+
+// Sets up disk image file
+int diskSetup() {
+  uint64_t s;
+
+  if (!has_sdcard) {
+    return 1;
+  }
+  
+  if (!file.open("disk0.img", O_RDWR)) {
+    Serial.println("Can't open file.");
+    return 1;
+  }
+
+  s = file.fileSize();
+
+  if ((s % (512 * 2048)) != 0) {
+    Serial.println("Warning: Image size not divisible by 1048576 (1MB), will be truncated.");
+  }
+
+  disk_size = (uint32_t)(s / 512 / 2048) * 2048; // Calculate number of RBAs in the image file
+
+  if (disk_size > 0x1ff800) {
+    Serial.println("Warning: Image size is > 1G (1023MB) and will be truncated.");
+    disk_size = 0x1ff800;
+  }
+
+  if (s < 1) {
+    Serial.println("Disk image is too small.");
+    return 1;
+  }
+
+  Serial.print("Disk size (RBAs): ");
+  Serial.println(disk_size, DEC);
+
+  return 0;
+}
+
+int readDiskRBA(uint32_t rba)
+{
+  if (!file.seek((uint64_t)rba * 512)) {
+    return 1;
+  }
+  if (!file.read(transfer_buffer, 512)) {
+    return 1;
+  }
+  return 0;
+}
 
 // Prints a 16-bit hex value to the USB console
 void print16hex(uint16_t val)
@@ -283,8 +350,8 @@ void prepDefaultSB()
   status_block[1] = (sb_cmd_status << 8) | sb_cmd_error; // command status, command error code
   status_block[2] = (sb_dev_status << 8) | sb_dev_error; // device status, device error code
   status_block[3] = 0x0000;
-  status_block[4] = 0x0000; 
-  status_block[5] = 0x0000; 
+  status_block[4] = current_rba & 0xffff; 
+  status_block[5] = current_rba >> 16; 
   status_block[6] = 0x0000;
 }
 
@@ -350,18 +417,28 @@ void processCmdBlock()
 
   switch (cmd_no_opt) {
     case 0x4001: // Read data (sector) page 41
-      Serial.println("Preparing sector.");
+      // TODO: Validate transfer count or trigger a command error
+      // cmd_block[1] = number of RBAs to read
+      // cmd_block[2] = low word RBA offset
+      // cmd_block[3] = high word RBA offset
+      current_rba = cmd_block[2] | cmd_block[3] << 16;
+      rba_transfer_count = cmd_block[1];
+      
+      Serial.print("Preparing to read sector ");
+      Serial.println(current_rba, DEC);
       status_max = 0; // No status data
-      for (i = 0; i < 512; i++) {
-        transfer_buffer[i] = i & 0xFF;
-      }
+      //for (i = 0; i < 512; i++) {
+      //  transfer_buffer[i] = i & 0xFF;
+      //}
+      readDiskRBA(current_rba);
+      
       doISR(DEV_DRIVE | ISR_DATA_XFER_RDY);
       transfer_state = TS_READ;
-      transfer_count = cmd_block[1] * 512;
+      transfer_count = 512; // Our buffer is just one sector to make things easy
       transfer_index = 0;
-      // TODO: Validate transfer count or trigger a command error
-      Serial.print("ReadData: ");
-      Serial.println(transfer_count, DEC);
+      
+      //Serial.print("ReadData: ");
+      //Serial.println(transfer_count, DEC);
       // Do not pend interrupt since we do not expect EOI for this
       return;
 
@@ -415,13 +492,15 @@ void processCmdBlock()
 
     case 0x9: // Get Configuration (Drive) (page 37, 55)
       Serial.println("Get config, drive");
-      // Check bit 11 (cmd_block[0] & _BV(11)) for 0=physical or 1=pseudo
+      // FIXME: Check bit 11 (cmd_block[0] & _BV(11)) for 0=physical or 1=pseudo
+      // We don't need to do this, but we're just using the BIOS's default CHS mapping
+      // to calculate the number of cylinders, tracks, and heads.
       startStatusBlock(6, cmd_block[0]);
-      status_block[1] = 0x0; // FIXME, status bits should be what?
-      status_block[2] = 0x0; // Low word number of RBAs
-      status_block[3] = 0x0; // High word number of RBAs
-      status_block[4] = 0x0; // Number of cylinders
-      status_block[5] = 0x0; // Sectors per track, tracks per cylinder
+      status_block[1] = 0x80; // ZD bit always set.
+      status_block[2] = disk_size & 0xFFFF; // Low word number of RBAs
+      status_block[3] = disk_size >> 16; // High word number of RBAs
+      status_block[4] = disk_size / 2048; // Number of cylinders
+      status_block[5] = (0x20 << 8) | 0x3f; // 32 sectors per track, 64 tracks per cylinder
       doISR(0x01);
       break;
 
@@ -578,6 +657,8 @@ void mainLoop() {
   bool expect_cb = false;
   bool reset_pending = false;
   bool hard_reset = false;
+
+  diskSetup();
   
   while (1) {
     flags = portRead(REG_FLAGS);
@@ -621,18 +702,29 @@ void mainLoop() {
         } else {
           Serial.print("Done with read data transfer. Last index ");
           Serial.println(transfer_index, HEX);
-          transfer_state = TS_IDLE;
-          sb_cmd_status = 1;
+          rba_transfer_count--;
+          // Any more sectors to read?
 
-          prepDefaultSB();
-          status_block[3] = 0x0000; // Words left to be processed
-          status_block[4] = 0x0000; // TODO: last RBA processed (low)
-          status_block[5] = 0x0000; // last RBA processed (high)
-          status_block[6] = 0x0000; // Number of blocks required to recover error
-          loadStatusBlock();
-          
-          doISR((cmd_block[0] & ATN_DEV_MASK) | 0x1); // Command complete
-          pendInterrupt(PEND_INT);
+          if (rba_transfer_count > 0) {
+            current_rba++;
+            Serial.print("Preparing to read sector ");
+            Serial.println(current_rba, DEC);
+            readDiskRBA(current_rba);
+            transfer_count = 512;
+            transfer_index = 0; // Continue in read state at start of buffer
+          } else {
+            transfer_state = TS_IDLE;
+            sb_cmd_status = 1;
+            prepDefaultSB();
+            status_block[3] = 0x0000; // Words left to be processed
+            status_block[4] = current_rba & 0xffff; // last RBA processed (low)
+            status_block[5] = current_rba >> 16; // last RBA processed (high)
+            status_block[6] = 0x0000; // Number of blocks required to recover error
+            loadStatusBlock();
+            
+            doISR((cmd_block[0] & ATN_DEV_MASK) | 0x1); // Command complete
+            pendInterrupt(PEND_INT);
+          }
         }
       }
 
@@ -656,6 +748,8 @@ void mainLoop() {
           Serial.print(" data: ");
           Serial.println(d, HEX);
           transfer_state = TS_IDLE;
+
+          // FIXME: handle write data
 
           //
           // TODO: Check original command, see if we need to write data
@@ -885,6 +979,31 @@ void CIFRTestLoop()
 }
 
 
+void sdTest() {
+  bool ret = false;
+  unsigned char buf[256] = {0};
+
+  if (!file.open("test.txt", O_RDWR)) {
+    Serial.println("Can't open file.");
+  }
+
+  Serial.print("File size: ");
+  Serial.println(file.fileSize(), DEC);
+  
+  if (!file.read(buf, 20)) {
+    Serial.println("Can't read file.");
+  }
+  Serial.println((char *)buf);
+  file.seek(5);
+  file.write("ABCD", 4);
+  //file.read(buf, 5);
+  file.seek(0);
+  file.read(buf, 20);
+  Serial.println((char *)buf);
+  file.close();
+  
+}
+
 // Main loop.
 void loop() {
   uint16_t d, i;
@@ -962,6 +1081,10 @@ void loop() {
       d = read16();
       portWrite(REG_SIFR, d);
       Serial.println();
+    }
+    if (cmd == 'q') {
+      Serial.println("Starting SD card test.");
+      sdTest();
     }
     if (cmd == 'G') {
       Serial.println("Starting main loop.");
