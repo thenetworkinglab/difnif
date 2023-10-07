@@ -411,6 +411,8 @@ void processCmdBlock()
 {
   uint16_t i;
   uint16_t cmd_no_opt = cmd_block[0] & CMD_NO_OPT_MASK;
+  Serial.print("CMD: ");
+  Serial.println(cmd_block[0], HEX);
 
   // After command, fill in the status block
   // then trigger a command complete interrupt
@@ -493,14 +495,23 @@ void processCmdBlock()
     case 0x9: // Get Configuration (Drive) (page 37, 55)
       Serial.println("Get config, drive");
       // FIXME: Check bit 11 (cmd_block[0] & _BV(11)) for 0=physical or 1=pseudo
-      // We don't need to do this, but we're just using the BIOS's default CHS mapping
-      // to calculate the number of cylinders, tracks, and heads.
       startStatusBlock(6, cmd_block[0]);
-      status_block[1] = 0x80; // ZD bit always set.
-      status_block[2] = disk_size & 0xFFFF; // Low word number of RBAs
-      status_block[3] = disk_size >> 16; // High word number of RBAs
-      status_block[4] = disk_size / 2048; // Number of cylinders
-      status_block[5] = (0x20 << 8) | 0x3f; // 32 sectors per track, 64 tracks per cylinder
+      if (cmd_block[0] & _BV(11)) { // bit 11, 1=pseudo RBA
+        Serial.println("Pseudo");
+        status_block[1] = 0x0200;
+        status_block[2] = 0x1001; // Low word number of RBAs
+        status_block[3] = 0x0; // High word number of RBAs
+        status_block[4] = disk_size / 2048; // Number of cylinders
+        status_block[5] = (0x20 << 8) | 0x3f; // 32 sectors per track, 64 tracks per cylinder
+      } else {
+        // We don't need to do this, but we're just using the BIOS's default CHS mapping
+        // to calculate the number of cylinders, tracks, and heads.
+        status_block[1] = 0x200; // ZD bit clear
+        status_block[2] = disk_size & 0xFFFF; // Low word number of RBAs
+        status_block[3] = disk_size >> 16; // High word number of RBAs
+        status_block[4] = disk_size / 2048; // Number of cylinders
+        status_block[5] = (0x20 << 8) | 0x3f; // 32 sectors per track, 64 tracks per cylinder
+      }
       doISR(0x01);
       break;
 
@@ -550,6 +561,8 @@ void processCmdBlock()
       transfer_state = TS_READ;
       transfer_count = cmd_block[1] * 512;
       transfer_index = 0;
+      rba_transfer_count = 1; // We do not want to try to read the disk, just return the buffer.
+      current_rba = 0;
       // TODO: Validate transfer count or trigger a command error
       Serial.print("ReadAttachBuffer: ");
       Serial.println(transfer_count, DEC);
@@ -813,6 +826,13 @@ void mainLoop() {
             clearFlag(_BV(FLAG_CMD_PROG));
             clearFlag(_BV(FLAG_BUSY)); // FIXME: may not want to clear busy flag here?
             Serial.println("Cleared some other int.");
+          } else {
+            // FIXME: Sometimes we get an extra EOI. Mailbox problem?
+            Serial.print("EOI but int_pending is ");
+            Serial.println(int_pending, DEC);
+            int_pending = 0;
+            clearFlag(_BV(FLAG_CMD_PROG));
+            clearFlag(_BV(FLAG_BUSY));
           }
           break;
         case ATN_RESET:
