@@ -256,13 +256,14 @@ module mcabus(
      ** Microchannel Interface Implementation below **
     */
 
-    // POS registers. FIXME: card ought to be disabled.
+    // POS registers.
     wire [15:0] reg_pos01 = 16'hDF9F;
-    reg [7:0] reg_pos2 = 8'b0_1_1110_0_1; // Default to card enabled, 3510, arb e, fairness on
+// LSB is card enable bit FIXME: add debug mode?
+    reg [7:0] reg_pos2 = 8'b0_1_1110_0_0; // Default to card disabled, 3510, arb e, fairness on
     reg [7:0] reg_pos3 = 8'b0_0_00_0000;
     reg [7:0] reg_pos4 = 8'b00000_00_0;
 
-    wire card_enable = reg_pos2[0]; // FIXME: wire up card enable signal
+    wire card_enable = reg_pos2[0];
     wire [3:0] arb_level = reg_pos2[5:2]; // DMA arbitration level
 
     assign t_pos_regs = {reg_pos4, reg_pos3, reg_pos2, reg_pos01};
@@ -278,7 +279,7 @@ module mcabus(
     // arb_gnt_l = input to monitor arbitration and grant cycle
     // tc_l = input to monitor for last cycle in burst
 
-    wire dma_requested = control_dma_enable & flag_treq; // FIXME: & card_enable
+    wire dma_requested = control_dma_enable & flag_treq & card_enable;
     //wire dma_requested = test3; // & cmd_l? FIXME: & card_enable
     reg dma_cycle = 1'b0; // latch is set when we are in a dma cycle
     wire arb_won;
@@ -322,7 +323,9 @@ module mcabus(
 
     // Only support IO ports. Only respond when not in reset.
     wire addressed;
-    assign addressed = ~addr_sel_l & ~m_io_l & ~chreset;
+//    assign addressed = (~addr_sel_l) & ~m_io_l & ~chreset;
+
+    assign addressed = (~addr_sel_l | ~cd_setup_l) & ~m_io_l & ~chreset;
 
     // Data bus steering
     // MCA uses signals a0, cd_ds16_l, sbhe_l
@@ -359,14 +362,16 @@ module mcabus(
         la_s1_r_l <= s1_r_l;
 
         la_mca_op <= addressed & cd_setup_l;
-        la_data_read <= ~s1_r_l & (addressed | dma_selected) & cd_setup_l; // FIXME: remove cd_setup_l
+
+        la_data_read <= ~s1_r_l & (addressed | dma_selected);
+        //la_data_read <= ~s1_r_l & (addressed | dma_selected) & cd_setup_l; // Use this to disable POS
         la_dma_selected <= dma_selected;
 
         // Data written to us on this edge
         // SBHE: useful really only when the host writes to us. Only write to the upper byte
         // when this is asserted low.
         if (~s0_w_l & (addressed | dma_selected)) begin
-            if (cd_setup_l) begin
+            if (cd_setup_l && card_enable) begin
                 if (~dma_selected) begin
                     case (bus_a)
                         REG_CIFR_L  : reg_cifr <= sbhe_l ? {reg_cifr[15:8], bus_d[7:0]} : bus_d;
@@ -388,15 +393,13 @@ module mcabus(
                 endcase
             end
         end
-
-        // TODO: Implement writeable POS registers
     end
 
     // Data output: present data at the data output depending on the address
     // This is qualified by the data output gate
     reg [15:0] data_out;
     assign bus_d = data_dir ? data_out : 16'bZ;
-    assign data_dir = la_data_read & ~cmd_l; // Read mode; only when CMD is low.
+    assign data_dir = la_data_read & ~cmd_l & (card_enable | ~la_cd_setup_l); // Read mode; only when CMD is low.
 
     // Data output mux
     always @ (*) begin

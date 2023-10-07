@@ -299,7 +299,7 @@ module mcabus_t;
         write_cycle(16'h3514, 16'hCCAA, 0, 0);
         write_cycle(16'h0000, 16'h0000, 0, 0);
         write_cycle(16'h3514, 16'hBBDD, 0, 1);
-if (0) begin
+if (1) begin
         #100;
         read_cycle(16'h3512, 0, 1);
         write_cycle(16'h3513, 8'hCC, 0, 1); // Write to the ATN reg
