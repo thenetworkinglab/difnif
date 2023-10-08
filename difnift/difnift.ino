@@ -119,6 +119,7 @@ uint32_t disk_size = 0; // In sectors/RBAs
 uint32_t current_rba = 0;
 uint32_t psu_rba_max = 0;
 uint32_t rba_transfer_count = 0;
+bool no_disk_op = false;
 
 
 // Set 16-bit data port direction
@@ -249,12 +250,26 @@ int readDiskRBA(uint32_t rba)
     return 0;
   }
   #endif
+  // TODO: check against file size limit
   if (!file.seek((uint64_t)rba * 512)) {
     return 1;
   }
   if (!file.read(transfer_buffer, 512)) {
     return 1;
   }
+  return 0;
+}
+
+int writeDiskRBA(uint32_t rba)
+{
+  // TODO: check against file size limit
+  if (!file.seek((uint64_t)rba * 512)) {
+    return 1;
+  }
+  //FIXME until i figure out the issue
+  //if (!file.write(transfer_buffer, 512)) {
+  //  return 1;
+  //}
   return 0;
 }
 
@@ -451,6 +466,7 @@ void processCmdBlock()
       transfer_state = TS_READ;
       transfer_count = 512; // Our buffer is just one sector to make things easy
       transfer_index = 0;
+      no_disk_op = false;
       
       //Serial.print("ReadData: ");
       //Serial.println(transfer_count, DEC);
@@ -459,14 +475,20 @@ void processCmdBlock()
 
     case 0x4002: // Write data (sector) page 48
     case 0x4004: // Write with verify (page 49)
+      current_rba = cmd_block[2] | cmd_block[3] << 16;
+      rba_transfer_count = cmd_block[1];
+      Serial.print("Preparing to write sector ");
+      Serial.println(current_rba, DEC);
+      
       status_max = 0; // No status data
       // TODO: Validate RBA?
       doISR(DEV_DRIVE | ISR_DATA_XFER_RDY);
       transfer_state = TS_WRITE;
-      transfer_count = cmd_block[1] * 512;
+      transfer_count = 512; // Our buffer is just one sector to make things easy
       transfer_index = 0;
-      Serial.print("WriteData: ");
-      Serial.println(transfer_count, DEC);
+      no_disk_op = false;
+      //Serial.print("WriteData: ");
+      //Serial.println(transfer_count, DEC);
       // Do not pend interrupt since we do not expect EOI for this
       return;
 
@@ -562,6 +584,8 @@ void processCmdBlock()
       transfer_state = TS_WRITE;
       transfer_count = cmd_block[1] * 512;
       transfer_index = 0;
+      no_disk_op = true; // Make sure we don't write this to the disk image
+      rba_transfer_count = 1; // Just one
       // TODO: Validate transfer count or trigger a command error
       Serial.print("WriteAttachBuffer: ");
       Serial.println(transfer_count, DEC);
@@ -574,6 +598,7 @@ void processCmdBlock()
       transfer_state = TS_READ;
       transfer_count = cmd_block[1] * 512;
       transfer_index = 0;
+      no_disk_op = false; // Make sure we don't read this from the drive
       rba_transfer_count = 1; // We do not want to try to read the disk, just return the buffer.
       current_rba = 0;
       // TODO: Validate transfer count or trigger a command error
@@ -737,9 +762,11 @@ void mainLoop() {
 
           if (rba_transfer_count > 0) {
             current_rba++;
-            Serial.print("Preparing to read sector ");
-            Serial.println(current_rba, DEC);
-            readDiskRBA(current_rba);
+            if (!no_disk_op) {
+              Serial.print("Preparing to read sector ");
+              Serial.println(current_rba, DEC);
+              readDiskRBA(current_rba);
+            }
             transfer_count = 512;
             transfer_index = 0; // Continue in read state at start of buffer
           } else {
@@ -777,25 +804,36 @@ void mainLoop() {
           Serial.print(transfer_index, HEX);
           Serial.print(" data: ");
           Serial.println(d, HEX);
-          transfer_state = TS_IDLE;
+          if (!no_disk_op) {
+            Serial.print("Writing sector ");
+            Serial.println(current_rba, DEC);
+            writeDiskRBA(current_rba);
+          }
+          rba_transfer_count--;
 
-          // FIXME: handle write data
+          if (rba_transfer_count > 0) {
+            current_rba++;
+            Serial.println("Preparing to transfer next sector for write");
+            transfer_count = 512;
+            transfer_index = 0; 
+          } else {
+            transfer_state = TS_IDLE;
+            sb_cmd_status = 1;
+            
+            prepDefaultSB();
+            status_block[3] = 0x0000; // Words left to be processed
+            status_block[4] = 0x0000; // TODO: last RBA processed (low)
+            status_block[5] = 0x0000; // last RBA processed (high)
+            status_block[6] = 0x0000; // Number of blocks required to recover error
+            loadStatusBlock();
+  
+            doISR((cmd_block[0] & ATN_DEV_MASK) | 0x1); // Command complete
+            pendInterrupt(PEND_INT);
+          }
 
-          //
-          // TODO: Check original command, see if we need to write data
-          //
+
           
-          sb_cmd_status = 1;
           
-          prepDefaultSB();
-          status_block[3] = 0x0000; // Words left to be processed
-          status_block[4] = 0x0000; // TODO: last RBA processed (low)
-          status_block[5] = 0x0000; // last RBA processed (high)
-          status_block[6] = 0x0000; // Number of blocks required to recover error
-          loadStatusBlock();
-
-          doISR((cmd_block[0] & ATN_DEV_MASK) | 0x1); // Command complete
-          pendInterrupt(PEND_INT);
         }
       }
     }
