@@ -2,6 +2,7 @@
 
 
 // Pin definitions
+#define DEBUG_PIN 0
 #define PIN_RD 36
 #define PIN_WR 37
 #define PIN_INT 29
@@ -116,6 +117,7 @@ bool has_sdcard;
 uint32_t disk_size = 0; // In sectors/RBAs
 
 uint32_t current_rba = 0;
+uint32_t psu_rba_max = 0;
 uint32_t rba_transfer_count = 0;
 
 
@@ -173,6 +175,7 @@ void setup() {
   pinMode(ADDR1, OUTPUT);
   pinMode(ADDR2, OUTPUT);
   pinMode(ADDR3, OUTPUT);
+  pinMode(DEBUG_PIN, OUTPUT);
 
   if (!sd.begin(SdioConfig(FIFO_SDIO))) {
     Serial.println("No SD card found.");
@@ -231,11 +234,21 @@ int diskSetup() {
   Serial.print("Disk size (RBAs): ");
   Serial.println(disk_size, DEC);
 
+  psu_rba_max = disk_size - 1; // Set pseudo RBA max to the disk size
+  // FIXME: eventually store this value nonvolatile if directed to by the Set RBA Max command
+
   return 0;
 }
 
 int readDiskRBA(uint32_t rba)
 {
+  // ES testing, load all zeros for IML sectors!
+  #if 0
+  if (rba >= 0x3BD35 && rba <= 0x3BFFF) {
+    memset(transfer_buffer, 0, 512);
+    return 0;
+  }
+  #endif
   if (!file.seek((uint64_t)rba * 512)) {
     return 1;
   }
@@ -499,8 +512,8 @@ void processCmdBlock()
       if (cmd_block[0] & _BV(11)) { // bit 11, 1=pseudo RBA
         Serial.println("Pseudo");
         status_block[1] = 0x0200;
-        status_block[2] = 0x1001; // Low word number of RBAs
-        status_block[3] = 0x0; // High word number of RBAs
+        status_block[2] = (psu_rba_max + 1) & 0xFFFF; // Low word number of RBAs
+        status_block[3] = (psu_rba_max + 1) >> 16; // High word number of RBAs
         status_block[4] = disk_size / 2048; // Number of cylinders
         status_block[5] = (0x20 << 8) | 0x3f; // 32 sectors per track, 64 tracks per cylinder
       } else {
@@ -620,13 +633,17 @@ void processCmdBlock()
     // case 0x0017: Format prepare not supported
     
     case 0x401A: // Set Max RBA (page 44)
+      Serial.print("Set RBA max to ");
       // Max RBA is in cmd_block[2] and cmd_block[3]
-      // TODO: what to do about this?
+      psu_rba_max = (uint32_t)cmd_block[2] | ((uint32_t)cmd_block[3] << 16);
+      Serial.println(psu_rba_max, HEX);
+      // TODO: write this to a nonvolatile storage if cmd_block[1] == 1
       doISR(0x01); // Command complete for drive. Page 25
       prepDefaultSB();
       break;
-    
-    case (DEV_CONTROLLER | 0x401B): // Set power saving mode (page 40)
+
+    case 0x401B: // Set power saving mode (page 40) seems to be drive only.
+      Serial.println("Set power saving mode.");
       // cmd_block[3] contains idle to standby timeout value. We don't care about that.
       doISR(0x01); // Command complete for drive. Page 25
       prepDefaultSB();
@@ -640,7 +657,7 @@ void processCmdBlock()
 
     default:
       Serial.print("Unknown command ");
-      Serial.println(cmd_no_opt, DEC);
+      Serial.println(cmd_no_opt, HEX);
       doISR((cmd_block[0] & ATN_DEV_MASK) | ISR_CMD_ERROR);
       sb_cmd_error = CMD_ERR_UNSUPP;
       prepDefaultSB();
@@ -786,6 +803,14 @@ void mainLoop() {
     // We have command block words coming in from the host.
     if (expect_cb && (flags & _BV(FLAG_CIFR_FULL))) {
       cmd_block[cmd_count] = portRead(REG_CIFR);
+      // ES testing, add GPIO toggling here
+
+      if ((cmd_block[cmd_count] == 0x6) && (cmd_count == 0)) {
+        digitalWriteFast(DEBUG_PIN, 1);
+        delayMicroseconds(1);
+        digitalWriteFast(DEBUG_PIN, 0);
+      }
+      
       Serial.print("Got cmd block byte: ");
       Serial.print(cmd_count);
       Serial.print(" - ");
@@ -834,6 +859,8 @@ void mainLoop() {
             clearFlag(_BV(FLAG_CMD_PROG));
             clearFlag(_BV(FLAG_BUSY));
           }
+          // ES testing
+          portRead(REG_CIFR); // Ensure interface is empty
           break;
         case ATN_RESET:
           if ((atn_cmd & ATN_DEV_MASK) == 0xE0) {
@@ -847,7 +874,8 @@ void mainLoop() {
         case ATN_COMMAND:
           // Expect to receive command blocks
           Serial.println("Set busy");
-          portRead(REG_CIFR); // Ensure interface is empty
+          //This doesn't seem to work if the first command word comes in very quick after the ATN...
+          //portRead(REG_CIFR); // Ensure interface is empty
           expect_cb = true;
           cmd_count = 0;
           break;

@@ -320,6 +320,16 @@ if (1) begin
         pos_write_cycle(16'h0003, 8'b10110010); // Value here goes to POS 03
         pos_write_cycle(16'h0002, 8'h01); // Value here goes to POS 02
 end
+
+        // Try a few back to back operations
+        t_cifr_read = 1;
+        #100
+        t_cifr_read = 0;
+        read_cycle(16'h0000, 0, 1);
+        write_cycle(16'h3510, 16'h06E1, 0, 0);
+        read_cycle(16'h3512, 0, 1);
+        write_cycle(16'h3510, 16'h0006, 0, 0);
+
         // More dummy cycles so we don't accidentally clear transfer req
         read_cycle(16'h0000, 0, 1);
         read_cycle(16'h0000, 0, 1);
