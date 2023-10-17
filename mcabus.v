@@ -151,6 +151,8 @@ module mcabus(
         end
     end
 
+    assign test1 = flag_atn; //ES testing
+
     // Busy flag: Set when ATN written to. Cleared by Teensy
     always @ (posedge clk) begin
         if ((reg_atn_set == 2'b01) || (reg_t_busy_clear == 2'b10) || clear_all) begin
