@@ -122,6 +122,13 @@ uint32_t rba_transfer_count = 0;
 bool no_disk_op = false;
 
 
+void debugPulse()
+{
+  digitalWriteFast(DEBUG_PIN, 1);
+  delayMicroseconds(1);
+  digitalWriteFast(DEBUG_PIN, 0);
+}
+
 // Set 16-bit data port direction
 void setPortMode(uint8_t mode)
 {
@@ -267,9 +274,9 @@ int writeDiskRBA(uint32_t rba)
     return 1;
   }
   //FIXME until i figure out the issue
-  //if (!file.write(transfer_buffer, 512)) {
-  //  return 1;
-  //}
+  if (!file.write(transfer_buffer, 512)) {
+    return 1;
+  }
   return 0;
 }
 
@@ -453,9 +460,9 @@ void processCmdBlock()
       // cmd_block[3] = high word RBA offset
       current_rba = cmd_block[2] | cmd_block[3] << 16;
       rba_transfer_count = cmd_block[1];
-      
-      Serial.print("Preparing to read sector ");
-      Serial.println(current_rba, DEC);
+      Serial.print("R");
+//      Serial.print("Preparing to read sector ");
+//      Serial.println(current_rba, DEC);
       status_max = 0; // No status data
       //for (i = 0; i < 512; i++) {
       //  transfer_buffer[i] = i & 0xFF;
@@ -479,10 +486,10 @@ void processCmdBlock()
       rba_transfer_count = cmd_block[1];
       Serial.print("Preparing to write sector ");
       Serial.println(current_rba, DEC);
-      
       status_max = 0; // No status data
       // TODO: Validate RBA?
       doISR(DEV_DRIVE | ISR_DATA_XFER_RDY);
+      setFlag(_BV(FLAG_TREQ_SET));
       transfer_state = TS_WRITE;
       transfer_count = 512; // Our buffer is just one sector to make things easy
       transfer_index = 0;
@@ -673,7 +680,8 @@ void processCmdBlock()
       doISR(0x01); // Command complete for drive. Page 25
       prepDefaultSB();
       break;
-    
+
+    case 0x001C:
     case (DEV_CONTROLLER | 0x001C): // Power conservation command (page 39)
       // cmd_block[1] contains the power mode requested. We don't care about that.
       doISR(0x01);
@@ -755,16 +763,16 @@ void mainLoop() {
           portWrite(REG_DREG, d);
           setFlag(_BV(FLAG_TREQ_SET)); // Tell host there is data
         } else {
-          Serial.print("Done with read data transfer. Last index ");
-          Serial.println(transfer_index, HEX);
+          //Serial.print("Done with read data transfer. Last index ");
+          //Serial.println(transfer_index, HEX);
           rba_transfer_count--;
           // Any more sectors to read?
 
           if (rba_transfer_count > 0) {
             current_rba++;
             if (!no_disk_op) {
-              Serial.print("Preparing to read sector ");
-              Serial.println(current_rba, DEC);
+              //Serial.print("Preparing to read sector ");
+              //Serial.println(current_rba, DEC);
               readDiskRBA(current_rba);
             }
             transfer_count = 512;
@@ -778,7 +786,7 @@ void mainLoop() {
             status_block[5] = current_rba >> 16; // last RBA processed (high)
             status_block[6] = 0x0000; // Number of blocks required to recover error
             loadStatusBlock();
-            
+            Serial.println(".");
             doISR((cmd_block[0] & ATN_DEV_MASK) | 0x1); // Command complete
             pendInterrupt(PEND_INT);
           }
@@ -790,13 +798,18 @@ void mainLoop() {
     if (transfer_state == TS_WRITE) {
       if (!(portRead(REG_FLAGS) & _BV(FLAG_TREQ_STATE))) { // Host sent us data
         d = portRead(REG_DREG);
+        if (transfer_index == 0) {
+          Serial.println(d, HEX);
+        }
         // FIXME: handle 8 or 16 bit transfers
         //Serial.print("being written at index: ");
         //Serial.print(transfer_index, HEX);
         //Serial.print("data: ");
         //Serial.println(d, HEX);
-        transfer_buffer[transfer_index++] = d & 0xFF;
-        transfer_buffer[transfer_index++] = d >> 8;
+        transfer_buffer[transfer_index] = d & 0xFF;
+        transfer_index++;
+        transfer_buffer[transfer_index] = d >> 8;
+        transfer_index++;
         if (transfer_index < transfer_count) {
           setFlag(_BV(FLAG_TREQ_SET)); // Ready for more data
         } else {
@@ -841,13 +854,14 @@ void mainLoop() {
     // We have command block words coming in from the host.
     if (expect_cb && (flags & _BV(FLAG_CIFR_FULL))) {
       cmd_block[cmd_count] = portRead(REG_CIFR);
-      // ES testing, add GPIO toggling here
 
+      
+      // ES testing, add GPIO toggling here
+      #if 0
       if ((cmd_block[cmd_count] == 0x6) && (cmd_count == 0)) {
-        digitalWriteFast(DEBUG_PIN, 1);
-        delayMicroseconds(1);
-        digitalWriteFast(DEBUG_PIN, 0);
+        debugPulse();
       }
+      #endif
       
       Serial.print("Got cmd block byte: ");
       Serial.print(cmd_count);
@@ -891,6 +905,10 @@ void mainLoop() {
             Serial.println("Cleared some other int.");
           } else {
             // FIXME: Sometimes we get an extra EOI. Mailbox problem?
+            // ES testing
+            #if 0
+            debugPulse();
+            #endif
             Serial.print("EOI but int_pending is ");
             Serial.println(int_pending, DEC);
             int_pending = 0;
