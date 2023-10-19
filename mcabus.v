@@ -169,13 +169,19 @@ module mcabus(
 
     // Busy flag: Set when ATN written to. Cleared by Teensy
     always @ (posedge clk) begin
-        if ((reg_atn_set_match) || (reg_t_busy_clear == 2'b10) || clear_all) begin
-            flag_busy <= clear_all ? 1'b0 : ((reg_t_busy_clear == 2'b10) ? 1'b0 : 1'b1);
+        if (clear_all || (reg_t_busy_clear == 2'b10)) begin
+            flag_busy <= 1'b0;
+        end else if (reg_atn_set_match) begin
+            flag_busy <= 1'b1;
         end
     end
 
     // Command Interface Register Full
-    wire flag_ci_full_set = la_mca_op & ~la_s0_w_l & (la_addr == REG_CIFR_L);
+    reg flag_ci_full_set = 1'b0;
+    always @ (negedge cmd_l) begin
+        flag_ci_full_set <= addressed & cd_setup_l & ~s0_w_l & (bus_a == REG_CIFR_L);
+    end
+
     reg [1:0] reg_ci_full_set;
     reg [1:0] reg_t_cifr_read;
 
@@ -185,13 +191,19 @@ module mcabus(
     end
 
     always @ (posedge clk) begin
-        if ((reg_ci_full_set == 2'b01) || (reg_t_cifr_read == 2'b10) || clear_all) begin
-            flag_ci_full <= clear_all ? 1'b0 : ((reg_t_cifr_read == 2'b10) ? 1'b0 : 1'b1);
+        if (clear_all || (reg_t_cifr_read == 2'b10)) begin
+            flag_ci_full <= 1'b0;
+        end else if (reg_ci_full_set == 2'b01) begin
+            flag_ci_full <= 1'b1;
         end
     end
 
     // ISR register full
-    wire flag_isr_clear = la_mca_op & ~la_s1_r_l & (la_addr == REG_ISR);
+    reg flag_isr_clear = 1'b0;
+    always @ (negedge cmd_l) begin
+        flag_isr_clear <= addressed & cd_setup_l & ~s1_r_l & (bus_a == REG_ISR);
+    end
+
     reg [1:0] reg_isr_clear;
     reg [1:0] reg_t_isr_write;
 
@@ -201,13 +213,18 @@ module mcabus(
     end
 
     always @ (posedge clk) begin
-        if ((reg_isr_clear == 2'b10) || (reg_t_isr_write == 2'b01) || clear_all) begin
-            flag_isr <= clear_all ? 1'b0 : ((reg_t_isr_write == 2'b01) ? 1'b1 : 1'b0);
+        if (clear_all || (reg_isr_clear == 2'b10)) begin
+            flag_isr <= 1'b0;
+        end else if (reg_t_isr_write == 2'b01) begin
+            flag_isr <= 1'b1;
         end
     end
 
     // Status Interface Register Full
-    wire flag_sifr_clear = la_mca_op & ~la_s1_r_l & (la_addr == REG_SIFR_L);
+    reg flag_sifr_clear = 1'b0;
+    always @ (negedge cmd_l) begin
+        flag_sifr_clear <= addressed & cd_setup_l & ~s1_r_l & (bus_a == REG_SIFR_L);
+    end
     reg [1:0] reg_sifr_clear;
     reg [1:0] reg_t_sifr_write;
 
@@ -218,12 +235,21 @@ module mcabus(
     // Clear register at end of MCA transaction
     // Set register when Teensy latches new value
     always @ (posedge clk) begin
-        if ((reg_sifr_clear == 2'b10) || (reg_t_sifr_write == 2'b01) || clear_all) begin
-            flag_si_full <= clear_all ? 1'b0 : ((reg_t_sifr_write == 2'b01) ? 1'b1 : 1'b0);
+        if (clear_all || (reg_sifr_clear == 2'b10)) begin
+            flag_si_full <= 1'b0;
+        end else if (reg_t_sifr_write == 2'b01) begin
+            flag_si_full <= 1'b1;
         end
     end
 
     // Data register drequest
+//    reg treq_clear = 1'b0;
+//
+//    always @ (negedge cmd_l) begin
+//        treq_clear <= (addressed & cd_setup_l & (~s1_r_l | s0_w_l) & (bus_a == REG_DREG)) |
+//                      (la_dma_selected & ~cmd_l);
+//
+ //   end
     wire treq_clear = (la_mca_op & (~la_s1_r_l || ~la_s0_w_l) & (la_addr == REG_DREG)) |
                       (la_dma_selected & ~cmd_l); // IO r/w of DREG *or* dma operation (qual'd by CMD)
 
@@ -235,11 +261,16 @@ module mcabus(
         reg_treq_set <= {reg_treq_set[0], t_treq_set};
     end
     always @ (posedge clk) begin
-        if ((reg_treq_clear == 2'b10) || (reg_treq_set == 2'b10) || clear_all) begin
-            flag_treq <= clear_all ? 1'b0 : ((reg_treq_set == 2'b10) ? 1'b1 : 1'b0);
+        if (clear_all || (reg_treq_clear == 2'b10)) begin
+            flag_treq <= 1'b0;
+        end else if (reg_treq_set == 2'b10) begin
+            flag_treq <= 1'b1;
         end
-        if ((reg_treq_clear == 2'b01) || clear_all) begin
-            flag_treq_16 <= clear_all ? 1'b0 : ~la_sbhe_l;
+
+        if (clear_all) begin
+            flag_treq_16 <= 1'b0;
+        end else begin
+            flag_treq_16 <= ~la_sbhe_l;
         end
     end
 
