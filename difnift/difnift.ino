@@ -782,7 +782,7 @@ void mainLoop() {
       if (!(portRead(REG_FLAGS) & _BV(FLAG_TREQ_STATE))) { // Nothing in data buffer
         if (transfer_index < transfer_count) {
           //Serial.print("bei: ");
-          Serial.println(transfer_index, HEX);
+         //Serial.println(transfer_index, HEX);
           d = transfer_buffer[transfer_index] | (transfer_buffer[transfer_index + 1] << 8);
           transfer_index += 2;
           portWrite(REG_DREG, d);

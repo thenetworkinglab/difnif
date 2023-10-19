@@ -243,15 +243,12 @@ module mcabus(
     end
 
     // Data register drequest
-//    reg treq_clear = 1'b0;
-//
-//    always @ (negedge cmd_l) begin
-//        treq_clear <= (addressed & cd_setup_l & (~s1_r_l | s0_w_l) & (bus_a == REG_DREG)) |
-//                      (la_dma_selected & ~cmd_l);
-//
- //   end
-    wire treq_clear = (la_mca_op & (~la_s1_r_l || ~la_s0_w_l) & (la_addr == REG_DREG)) |
-                      (la_dma_selected & ~cmd_l); // IO r/w of DREG *or* dma operation (qual'd by CMD)
+    reg treq_clear1 = 1'b0;
+    always @ (negedge cmd_l) begin
+        treq_clear1 <= (addressed & cd_setup_l & (~s1_r_l | s0_w_l) & (bus_a == REG_DREG));
+    end
+
+    wire treq_clear = treq_clear1 | (la_dma_selected & ~cmd_l);
 
     reg [1:0] reg_treq_clear;
     reg [1:0] reg_treq_set;
@@ -389,26 +386,16 @@ module mcabus(
     // Also includes data being written to us.
     reg la_cd_setup_l;
     reg [3:0] la_addr;
-    reg [15:0] la_data_in;
     reg la_sbhe_l;
     reg la_data_read;
-
-    reg la_mca_op;
-    reg la_s0_w_l;
-    reg la_s1_r_l;
 
     reg la_dma_selected;
 
     // Data input latches
     always @ (negedge cmd_l) begin
         la_addr <= bus_a;
-        la_data_in <= bus_d; // Note that data out needs to be ready by rising edge of CMD
         la_cd_setup_l <= cd_setup_l;
         la_sbhe_l <= sbhe_l;
-        la_s0_w_l <= s0_w_l;
-        la_s1_r_l <= s1_r_l;
-
-        la_mca_op <= addressed & cd_setup_l;
 
         la_data_read <= ~s1_r_l & (addressed | dma_selected);
         //la_data_read <= ~s1_r_l & (addressed | dma_selected) & cd_setup_l; // Use this to disable POS
