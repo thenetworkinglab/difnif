@@ -3,6 +3,7 @@
 
 // Pin definitions
 #define DEBUG_PIN 0
+#define DEBUG_PIN2 1
 #define PIN_RD 36
 #define PIN_WR 37
 #define PIN_INT 29
@@ -121,13 +122,28 @@ uint32_t psu_rba_max = 0;
 uint32_t rba_transfer_count = 0;
 bool no_disk_op = false;
 
+// Benchmarking
+elapsedMicros since_sd_op;
+elapsedMicros since_dma_start;
 
+bool debugpinstate = false;
 void debugPulse()
 {
-  digitalWriteFast(DEBUG_PIN, 1);
-  delayMicroseconds(1);
-  digitalWriteFast(DEBUG_PIN, 0);
+  digitalWriteFast(DEBUG_PIN, !debugpinstate);
+  debugpinstate = !debugpinstate;
+  //delayMicroseconds(1);
+  //digitalWriteFast(DEBUG_PIN, 0);
 }
+
+bool debugpinstate2 = false;
+void debugPulse2()
+{
+  digitalWriteFast(DEBUG_PIN2, !debugpinstate2);
+  debugpinstate2 = !debugpinstate2;
+  //delayMicroseconds(1);
+  //digitalWriteFast(DEBUG_PIN, 0);
+}
+
 
 // Set 16-bit data port direction
 void setPortMode(uint8_t mode)
@@ -147,7 +163,7 @@ uint16_t portRead(uint8_t address)
     digitalWriteFast(ADDR2, (address >> 2) & 1);
     digitalWriteFast(ADDR3, (address >> 3) & 1);
     digitalWriteFast(PIN_RD, 1);
-    delayMicroseconds(3);
+    delayMicroseconds(3); //ES was 3.
     ret = GPIO6_PSR >> 16;
     // Grab port contents
     digitalWriteFast(PIN_RD, 0);
@@ -184,6 +200,7 @@ void setup() {
   pinMode(ADDR2, OUTPUT);
   pinMode(ADDR3, OUTPUT);
   pinMode(DEBUG_PIN, OUTPUT);
+  pinMode(DEBUG_PIN2, OUTPUT);
 
   if (!sd.begin(SdioConfig(FIFO_SDIO))) {
     Serial.println("No SD card found.");
@@ -250,6 +267,7 @@ int diskSetup() {
 
 int readDiskRBA(uint32_t rba)
 {
+  since_sd_op = 0;
   // ES testing, load all zeros for IML sectors!
   #if 0
   if (rba >= 0x3BD35 && rba <= 0x3BFFF) {
@@ -264,19 +282,23 @@ int readDiskRBA(uint32_t rba)
   if (!file.read(transfer_buffer, 512)) {
     return 1;
   }
+  Serial.print("rtime: ");
+  Serial.println(since_sd_op);
   return 0;
 }
 
 int writeDiskRBA(uint32_t rba)
 {
+  since_sd_op = 0;
   // TODO: check against file size limit
   if (!file.seek((uint64_t)rba * 512)) {
     return 1;
   }
-  //FIXME until i figure out the issue
   if (!file.write(transfer_buffer, 512)) {
     return 1;
   }
+  Serial.print("wtime: ");
+  Serial.println(since_sd_op);
   return 0;
 }
 
@@ -373,6 +395,9 @@ void loadStatusBlock()
   status_max--;
   portWrite(REG_SIFR, status_block[status_count]);
   Serial.print("SIFR: count ");
+  #if 0
+  debugPulse();
+  #endif
   Serial.println(status_count);
   status_count++;
 }
@@ -468,7 +493,7 @@ void processCmdBlock()
       //  transfer_buffer[i] = i & 0xFF;
       //}
       readDiskRBA(current_rba);
-      
+      since_dma_start = 0; // Benchmarking
       doISR(DEV_DRIVE | ISR_DATA_XFER_RDY);
       transfer_state = TS_READ;
       transfer_count = 512; // Our buffer is just one sector to make things easy
@@ -756,15 +781,15 @@ void mainLoop() {
     if (transfer_state == TS_READ) {
       if (!(portRead(REG_FLAGS) & _BV(FLAG_TREQ_STATE))) { // Nothing in data buffer
         if (transfer_index < transfer_count) {
-          //Serial.print("being read at index: ");
-          //Serial.println(transfer_index, HEX);
+          //Serial.print("bei: ");
+          Serial.println(transfer_index, HEX);
           d = transfer_buffer[transfer_index] | (transfer_buffer[transfer_index + 1] << 8);
           transfer_index += 2;
           portWrite(REG_DREG, d);
           setFlag(_BV(FLAG_TREQ_SET)); // Tell host there is data
         } else {
-          //Serial.print("Done with read data transfer. Last index ");
-          //Serial.println(transfer_index, HEX);
+          Serial.print("Done with read data transfer. Last index ");
+          Serial.println(transfer_index, HEX);
           rba_transfer_count--;
           // Any more sectors to read?
 
@@ -775,10 +800,13 @@ void mainLoop() {
               //Serial.println(current_rba, DEC);
               readDiskRBA(current_rba);
             }
+            since_dma_start = 0;
             transfer_count = 512;
             transfer_index = 0; // Continue in read state at start of buffer
           } else {
             transfer_state = TS_IDLE;
+            Serial.print("tdma: ");
+            Serial.println(since_dma_start);
             sb_cmd_status = 1;
             prepDefaultSB();
             status_block[3] = 0x0000; // Words left to be processed
@@ -893,6 +921,7 @@ void mainLoop() {
           // since technically we can have an interrupt pending
           // from both the controller and the drive at the same time.
           // Check if we have a pending interrupt
+          debugPulse2();
           if (int_pending == PEND_INT_RESET) {
             int_pending = 0;
             // Reset interrupt clears the busy flag (Page 23)
@@ -907,7 +936,7 @@ void mainLoop() {
           } else {
             // FIXME: Sometimes we get an extra EOI. Mailbox problem?
             // ES testing
-            #if 0
+            #if 1
             debugPulse();
             #endif
             Serial.print("EOI but int_pending is ");

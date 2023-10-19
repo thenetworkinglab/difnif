@@ -102,8 +102,8 @@ set_io led1         38
 set_io sd_clk       1
 set_io sd_cmd       2
 set_io sd_switch    3
-set_io sd_d1        4
-set_io sd_d0        7
-set_io sd_d3        8
-set_io sd_d2        9
+set_io sd_d[1]      4
+set_io sd_d[0]      7
+set_io sd_d[3]      8
+set_io sd_d[2]      9
 

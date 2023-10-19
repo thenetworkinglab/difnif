@@ -46,10 +46,7 @@ module difnif_top(
     // SD card (temporarily used for testing)
     output sd_clk,
     output sd_cmd,
-    input sd_d0,
-    input sd_d1,
-    input sd_d2,
-    input sd_d3,
+    output [3:0]sd_d,
     input sd_switch,
 
     // LEDs
@@ -127,6 +124,7 @@ module difnif_top(
         .preempt_o_l(preempt_o_l),
         .test1(sd_clk), // FIXME testing
         .test2(sd_cmd),
+        .tbus(sd_d), // more testing
 
         // Teensy connections
         .t_atn(t_atn),

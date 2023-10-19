@@ -43,6 +43,7 @@ module mcabus(
     output test1,
     output test2,
     input test3,
+    output [3:0] tbus,  // test bus
 
     // Wiring from Teensy
     output [7:0] t_atn,   // Attention data to Teensy
@@ -99,9 +100,6 @@ module mcabus(
     reg [15:0] reg_cifr = 16'h0000;
     reg [7:0] reg_atn = 8'h00;
 
-    // Flag clear signal
-    wire clear_all = t_clear_all | t_hard_reset;
-
     // Interrupt request line
     assign irq14_l = !(flag_isr & control_int_enable);
 
@@ -133,8 +131,18 @@ module mcabus(
      ** Registers and handshaking interface **
     */
 
+    // Signal to clear flags -- sync it up.
+    reg clear_all = 1'b0;
+    always @ (posedge clk) begin
+        clear_all <= t_clear_all | t_hard_reset;
+    end
+
     // ATN register full
-    wire flag_atn_set = la_mca_op & ~la_s0_w_l & (la_addr == REG_ATN);
+    reg flag_atn_set = 1'b0;
+    always @ (negedge cmd_l) begin
+        flag_atn_set <= addressed & cd_setup_l & ~s0_w_l & (bus_a == REG_ATN);
+    end
+
     reg [1:0] reg_atn_set;
     reg [1:0] reg_t_atn_read;
     reg [1:0] reg_t_busy_clear;
@@ -145,17 +153,23 @@ module mcabus(
         reg_t_busy_clear <= {reg_t_busy_clear[0], t_busy_clear};
     end
 
+    wire reg_atn_set_match = (reg_atn_set == 2'b01);
+
     always @ (posedge clk) begin
-        if ((reg_atn_set == 2'b01) || (reg_t_atn_read == 2'b10) || clear_all) begin
-            flag_atn <= clear_all ? 1'b0 : ((reg_t_atn_read == 2'b10) ? 1'b0 : 1'b1);
+        if (clear_all || (reg_t_atn_read == 2'b10)) begin
+            flag_atn <= 1'b0;
+        end else if (reg_atn_set_match) begin
+            flag_atn <= 1'b1;
         end
     end
 
-    assign test1 = flag_atn; //ES testing
+    assign test1 = flag_atn;
+    assign test2 = reg_atn_set_match;
+    assign tbus = {flag_atn_set, clear_all, reg_t_atn_read};
 
     // Busy flag: Set when ATN written to. Cleared by Teensy
     always @ (posedge clk) begin
-        if ((reg_atn_set == 2'b01) || (reg_t_busy_clear == 2'b10) || clear_all) begin
+        if ((reg_atn_set_match) || (reg_t_busy_clear == 2'b10) || clear_all) begin
             flag_busy <= clear_all ? 1'b0 : ((reg_t_busy_clear == 2'b10) ? 1'b0 : 1'b1);
         end
     end
