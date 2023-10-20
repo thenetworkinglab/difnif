@@ -4,6 +4,7 @@
 // Pin definitions
 #define DEBUG_PIN 0
 #define DEBUG_PIN2 1
+#define PIN_CLK 35
 #define PIN_RD 36
 #define PIN_WR 37
 #define PIN_INT 29
@@ -11,6 +12,8 @@
 #define ADDR1 12
 #define ADDR2 11
 #define ADDR3 13
+
+#define DPORT_MASK (0xFFFF0000)
 
 // Register definitions for Teensy interface
 #define REG_TEST 0
@@ -148,8 +151,11 @@ void debugPulse2()
 // Set 16-bit data port direction
 void setPortMode(uint8_t mode)
 {
-    for (int i = 0; i < 16; i++) {
-      pinMode(portpin[i], mode);
+    // We are using GPIO6 pins 16 to 31.
+    if (mode == OUTPUT) {
+      GPIO6_GDIR |= DPORT_MASK; // Set bits to '1' for output
+    } else if (mode == INPUT) {
+      GPIO6_GDIR &= ~DPORT_MASK; // Clear bits to '0' for input
     }
 }
 
@@ -163,7 +169,7 @@ uint16_t portRead(uint8_t address)
     digitalWriteFast(ADDR2, (address >> 2) & 1);
     digitalWriteFast(ADDR3, (address >> 3) & 1);
     digitalWriteFast(PIN_RD, 1);
-    delayMicroseconds(3); //ES was 3.
+    delayNanoseconds(200); //ES was 3us
     ret = GPIO6_PSR >> 16;
     // Grab port contents
     digitalWriteFast(PIN_RD, 0);
@@ -181,7 +187,7 @@ void portWrite(uint8_t address, uint16_t data)
     setPortMode(OUTPUT);
     GPIO6_DR = (GPIO6_DR & 0xFFFF) | (data << 16);
     digitalWriteFast(PIN_WR, 1);
-    delayMicroseconds(3);
+    delayNanoseconds(200); //ES was 3us
     digitalWriteFast(PIN_WR, 0);
     setPortMode(INPUT);
 }
@@ -192,6 +198,7 @@ void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
   setPortMode(INPUT);
+  pinMode(PIN_CLK, INPUT);
   pinMode(PIN_RD, OUTPUT);
   pinMode(PIN_WR, OUTPUT);
   pinMode(PIN_INT, INPUT);
@@ -779,7 +786,7 @@ void mainLoop() {
     }
 
     if (transfer_state == TS_READ) {
-      if (!(portRead(REG_FLAGS) & _BV(FLAG_TREQ_STATE))) { // Nothing in data buffer
+      if (!(flags & _BV(FLAG_TREQ_STATE))) { // Nothing in data buffer
         if (transfer_index < transfer_count) {
           //Serial.print("bei: ");
          //Serial.println(transfer_index, HEX);
@@ -820,11 +827,10 @@ void mainLoop() {
           }
         }
       }
-
     }
 
     if (transfer_state == TS_WRITE) {
-      if (!(portRead(REG_FLAGS) & _BV(FLAG_TREQ_STATE))) { // Host sent us data
+      if (!(flags & _BV(FLAG_TREQ_STATE))) { // Host sent us data
         d = portRead(REG_DREG);
         if (transfer_index == 0) {
           Serial.println(d, HEX);
@@ -871,11 +877,7 @@ void mainLoop() {
   
             doISR((cmd_block[0] & ATN_DEV_MASK) | 0x1); // Command complete
             pendInterrupt(PEND_INT);
-          }
-
-
-          
-          
+          }          
         }
       }
     }
