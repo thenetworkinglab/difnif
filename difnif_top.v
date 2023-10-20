@@ -59,8 +59,8 @@ module difnif_top(
     input [3:0]tn_addr,
     inout [15:0]tn_d,
     output tn_int,
+    output tn_clk,
     input tn30,
-    input tn35
     );
 
     reg[22:0] counter;
@@ -158,8 +158,8 @@ module difnif_top(
         .tn_addr(tn_addr),
         .tn_d(tn_d),
         .tn_int(tn_int),
+        .clk(clk),
         .tn30(tn30),
-        .tn35(tn35),
 
         // Register interface
         .t_atn(t_atn),
@@ -204,6 +204,9 @@ module difnif_top(
     `else
     assign clk = clk_10m;
     `endif
+
+    assign tn_clk = 1'b0; // No clock for now
+    //assign tn_clk = clk; // Clock to Teensy in case I want to make a synchronous interface
 
     assign led0 = counter[22];
     assign led1 = counter[21];

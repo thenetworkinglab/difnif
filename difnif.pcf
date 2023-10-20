@@ -89,9 +89,9 @@ set_io tn_addr[3]   19
 set_io tn_rd        143
 set_io tn_wr        10
 set_io tn_int       144
+set_io tn_clk       141
 
 # Spares
-set_io tn35         141
 set_io tn30         142
 
 ### LEDs

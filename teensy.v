@@ -15,8 +15,8 @@ module teensy(
     input [3:0]tn_addr,
     inout [15:0]tn_d,
     output tn_int,
+    input clk,
     input tn30,
-    input tn35,
 
     // Connections to MCA interface
     // ATN register
