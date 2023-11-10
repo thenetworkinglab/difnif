@@ -169,6 +169,8 @@ uint16_t portRead(uint8_t address)
     digitalWriteFast(ADDR2, (address >> 2) & 1);
     digitalWriteFast(ADDR3, (address >> 3) & 1);
     digitalWriteFast(PIN_RD, 1);
+    // If I want to go faster than 200ns, I will need to make this a synchronous
+    // interface using a clock coming out of the FPGA.
     delayNanoseconds(200); //ES was 3us
     ret = GPIO6_PSR >> 16;
     // Grab port contents
@@ -1145,6 +1147,9 @@ void loop() {
   uint16_t d, i;
   uint8_t cmd, t;
   // put your main code here, to run repeatedly:
+  // Comment out the following two lines for debugging
+  esdiReset();
+  mainLoop();
 
   // FIXME: make it an interrupt?
   t = digitalReadFast(PIN_INT);
