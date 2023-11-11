@@ -1471,11 +1471,11 @@
         )
       )
     )
-    (symbol "power:+5V" (power) (pin_names (offset 0)) (in_bom yes) (on_board yes)
+    (symbol "power:+5VD" (power) (pin_names (offset 0)) (in_bom yes) (on_board yes)
       (property "Reference" "#PWR" (id 0) (at 0 -3.81 0)
         (effects (font (size 1.27 1.27)) hide)
       )
-      (property "Value" "+5V" (id 1) (at 0 3.556 0)
+      (property "Value" "+5VD" (id 1) (at 0 3.556 0)
         (effects (font (size 1.27 1.27)))
       )
       (property "Footprint" "" (id 2) (at 0 0 0)
@@ -1487,10 +1487,10 @@
       (property "ki_keywords" "power-flag" (id 4) (at 0 0 0)
         (effects (font (size 1.27 1.27)) hide)
       )
-      (property "ki_description" "Power symbol creates a global label with name \"+5V\"" (id 5) (at 0 0 0)
+      (property "ki_description" "Power symbol creates a global label with name \"+5VD\"" (id 5) (at 0 0 0)
         (effects (font (size 1.27 1.27)) hide)
       )
-      (symbol "+5V_0_1"
+      (symbol "+5VD_0_1"
         (polyline
           (pts
             (xy -0.762 1.27)
@@ -1516,9 +1516,9 @@
           (fill (type none))
         )
       )
-      (symbol "+5V_1_1"
+      (symbol "+5VD_1_1"
         (pin power_in line (at 0 0 90) (length 0) hide
-          (name "+5V" (effects (font (size 1.27 1.27))))
+          (name "+5VD" (effects (font (size 1.27 1.27))))
           (number "1" (effects (font (size 1.27 1.27))))
         )
       )
@@ -2562,7 +2562,7 @@
     (stroke (width 0) (type default) (color 0 0 0 0))
     (uuid e1e2ae7d-b81d-4886-8c89-8d935631e9b6)
   )
-  (wire (pts (xy 106.68 121.92) (xy 116.84 121.92))
+  (wire (pts (xy 106.68 121.92) (xy 111.76 121.92))
     (stroke (width 0) (type default) (color 0 0 0 0))
     (uuid e1e7032c-6102-48c4-a7f0-22402e416a95)
   )
@@ -2777,7 +2777,7 @@
     (effects (font (size 1.27 1.27)) (justify left bottom))
     (uuid 2e3f6686-79a0-45da-a495-97c77271c238)
   )
-  (text "not used" (at 97.79 121.92 0)
+  (text "clock" (at 97.79 121.92 0)
     (effects (font (size 1.27 1.27)) (justify left bottom))
     (uuid 32481574-1b95-4272-85f6-d68274528c38)
   )
@@ -3833,6 +3833,22 @@
     (pin "1" (uuid 9c48b61c-ed14-425e-925e-6fa75d4f9e97))
   )
 
+  (symbol (lib_id "power:+5VD") (at 246.38 54.61 0) (unit 1)
+    (in_bom yes) (on_board yes) (fields_autoplaced)
+    (uuid 533b578e-65a7-4820-90a0-53999d2bfa42)
+    (property "Reference" "#PWR0107" (id 0) (at 246.38 58.42 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (property "Value" "+5VD" (id 1) (at 246.38 49.53 0))
+    (property "Footprint" "" (id 2) (at 246.38 54.61 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (property "Datasheet" "" (id 3) (at 246.38 54.61 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (pin "1" (uuid 03ae6270-16a0-4912-8b3e-42cc6f739a16))
+  )
+
   (symbol (lib_id "Mechanical:MountingHole_Pad") (at 63.5 182.88 0) (unit 1)
     (in_bom yes) (on_board yes) (fields_autoplaced)
     (uuid 55336152-d16d-4e15-8a84-c366eb347710)
@@ -4508,6 +4524,24 @@
     (pin "8" (uuid e3a67d41-86ef-4601-9cd7-bf62c6c5631e))
   )
 
+  (symbol (lib_id "Device:R_Small_US") (at 114.3 121.92 270) (unit 1)
+    (in_bom yes) (on_board yes)
+    (uuid d9888160-a86a-4125-915b-d7c8ee17c1c7)
+    (property "Reference" "R23" (id 0) (at 114.3 116.713 90))
+    (property "Value" "10" (id 1) (at 114.3 119.0244 90))
+    (property "Footprint" "Passive:RESC1608X55" (id 2) (at 114.3 121.92 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (property "Datasheet" "~" (id 3) (at 114.3 121.92 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (property "Mouser" "603-RC0603FR-0710RL" (id 4) (at 62.23 -6.35 0)
+      (effects (font (size 1.27 1.27)) hide)
+    )
+    (pin "1" (uuid 364272e6-9573-499c-a74d-d94c083dff91))
+    (pin "2" (uuid 3b74d857-cced-40ff-87c3-10519fec99cc))
+  )
+
   (symbol (lib_id "Mechanical:MountingHole_Pad") (at 78.74 182.88 0) (unit 1)
     (in_bom yes) (on_board yes) (fields_autoplaced)
     (uuid daaf4669-f708-4c55-ac57-a365796598d0)
@@ -4562,22 +4596,6 @@
       (effects (font (size 1.27 1.27)) hide)
     )
     (pin "1" (uuid 66113b64-9a66-4a80-91d0-f7a06c3390b3))
-  )
-
-  (symbol (lib_id "power:+5V") (at 246.38 54.61 0) (mirror y) (unit 1)
-    (in_bom yes) (on_board yes)
-    (uuid f9b1fd47-53a9-4b8e-93ad-29781e05e37e)
-    (property "Reference" "#PWR011" (id 0) (at 246.38 58.42 0)
-      (effects (font (size 1.27 1.27)) hide)
-    )
-    (property "Value" "+5V" (id 1) (at 245.999 50.2158 0))
-    (property "Footprint" "" (id 2) (at 246.38 54.61 0)
-      (effects (font (size 1.27 1.27)) hide)
-    )
-    (property "Datasheet" "" (id 3) (at 246.38 54.61 0)
-      (effects (font (size 1.27 1.27)) hide)
-    )
-    (pin "1" (uuid b81fac27-0dda-4c76-b694-b0d1e2678715))
   )
 
   (symbol (lib_id "logic:ICE40HX4K-TQ144") (at 86.36 60.96 0) (unit 3)
@@ -4855,9 +4873,6 @@
     (path "/e5793003-8842-4df4-aad1-4264b34c1470"
       (reference "#PWR010") (unit 1) (value "+3V3") (footprint "")
     )
-    (path "/f9b1fd47-53a9-4b8e-93ad-29781e05e37e"
-      (reference "#PWR011") (unit 1) (value "+5V") (footprint "")
-    )
     (path "/894e4742-c535-4b25-876b-aca8c621e9fb"
       (reference "#PWR012") (unit 1) (value "GND") (footprint "")
     )
@@ -4869,6 +4884,18 @@
     )
     (path "/c2c2b41d-50a0-4e78-b084-a991ec385ec5"
       (reference "#PWR015") (unit 1) (value "GND") (footprint "")
+    )
+    (path "/f4193393-2cc9-4286-85ab-d00d3620a7d2/f71cdeb2-e88c-46fd-9bca-790eca942cd5"
+      (reference "#PWR017") (unit 1) (value "+5V") (footprint "")
+    )
+    (path "/f4193393-2cc9-4286-85ab-d00d3620a7d2/82d6cc08-4f1f-47c2-8f65-ccda8c835038"
+      (reference "#PWR018") (unit 1) (value "+5VD") (footprint "")
+    )
+    (path "/f4193393-2cc9-4286-85ab-d00d3620a7d2/5c2054fb-8f82-4af4-88a9-ea1b20540e16"
+      (reference "#PWR019") (unit 1) (value "+5VD") (footprint "")
+    )
+    (path "/f4193393-2cc9-4286-85ab-d00d3620a7d2/9a68a24b-bdf8-49fc-8e7c-909dd654cb30"
+      (reference "#PWR020") (unit 1) (value "+5VD") (footprint "")
     )
     (path "/19b8b40d-8ec2-4dbf-9b1c-df901e2aebee"
       (reference "#PWR0101") (unit 1) (value "GND") (footprint "")
@@ -4887,6 +4914,9 @@
     )
     (path "/108af75a-90cd-4327-a316-c00221d759b9"
       (reference "#PWR0106") (unit 1) (value "GND") (footprint "")
+    )
+    (path "/533b578e-65a7-4820-90a0-53999d2bfa42"
+      (reference "#PWR0107") (unit 1) (value "+5VD") (footprint "")
     )
     (path "/f4193393-2cc9-4286-85ab-d00d3620a7d2/081d13b2-1f74-4ff1-82e8-fe530bcf0e88"
       (reference "#PWR0108") (unit 1) (value "GND") (footprint "")
@@ -4912,17 +4942,14 @@
     (path "/f4193393-2cc9-4286-85ab-d00d3620a7d2/18a28d40-1a55-4ca1-9ed6-5cc4b2a6c276"
       (reference "#PWR0115") (unit 1) (value "GND") (footprint "")
     )
-    (path "/f4193393-2cc9-4286-85ab-d00d3620a7d2/0a43c551-dbfe-43ff-a241-076a8ca91cef"
-      (reference "#PWR0116") (unit 1) (value "+5V") (footprint "")
+    (path "/78d98f44-3152-4de7-839f-c3effe832ce2/184eb276-7af8-4f9d-b232-4494c69b00fb"
+      (reference "#PWR0116") (unit 1) (value "GND") (footprint "")
     )
     (path "/f4193393-2cc9-4286-85ab-d00d3620a7d2/a828edb3-dd7a-4b2d-a55e-eccfddbf1beb"
       (reference "#PWR0117") (unit 1) (value "GND") (footprint "")
     )
     (path "/f4193393-2cc9-4286-85ab-d00d3620a7d2/caf3d6fa-4a2b-4403-b2a4-8ef75b254fa4"
       (reference "#PWR0118") (unit 1) (value "GND") (footprint "")
-    )
-    (path "/f4193393-2cc9-4286-85ab-d00d3620a7d2/116367b2-3e55-4ca0-83b2-aa471262d58c"
-      (reference "#PWR0119") (unit 1) (value "+5V") (footprint "")
     )
     (path "/f4193393-2cc9-4286-85ab-d00d3620a7d2/cbedcb1f-f6fd-4ef5-b1b7-a22936804498"
       (reference "#PWR0120") (unit 1) (value "+3V3") (footprint "")
@@ -5152,6 +5179,9 @@
     (path "/8daed0e9-71ec-430e-93c8-6532f0e3d349"
       (reference "D2") (unit 1) (value "LED1") (footprint "Active:LEDM1608X50")
     )
+    (path "/f4193393-2cc9-4286-85ab-d00d3620a7d2/87f2dc0e-0fb0-4ff1-8581-5f9863f598c2"
+      (reference "D3") (unit 1) (value "PMEG10010ELR") (footprint "Active:SOD3716X117")
+    )
     (path "/55336152-d16d-4e15-8a84-c366eb347710"
       (reference "H1") (unit 1) (value "MountingHole_Pad") (footprint "MountingHole:MountingHole_2.7mm_Pad")
     )
@@ -5238,6 +5268,9 @@
     )
     (path "/9791a16f-dc69-407d-8d05-b63fe43c0af6"
       (reference "R21") (unit 1) (value "10") (footprint "Passive:RESC1608X55")
+    )
+    (path "/d9888160-a86a-4125-915b-d7c8ee17c1c7"
+      (reference "R23") (unit 1) (value "10") (footprint "Passive:RESC1608X55")
     )
     (path "/b7cdbf56-648f-4b61-a929-f6df4844931e"
       (reference "U1") (unit 1) (value "ICE40HX4K-TQ144") (footprint "Active:TSQFP50P2200X2200X160-144")
