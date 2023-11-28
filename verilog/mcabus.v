@@ -405,7 +405,7 @@ module mcabus(
         // SBHE: useful really only when the host writes to us. Only write to the upper byte
         // when this is asserted low.
         if (~s0_w_l & (addressed | dma_selected)) begin
-            if (cd_setup_l && card_enable) begin
+            if (cd_setup_l & card_enable) begin
                 if (~dma_selected) begin
                     case (bus_a)
                         REG_CIFR_L  : reg_cifr <= sbhe_l ? {reg_cifr[15:8], bus_d[7:0]} : bus_d;
@@ -419,7 +419,7 @@ module mcabus(
                     // DMA ignores address
                     reg_dreg_write <= sbhe_l ? {reg_dreg_write[15:8], bus_d[7:0]} : bus_d;
                 end
-            end else begin
+            end else if (~cd_setup_l) begin
                 case (bus_a)
                     4'h2       : reg_pos2 <= bus_d[7:0];
                     4'h3       : reg_pos3 <= bus_d[7:0];

@@ -299,7 +299,9 @@ module mcabus_t;
         write_cycle(16'h3514, 16'hCCAA, 0, 0);
         write_cycle(16'h0000, 16'h0000, 0, 0);
         write_cycle(16'h3514, 16'hBBDD, 0, 1);
-if (1) begin
+
+        pos_write_cycle(16'h0102, 8'b0_1_1110_0_1); // Enable card
+if (0) begin
         #100;
         read_cycle(16'h3512, 0, 1);
         write_cycle(16'h3513, 8'hCC, 0, 1); // Write to the ATN reg
@@ -403,10 +405,25 @@ t_dreg_in = 16'h4321;
         test3 = 0;
         write_cycle(16'h0000, 16'hAAAA, 1, 0);
         read_cycle(16'h0000, 1, 1); //dummy cycle
+        cmd_l = 1; // FIXME hack to get cmd_l back high
         arb_gnt_l = 1;
-        #25
+        #100
+// Test weird dma waveform found on the real thing
+// IO goes low while arb is still high
+        m_io_l = 0;
+#16
+// Test cmd_l going low
+//        cmd_l = 0;
+#1
         arb_gnt_l = 0;
-        read_cycle(16'h0000, 1, 1);
+#1
+        cmd_l = 0;
+        #136
+        read_cycle(16'h0000, 0, 0); // Read from IO (dma)
+        test3 = 0;
+        write_cycle(16'h0000, 16'hAAAA, 1, 0);
+        read_cycle(16'h0000, 1, 1); //dummy cycle
+
         #200
 
         #200
