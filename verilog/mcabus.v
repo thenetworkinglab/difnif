@@ -363,7 +363,7 @@ module mcabus(
 
     // dma_selected acts like another address select. This should enable access
     // by the bus to the DREG.
-    wire dma_selected = la_arb_won & ~m_io_l & ~arb_gnt_l;
+    wire dma_selected = arb_won & ~m_io_l & ~arb_gnt_l;
 
     // Only support IO ports. Only respond when not in reset.
     wire addressed;
