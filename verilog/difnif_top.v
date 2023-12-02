@@ -23,8 +23,9 @@ module difnif_top(
     input s1_r_l,       // S1 aka read#
     input m_io_l,       // memory / IO# transfer
     input cd_setup_l,   // Card setup mode
-    input addr_sel_l,   // Card address selected
-    input [3:0] bus_a,  // Truncated address bus (register select)
+    input addr_sel_in_l,// Card address selected
+    input [15:0] bus_a, // Address bus (register select)
+    input fulladdr_l,   // When high, only use 4 bits of address
     input sbhe_l,       // With bus_a0, selects 8 or 16 bit transfer
     output cd_ds16_l,   // Assert low to request 16-bit transfer
     output cd_chrdy_l,  // Channel ready (inserts wait states)
@@ -93,6 +94,27 @@ module difnif_top(
     wire t_clear_all;
 
     wire [39:0] t_pos_regs;
+
+    wire addr_sel_l;
+    wire fulladdr2_l;
+
+    // Use pullup on fulladdr_l signal.
+    SB_IO #(
+        .PIN_TYPE(6'b0000_01),
+        .PULLUP(1'b1)
+    ) fulladdr_pad (
+        .PACKAGE_PIN(fulladdr_l),
+        .D_IN_0(fulladdr2_l),
+    );
+
+    // Address decoder for 72-pin version
+    always @ (*) begin
+        if (fulladdr2_l) begin
+            addr_sel_l <= addr_sel_in_l;
+        end else begin
+            addr_sel_l <= ~(bus_a[15:4] == 12'h351);
+        end
+    end
 
     mcabus mca1 (
         .clk(clk),
@@ -208,7 +230,8 @@ module difnif_top(
     assign tn_clk = 1'b0; // No clock for now
     //assign tn_clk = clk; // Clock to Teensy in case I want to make a synchronous interface
 
-    assign led0 = counter[22];
+//    assign led0 = counter[22];
+    assign led0 = fulladdr2_l;
     assign led1 = counter[21];
 
     always @ (posedge clk)

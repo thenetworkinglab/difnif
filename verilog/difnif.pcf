@@ -40,7 +40,7 @@ set_io arb[0]       102
 set_io burst_l      104
 set_io preempt_l    105
 set_io cd_setup_l   106
-set_io addr_sel_l   107
+set_io addr_sel_in_l 107
 set_io bus_d[13]    110
 set_io bus_d[11]    112
 set_io bus_d[10]    113
@@ -59,6 +59,22 @@ set_io bus_d[3]     128
 set_io bus_d[1]     129
 set_io data_dir     130
 
+# Extended address lines
+# 72-pin interface only
+set_io bus_a[4]     39
+set_io bus_a[5]     41
+set_io bus_a[6]     42
+set_io bus_a[7]     43
+set_io bus_a[8]     44
+set_io bus_a[9]     45
+set_io bus_a[10]    47
+set_io bus_a[11]    48
+set_io bus_a[12]    55
+set_io bus_a[13]    56
+set_io bus_a[14]    60
+set_io bus_a[15]    61
+
+set_io fulladdr_l   62
 
 ### Teensy connections
 # Data port (bidirectional)
