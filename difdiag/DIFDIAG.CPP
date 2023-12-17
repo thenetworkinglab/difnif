@@ -1616,7 +1616,7 @@ void menu_dreg_read_mailbox()
 	}
 }
 
-int13h_read(unsigned char *buffer, unsigned long lba, int length)
+int int13h_read(char far *buffer, unsigned long lba, int length)
 {
 	int c, h, s, ret;
 
@@ -1635,27 +1635,78 @@ int13h_read(unsigned char *buffer, unsigned long lba, int length)
 	return 0;
 }
 
-menu_int13_readsectors()
+// Use caution, this writes directly to the disk!
+int int13h_write(char far *buffer, unsigned long lba, int length)
+{
+	int c, h, s, ret;
+
+	s = (lba & 0x1F) + 1;
+	h = (lba >> 5) & 0x3F;
+	c = (lba >> 11) & 0x3FF;
+
+	ret = biosdisk(0x3, 0x80, h, c, s, length, buffer);
+	if (ret != 0) {
+		cprintf("Int13h error %x\r\n", ret);
+		return 1;
+	}
+	return 0;
+}
+
+// Shows the differences between two sectors
+void sector_diff(unsigned int far *buf_ref, unsigned int far *buf2, int numsectors)
+{
+	unsigned long count;
+	int linecount = 0;
+
+	for (count = 0; count < numsectors * 256; count++) {
+		if (buf_ref[count] != buf2[count]) {
+			if (linecount >= 20) {
+				linecount = 0;
+				cprintf("<more>");
+				getch();
+				cprintf("\r\n");
+			}
+			cprintf("%lu: %.4hx (ref %.4hx)\r\n", count, buf2[count], buf_ref[count]);
+			linecount++;
+		}
+	}
+
+}
+
+void do_int13_readsectors(int halt_on_error)
 {
 	int numsectors, x, y;
-	unsigned long interation = 0;
+	unsigned long iteration = 0;
+	unsigned long mismatches = 0;
 	cprintf("Enter number of sectors (1 to 5): ");
 	numsectors = get_user_int(1, 5);
-	cprintf("Running test, press any key to end.\r\n");
+	cprintf("\r\nRunning test, press any key to end.\r\n");
+
+	// Go back to the BIOS int13 handler
+	remove_handler();
 
 	// First read is our reference read
-	int13h_read(buffer_out, 0, numsectors);
+	int13h_read((char far *)buffer_in, 0, numsectors);
+	cprintf("Read reference buffer.\r\n");
 
 	while (1) {
-		int13h_read(buffer_in, 0, numsectors);
+		int13h_read((char far *)buffer_out, 0, numsectors);
 		if (_fmemcmp(buffer_out, buffer_in, numsectors * 512) != 0) {
-			cprintf("Buffer mismatch.\r\n");
-			break;
+			DEBUG_IO(0x01); // For a connected logic analyzer
+			mismatches++;
+			if (halt_on_error) {
+				cprintf("\r\n");
+				sector_diff(buffer_in, buffer_out, numsectors);
+				break;
+			}
+			// Maybe trigger dummy IO write
+			//break;
 		}
 		iteration++;
 		x = wherex();
 		y = wherey();
-		cprintf("Iteration %d       ", iteration);
+		cprintf("Iteration %lu       \r\n", iteration);
+		cprintf("Mismatches %lu       ", mismatches);
 		gotoxy(x, y);
 
 		if (bioskey(1) != 0) { // End test
@@ -1664,9 +1715,88 @@ menu_int13_readsectors()
 		}
 
 	}
-	cprintf("Test ended.");
+	cprintf("\r\nTest ended.");
+	// Swap over to our interrupt handler again
+	install_handler();
 }
-		
+
+int match_prompt()
+{
+	int i;
+	char ent[32];
+	ent[0] = 32;
+	cgets(ent);
+	cprintf("\r\n");
+	return ((ent[1] == 2) && (ent[2] == 'O') && (ent[3] == 'K'));
+}
+
+void menu_int13_writesectors()
+{
+	int numsectors, x, y;
+	int halt_on_error = 1;
+	unsigned long iteration = 0;
+	unsigned long mismatches = 0;
+	cprintf("THIS TEST CAUSES DATA LOSS!!!\r\n");
+	cprintf("To continue, type OK and hit Enter: ");
+	if (!match_prompt()) {
+		cprintf("Skipping test.\r\n");
+		return;
+	}
+	cprintf("Enter number of sectors (1 to 5): ");
+	numsectors = get_user_int(1, 5);
+	cprintf("\r\nRunning test, press any key to end.\r\n");
+
+	// Go back to the BIOS int13 handler
+	remove_handler();
+
+	// Set up reference buffer
+	for (x = 0; x < 512 * numsectors; x++) {
+		buffer_in[x] = x & 0xff;
+	}
+
+	while (1) {
+		// 0x1000 is arbitrary RBA offset since we don't care about this disk image
+		int13h_write((char far *)buffer_in, 0x1000, numsectors);
+
+		int13h_read((char far *)buffer_out, 0x1000, numsectors);
+		if (_fmemcmp(buffer_out, buffer_in, numsectors * 512) != 0) {
+			DEBUG_IO(0x01); // For a connected logic analyzer
+			mismatches++;
+			if (halt_on_error) {
+				cprintf("\r\n");
+				sector_diff(buffer_in, buffer_out, numsectors);
+				break;
+			}
+		}
+		iteration++;
+		x = wherex();
+		y = wherey();
+		cprintf("Iteration %lu       \r\n", iteration);
+		cprintf("Mismatches %lu       ", mismatches);
+		gotoxy(x, y);
+
+		if (bioskey(1) != 0) { // End test
+			getch();
+			break;
+		}
+	}
+	cprintf("\r\nTest ended.");
+	// Swap over to our interrupt handler again
+	install_handler();
+}
+
+
+void menu_int13_readsectors()
+{
+	do_int13_readsectors(0);
+}
+
+void menu_int13_readsectors_halt()
+{
+	do_int13_readsectors(1);
+}
+
+
 
 const MENU_ITEM menu_settings[] = { {"Autoconfigure DMA", menu_setup_dma},
 				{"Manual DMA config", menu_manual_dma},
@@ -1705,15 +1835,18 @@ const MENU_ITEM menu_mailbox[] = { {"ATN mailbox test", menu_atn_mailbox},
 				   {"DREG host read test", menu_dreg_read_mailbox},
 	                        {0, 0} };
 
-const MENU_ITEM menu_int13[] = { {"Repeated read sectors", menu_int13_readsectors},
-	                        {0, 0} };
+const MENU_ITEM menu_int13h[] = { {"Repeated read sectors", menu_int13_readsectors},
+                                  {"Repeated read sectors, stop on error", menu_int13_readsectors_halt},
+				  {"Repeated write sectors", menu_int13_writesectors},
+				{0, 0} };
 
 const MENU_ITEM menu_main[] = { {"Settings", 0, (void *)menu_settings},
-	                        {"Mailbox tests", 0, (void *)menu_mailbox},
+				{"Mailbox tests", 0, (void *)menu_mailbox},
 				{"Low level commands", 0, (void *)menu_lowlevel},
 				{"Drive information", 0, (void *)menu_driveinfo},
 				{"POST tests", 0, (void *)menu_post},
 				{"Run diagnostics", menu_rundiags},
+				{"Int13 tests", 0, (void *)menu_int13h},
 				{"Read sector", menu_readtest},
 				{0, 0} };
 
@@ -1828,7 +1961,14 @@ int main()
 		farfree(buffer_out);
 		return 0;
 	}
-
+	/*
+	buffer_out[0] = 0x00;
+	buffer_in[0] = 0xff;
+	buffer_out[1] = 0x00;
+	buffer_in[1] = 0x00;
+	sector_diff((char far *)buffer_out, (char far *)buffer_in, 1);
+	getch();
+	*/
 	install_handler();
 	clrscr();
 	do_statusbar();
