@@ -163,10 +163,6 @@ module mcabus(
         end
     end
 
-    assign test1 = flag_atn;
-    assign test2 = reg_atn_set_match;
-    assign tbus = {flag_atn_set, clear_all, reg_t_atn_read};
-
     // Busy flag: Set when ATN written to. Cleared by Teensy
     always @ (posedge clk) begin
         if (clear_all || (reg_t_busy_clear == 2'b10)) begin
@@ -245,10 +241,12 @@ module mcabus(
     // Data register drequest
     reg treq_clear1 = 1'b0;
     always @ (negedge cmd_l) begin
-        treq_clear1 <= (addressed & cd_setup_l & (~s1_r_l | s0_w_l) & (bus_a == REG_DREG));
+        treq_clear1 <= (addressed & cd_setup_l & (~s1_r_l | ~s0_w_l) & (bus_a == REG_DREG));
     end
 
-    wire treq_clear = treq_clear1 | (la_dma_selected & ~cmd_l);
+    // FIXME
+    //wire treq_clear = treq_clear1 | (la_dma_selected & ~cmd_l);
+    wire treq_clear = treq_clear1 | (dma_selected & ~cmd_l);
 
     reg [1:0] reg_treq_clear;
     reg [1:0] reg_treq_set;
@@ -270,6 +268,15 @@ module mcabus(
             flag_treq_16 <= ~la_sbhe_l;
         end
     end
+
+    // Test outputs
+    assign test1 = flag_treq;
+    assign test2 = t_treq_set;
+    assign tbus = {treq_clear1, 1'b0, 1'b0};
+    //assign tbus = 3'b0;
+    // "fixed" when i probe treq_clear.
+    // Signal treq_clear1 never asserts.
+
 
     /*
      ** Microchannel status registers **
