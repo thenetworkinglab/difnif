@@ -8,6 +8,9 @@
 //
 
 `default_nettype none
+
+`define MCA_NO_POS
+
 module mcabus(
     input clk,
     input chreset,
@@ -270,10 +273,12 @@ module mcabus(
     end
 
     // Test outputs
-    assign test1 = flag_treq;
-    assign test2 = t_treq_set;
-    assign tbus = {treq_clear1, 1'b0, 1'b0};
-    //assign tbus = 3'b0;
+//    assign test1 = flag_treq;
+//    assign test2 = t_treq_set;
+//    assign tbus = {treq_clear1, 1'b0, 1'b0};
+    assign tbus = 3'b0;
+    assign test1 = 1'b0;
+    assign test2 = 1'b0;
     // "fixed" when i probe treq_clear.
     // Signal treq_clear1 never asserts.
 
@@ -310,7 +315,11 @@ module mcabus(
     // POS registers.
     wire [15:0] reg_pos01 = 16'hDF9F;
 // LSB is card enable bit FIXME: add debug mode?
+`ifdef MCA_NO_POS
+    reg [7:0] reg_pos2 = 8'b0_1_1110_0_1; // Default to card enabled, 3510, arb e, fairness on
+`else
     reg [7:0] reg_pos2 = 8'b0_1_1110_0_0; // Default to card disabled, 3510, arb e, fairness on
+`endif
     reg [7:0] reg_pos3 = 8'b0_0_00_0000;
     reg [7:0] reg_pos4 = 8'b00000_00_0;
 
@@ -374,9 +383,12 @@ module mcabus(
 
     // Only support IO ports. Only respond when not in reset.
     wire addressed;
-//    assign addressed = (~addr_sel_l) & ~m_io_l & ~chreset;
 
+`ifdef MCA_NO_POS
+    assign addressed = (~addr_sel_l) & ~m_io_l & ~chreset;
+`else
     assign addressed = (~addr_sel_l | ~cd_setup_l) & ~m_io_l & ~chreset;
+`endif
 
     // Data bus steering
     // MCA uses signals a0, cd_ds16_l, sbhe_l
