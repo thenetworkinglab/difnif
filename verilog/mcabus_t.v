@@ -7,12 +7,9 @@
 // for bus delays. Do it for both the 50Z and the 95.
 
 //
-// SB MCA CPLD - Test bench for main module
+// Test bench for main module
 // Copyright (c) 2020 Eric Schlaepfer
-// This work is licensed under the Creative Commons Attribution-ShareAlike 4.0
-// International License. To view a copy of this license, visit
-// http://creativecommons.org/licenses/by-sa/4.0/ or send a letter to Creative
-// Commons, PO Box 1866, Mountain View, CA 94042, USA.
+// This work is licensed under CERN-OHL-S-2.0.
 //
 module mcabus_t;
 
