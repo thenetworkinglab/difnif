@@ -69,6 +69,12 @@ Menus:
 * Int13 tests - This destructive test uses BIOS int13 routines to write arbitrary data to the drive, read it back, and compare it to look for mismatches.
 * Read sector - This test reads one or more sectors from the drive and dumps them to the screen in hex.
 
+## Bugs
+
+* There seem to be occasional errors when writing sectors. The sector written is shifted by one byte, so it's clearly an off-by-one error somewhere.
+* The version for the 50Z has some sort of timing error and register communications don't work correctly.
+* And probably more!
+
 ## Reference Documents
 
 * [IBM DBA-ESDI reference](https://ardent-tool.com/docs/pdf/j_mcspec.pdf).
