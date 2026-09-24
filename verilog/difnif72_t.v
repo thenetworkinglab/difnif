@@ -15,6 +15,8 @@
 //     finding 1)
 //   * the Teensy: register accesses timed like difnift.ino's portRead and
 //     portWrite, running the same mailbox handshakes as DIFDIAG
+//   * the planar's central arbiter and DMA controller (Figures 2-40, 2-41,
+//     2-46), optionally with a second DMA device competing for the bus
 //
 // Parameters (override with iverilog -P difnif72_t.NAME=value):
 //   CYCLE        default I/O cycle in ns: 300 = 50Z, 250 = 55SX, 200 = Model 70
@@ -73,6 +75,10 @@ module difnif72_t;
     localparam real T_RD      = 60;                 // T20 read data valid from -CMD
     localparam real T_RD_OFF  = 40;                 // T22 read data off from -CMD rising
     localparam real T_SFDBK   = 60;                 // T14 -CD SFDBK valid from address
+    localparam real T_EOT_ARB = WORST ? 30 : 100;   // T41 ARB/-GNT high after end of transfer
+    localparam real T_ARB     = 300;                // T44 ARB/-GNT high (arbitration) time
+    localparam real T_GNT_CMD = 115;                // T43B -CMD after ARB/-GNT low
+    localparam real T_PRE_OFF = 50;                 // T42 winner releases -PREEMPT
 
     // ESDI registers (primary address)
     localparam [15:0] A_CIFR = 16'h3510;  // write: command interface, read: status
@@ -151,6 +157,22 @@ module difnif72_t;
             assign h_arb[gi] = b_out[gi] ? 1'bz : 1'b0;
         end
     endgenerate
+
+    // A second DMA device on the channel: a local arbiter as in Figure 2-27
+    reg comp_want = 1'b0;       // wants a transfer (drives -PREEMPT)
+    reg comp_in = 1'b0;         // taking part in the current arbitration
+    reg [3:0] comp_level = 4'h2;
+    wire [3:0] comp_lost;
+    assign comp_lost[3] = 1'b0;
+    assign comp_lost[2] = comp_lost[3] | (comp_level[3] & ~h_arb[3]);
+    assign comp_lost[1] = comp_lost[2] | (comp_level[2] & ~h_arb[2]);
+    assign comp_lost[0] = comp_lost[1] | (comp_level[1] & ~h_arb[1]);
+    generate
+        for (gi = 0; gi < 4; gi = gi + 1) begin : comp_od
+            assign h_arb[gi] = (comp_in && !comp_level[gi] && !comp_lost[gi]) ? 1'b0 : 1'bz;
+        end
+    endgenerate
+    assign h_preempt_l = comp_want ? 1'b0 : 1'bz;
 
     // Data bus: U6/U7, DIR driven by the FPGA (high = FPGA to connector)
     wire [15:0] f_d;
@@ -275,7 +297,7 @@ module difnif72_t;
     // Bus contention on the connector data lines
     always @(h_wdrive or b_dir)
         if (h_wdrive && b_dir !== 1'b0)
-            spec("data bus contention: host writing while the card drives");
+            fail("data bus contention: host writing while the card drives");
 
     // ------------------------------------------------------------------
     // Host bus cycle
@@ -290,18 +312,24 @@ module difnif72_t;
     // End of a host cycle: -CMD rises, then write data is released
     event end_cycle;
     realtime end_rise;
-    reg end_rd;
+    realtime t_last_rise;
+    reg end_rd, end_tc;
     integer end_id;
 
     always @(end_cycle) begin : cycle_end
         realtime rise;
-        reg rd;
+        reg rd, tc;
         integer id;
         rise = end_rise;
         rd = end_rd;
+        tc = end_tc;
         id = end_id;
         wait_until(rise);
         h_cmd_l = 1'b1;
+        if (tc) begin
+            wait_until(rise + 10);  // T53
+            h_tc_l = 1'b1;
+        end
         if (!rd) begin
             wait_until(rise + T_WD_H);
             if (wd_owner == id) h_wdrive = 1'b0;
@@ -310,9 +338,9 @@ module difnif72_t;
 
     // One I/O or setup cycle. For reads, rdata is the byte or word as the
     // planar would see it after data steering.
-    task automatic mca_cycle(input rd, input setup, input [15:0] addr, input word,
-                             input expect_ds16, input expect_sel, input [15:0] wdata,
-                             output [15:0] rdata);
+    task automatic mca_cycle(input rd, input mem, input setup, input tc, input [15:0] addr,
+                             input word, input expect_ds16, input expect_sel,
+                             input [15:0] wdata, output [15:0] rdata);
         realtime t0, t_rise;
         reg ds16, card16;
         reg [15:0] raw, early;
@@ -324,10 +352,11 @@ module difnif72_t;
             if (t0 < $realtime + T_ADDR_SU) t0 = $realtime + T_ADDR_SU;
             t_rise = t0 + T_CMD_LOW;
             t_next_cmd = t0 + CYCLE;
+            t_last_rise = t_rise;
 
             wait_until(t0 - T_ADDR_SU);
             h_a = addr;
-            h_mio_l = 1'b0;
+            h_mio_l = mem;
             h_setup_l = ~setup;
             h_sbhe_l = word ? 1'b0 : ~addr[0];
 
@@ -337,14 +366,16 @@ module difnif72_t;
             wait_until(t0 - T_ADDR_SU + T_DS16);
             ds16 = ~h_ds16_l;
             if (h_ds16_l === 1'bx || ds16 !== expect_ds16)
-                spec($sformatf("-CD DS 16 = %b at %h, expected %0s", h_ds16_l, addr,
+                fail($sformatf("-CD DS 16 = %b in %0s cycle at %h, expected %0s", h_ds16_l,
+                               mem ? "memory" : "I/O", addr,
                                expect_ds16 ? "asserted" : "not asserted"));
             card16 = (ds16 === 1'b1);
 
             if (BOARD >= 2) begin
                 wait_until(t0 - T_ADDR_SU + T_SFDBK);
                 if (h_sfdbk_l === 1'bx || ~h_sfdbk_l !== expect_sel)
-                    spec($sformatf("-CD SFDBK = %b at %h, expected %0s", h_sfdbk_l, addr,
+                    fail($sformatf("-CD SFDBK = %b in %0s cycle at %h, expected %0s", h_sfdbk_l,
+                                   mem ? "memory" : "I/O", addr,
                                    expect_sel ? "asserted" : "not asserted"));
             end
 
@@ -363,6 +394,11 @@ module difnif72_t;
 
             wait_until(t0 - T_ADL_OFF);
             h_adl_l = 1'b1;
+
+            if (tc) begin
+                wait_until(t0);         // well over 30 ns before -CMD rises (T52)
+                h_tc_l = 1'b0;
+            end
 
             wait_until(t0);
             h_cmd_l = 1'b0;
@@ -386,6 +422,7 @@ module difnif72_t;
             // End of cycle runs in cycle_end so the next cycle can overlap it
             end_rise = t_rise;
             end_rd = rd;
+            end_tc = tc;
             end_id = my_id;
             -> end_cycle;
 
@@ -421,25 +458,25 @@ module difnif72_t;
     endfunction
 
     task automatic host_in(input [15:0] addr, input word, output [15:0] d);
-        mca_cycle(1, 0, addr, word, is16(addr), selected(addr), 16'h0, d);
+        mca_cycle(1, 0, 0, 0, addr, word, is16(addr), selected(addr), 16'h0, d);
     endtask
 
     task automatic host_out(input [15:0] addr, input word, input [15:0] d);
         reg [15:0] dummy;
-        mca_cycle(0, 0, addr, word, is16(addr), selected(addr), d, dummy);
+        mca_cycle(0, 0, 0, 0, addr, word, is16(addr), selected(addr), d, dummy);
     endtask
 
     task automatic pos_in(input [2:0] r, output [7:0] d);
         reg [15:0] w;
         begin
-            mca_cycle(1, 1, 16'h0100 + r, 0, 0, 0, 16'h0, w);
+            mca_cycle(1, 0, 1, 0, 16'h0100 + r, 0, 0, 0, 16'h0, w);
             d = w[7:0];
         end
     endtask
 
     task automatic pos_out(input [2:0] r, input [7:0] d);
         reg [15:0] dummy;
-        mca_cycle(0, 1, 16'h0100 + r, 0, 0, 0, {8'h00, d}, dummy);
+        mca_cycle(0, 0, 1, 0, 16'h0100 + r, 0, 0, 0, {8'h00, d}, dummy);
     endtask
 
     // Poll the basic status register until a bit has the wanted value
@@ -747,6 +784,187 @@ module difnif72_t;
     endtask
 
     // ------------------------------------------------------------------
+    // Central arbiter and DMA controller
+    // ------------------------------------------------------------------
+    reg [3:0] card_level = 4'hE;    // arbitration level set in POS 2
+    integer dma_done;               // transfers completed for the card
+    integer dma_extra;              // transfers the card won with nothing to send
+    reg [15:0] dma_buf [0:255];     // "system memory"
+
+    // The card must never request burst mode
+    always @(h_burst_l)
+        if (h_burst_l === 1'b0) fail("card asserted -BURST");
+
+    // One arbitration cycle, starting T41 after the last transfer ended
+    task automatic arbitrate(output [3:0] winner);
+        begin
+            wait_until(t_last_rise + T_EOT_ARB);
+            h_arb_gnt_l = 1'b1;
+            comp_in = comp_want;
+            #(T_ARB);
+            winner = h_arb;
+            if (^winner === 1'bx) fail($sformatf("arbitration bus unresolved: %b", winner));
+            h_arb_gnt_l = 1'b0;
+            t_next_cmd = $realtime + T_GNT_CMD;
+            if (winner != comp_level) comp_in = 1'b0;
+            if (winner == card_level) begin
+                #(T_PRE_OFF);
+                if (b_out[4] !== 1'b1)
+                    fail($sformatf("card still driving -PREEMPT %0.0f ns after winning (T42)", T_PRE_OFF));
+            end
+        end
+    endtask
+
+    // The planar's DMA controller moving one word. Its I/O cycles carry an
+    // address the card must ignore: alternate between DREG and garbage.
+    task automatic dma_transfer(input to_card, input integer k, input last);
+        reg [15:0] d, io_addr;
+        begin
+            io_addr = k[0] ? A_DREG : 16'hxxxx;
+            if (to_card) begin
+                // DMA read: memory read, then I/O write to the card
+                mca_cycle(1, 1, 0, 0, 16'h2000 + 2 * k, 1, 0, 0, 16'h0, d);
+                mca_cycle(0, 0, 0, last, io_addr, 1, 1, 1, dma_buf[k], d);
+            end else begin
+                // DMA write: I/O read from the card, then memory write
+                mca_cycle(1, 0, 0, last, io_addr, 1, 1, 1, 16'h0, d);
+                dma_buf[k] = d;
+                mca_cycle(0, 1, 0, 0, 16'h2000 + 2 * k, 1, 0, 0, d, d);
+            end
+        end
+    endtask
+
+    // A transfer for the competing device: the card must stay out of it
+    task automatic dma_other;
+        reg [15:0] d;
+        begin
+            mca_cycle(1, 1, 0, 0, 16'h4000, 1, 0, 0, 16'h0, d);
+            mca_cycle(0, 0, 0, 0, 16'h0000, 1, 0, 0, 16'h1234, d);  // its own port
+        end
+    endtask
+
+    // Run the bus until n transfers for the card have completed. The CPU
+    // does unrelated I/O between arbitrations; the competitor asks for the
+    // bus now and then.
+    task automatic dma_run(input to_card, input integer n, input compete);
+        reg [3:0] winner;
+        reg [15:0] d;
+        reg after_card;
+        integer loops;
+        begin
+            dma_done = 0;
+            dma_extra = 0;
+            for (loops = 0; dma_done < n && loops < 40 * n && !aborted; loops = loops + 1) begin
+                // CPU cycles to an unrelated port while nobody is asking
+                watch_en = 1'b1;
+                if (loops[0]) host_out(16'h0080, 0, loops);
+                else host_in(16'h0080, 0, d);
+                watch_en = 1'b0;
+                if (drove) begin
+                    fail("card drove the data bus during a CPU cycle to 0080");
+                    drove = 1'b0;
+                end
+                if (compete && (loops % 3 == 1)) comp_want = 1'b1;
+
+                // Arbitrate when anyone wants the bus. Every transfer is
+                // followed by another arbitration cycle (T41); the bus goes
+                // back to the CPU when nobody wins it.
+                // When nobody wins, the CPU gets at least one cycle before the
+                // next arbitration.
+                if (h_preempt_l === 1'b0 && dma_done < n && !aborted) begin
+                    arbitrate(winner);
+                    after_card = 1'b0;
+                    while (winner != 4'hF && !aborted) begin
+                        if (winner == card_level) begin
+                            // The Teensy can't re-arm this quickly, so a win
+                            // straight after the card's own transfer means it
+                            // bid with a request that was already serviced.
+                            if (after_card) dma_extra = dma_extra + 1;
+                            if (dma_done >= n) begin
+                                fail("card won arbitration after its last transfer");
+                                aborted = 1'b1;
+                            end else begin
+                                dma_transfer(to_card, dma_done, dma_done == n - 1);
+                                dma_done = dma_done + 1;
+                            end
+                            after_card = 1'b1;
+                        end else if (winner == comp_level) begin
+                            dma_other;
+                            comp_want = 1'b0;
+                            after_card = 1'b0;
+                        end else begin
+                            fail($sformatf("arbitration won by unknown level %h", winner));
+                            aborted = 1'b1;
+                        end
+                        if (!aborted) arbitrate(winner);
+                    end
+                end
+            end
+            if (dma_done < n && !aborted) begin
+                fail($sformatf("only %0d of %0d DMA transfers happened", dma_done, n));
+                aborted = 1'b1;
+            end
+            comp_want = 1'b0;
+        end
+    endtask
+
+    // Sector write: DMA from memory into DREG, read out by the Teensy
+    task automatic test_dma_to_card(input compete, input string name);
+        integer k, ib;
+        reg ok;
+        reg [15:0] d;
+        begin
+            begin_test(name);
+            for (k = 0; k < N_ITER; k = k + 1) dma_buf[k] = pattern(k, 16'h6969);
+            host_out(A_BSR, 0, 16'h0002);       // BCR: DMA enable
+            fork
+                dma_run(1, N_ITER, compete);
+                for (ib = 0; ib <= N_ITER && !aborted; ib = ib + 1) begin
+                    tn_wait_flag(FL_TREQ, 1'b0, ok);
+                    if (ok && ib > 0) begin
+                        tn_read(TN_DREG, d);
+                        if (d !== pattern(ib - 1, 16'h6969))
+                            fail($sformatf("DMA word %0d: Teensy read %h, memory held %h", ib - 1, d,
+                                           pattern(ib - 1, 16'h6969)));
+                    end
+                    if (ok && ib < N_ITER) tn_write(TN_FLAGS, 16'h0001 << FL_TREQ_SET);
+                end
+            join
+            if (dma_extra) fail($sformatf("card re-entered arbitration with a stale request %0d times", dma_extra));
+            host_out(A_BSR, 0, 16'h0000);
+            end_test;
+        end
+    endtask
+
+    // Sector read: Teensy fills DREG, DMA moves it into memory
+    task automatic test_dma_from_card(input compete, input string name);
+        integer k, ib;
+        reg ok;
+        begin
+            begin_test(name);
+            for (k = 0; k < N_ITER; k = k + 1) dma_buf[k] = 16'hxxxx;
+            host_out(A_BSR, 0, 16'h0002);
+            fork
+                dma_run(0, N_ITER, compete);
+                for (ib = 0; ib < N_ITER && !aborted; ib = ib + 1) begin
+                    tn_wait_flag(FL_TREQ, 1'b0, ok);
+                    if (ok) begin
+                        tn_write(TN_DREG, pattern(ib, 16'h9696));
+                        tn_write(TN_FLAGS, 16'h0001 << FL_TREQ_SET);
+                    end
+                end
+            join
+            for (k = 0; k < N_ITER && !aborted; k = k + 1)
+                if (dma_buf[k] !== pattern(k, 16'h9696))
+                    fail($sformatf("DMA word %0d: memory got %h, Teensy wrote %h", k, dma_buf[k],
+                                   pattern(k, 16'h9696)));
+            if (dma_extra) fail($sformatf("card re-entered arbitration with a stale request %0d times", dma_extra));
+            host_out(A_BSR, 0, 16'h0000);
+            end_test;
+        end
+    endtask
+
+    // ------------------------------------------------------------------
     // Main sequence
     // ------------------------------------------------------------------
     initial begin
@@ -802,6 +1020,23 @@ module difnif72_t;
         test_isr;
         test_dreg_write;
         test_dreg_read;
+
+`ifdef MCA_USE_POS
+        // Arbitration level 3, the fixed disk's usual level
+        pos_out(2, 8'b0_1_0011_0_1);
+        card_level = 4'h3;
+`endif
+        comp_level = 4'h2;
+        test_dma_to_card(0, "DMA sector write");
+        test_dma_from_card(0, "DMA sector read");
+        test_dma_to_card(1, "DMA sector write, higher-priority device competing");
+        test_dma_from_card(1, "DMA sector read, higher-priority device competing");
+`ifdef MCA_USE_POS
+        comp_level = 4'h5;
+        test_dma_to_card(1, "DMA sector write, lower-priority device competing");
+        test_dma_from_card(1, "DMA sector read, lower-priority device competing");
+`endif
+        test_not_selected(16'h0080, "no response at 0080 after DMA");
 
         $display("RESULT: cycle=%0d worst=%0d board=%0d pos=%0d seed=%0d tests=%0d failed=%0d spec=%0d",
                  CYCLE, WORST, BOARD,

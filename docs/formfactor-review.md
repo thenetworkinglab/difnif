@@ -38,6 +38,8 @@ because the level-shifter pins are typed "bidirectional".
 | 9 | High | Write data is captured on the falling edge of `-CMD`, where IBM guarantees 0 ns setup (fixed) | Both boards |
 | 10 | High | Eric's default build hides the POS registers, including the `DF9F` adapter ID | Build setting |
 | 11 | Low | Status register can change during a read cycle | Both boards |
+| 12 | High | Card can bid for DMA again with a request already serviced (fixed) | Both boards |
+| 13 | Note | Card relies on the planar re-arbitrating after every DMA transfer | Both boards |
 
 ### 1. FPGA `chreset` input is floating
 
@@ -197,6 +199,36 @@ of `-CMD` falling (T20). Each bit is either the old or the new value, so this is
 usually harmless, but a snapshot at the start of the cycle would be cleaner.
 The simulation reports these as SPEC notes, not failures.
 
+### 12. DMA request dropped too late
+
+The card asks for DMA while its data-register request flag (`flag_treq`) is
+set. A DMA transfer clears that flag through the 50 MHz synchronizer, 40-60 ns
+after the transfer's `-CMD` rises. IBM allows the next arbitration cycle to
+start 30 ns after the end of a transfer (Figure 2-46, T41). The card decides
+whether to compete when `ARB/-GNT` rises, so on a planar that re-arbitrates
+that quickly, it competes again with a request that has already been serviced,
+wins, and receives (or supplies) a word the Teensy isn't ready for.
+
+The simulation reproduces it at IBM's limits: a whole 16-word DMA transfer went
+through on a single request. At typical timing (arbitration 100 ns after the
+transfer) it doesn't happen. How fast real 55SX and Model 70 planars
+re-arbitrate is unknown. This may also be what Eric's "fix rare dma glitch"
+commit was working around.
+
+**Fixed:** `dma_requested` is now also gated by `treq_pending`, which rises the
+moment a DREG or DMA cycle's `-CMD` rises and falls one clock after `flag_treq`
+clears, so the request never glitches back on.
+
+### 13. Dependence on re-arbitration after DMA
+
+After winning arbitration, the card stays "DMA selected" for any I/O cycle
+until `ARB/-GNT` next goes high (`dma_cycle` only updates on that edge). If a
+planar handed the bus back to the CPU without an arbitration cycle, the card
+would treat the CPU's next I/O cycles as DMA transfers. IBM's timing (T41) and
+Eric's note about the real 50Z in `mcabus_t.v` indicate the planar does
+re-arbitrate after each transfer, and the simulation models it that way. This
+is worth confirming with a logic analyzer on real hardware.
+
 ## Mechanical
 
 Confirmed against a real drive (IBM FRU 6128291, model WD-3158, 120 MB):
@@ -289,19 +321,18 @@ Because POS writes are now stored as `-CMD` rises, a new POS setting takes
 effect when the POS write cycle ends. A host cycle overlapping that write still
 sees the old setting. That's normal for Micro Channel cards.
 
+**DMA (finding 12):** see finding 12. Also, a DMA I/O cycle can no longer
+trigger mailbox flags, whatever address the DMA controller puts on the bus
+(`la_io` excludes DMA cycles).
+
 **Not yet verified:**
 
-- **DMA.** The new testbench doesn't do DMA transfers, and DMA writes into DREG
-  now use the rising edge. Eric's original `mcabus_t.v` still runs but has no
-  checks. The PS/2 BIOS likely uses DMA for disk transfers, so a DMA test is
-  next.
 - **The ThinkPad 700C.** Finding 9's fix changes the ThinkPad build too. It's
   per IBM's timing rules, but nobody has run it on a 700C.
 
 ## Suggested next steps
 
-1. Add DMA transfers (arbitration, both directions, terminal count) to
-   `difnif72_t.v`.
+1. ~~Add DMA transfers to `difnif72_t.v`.~~ Done.
 2. Post-place-and-route timing check of the FPGA's internal delays (finding 3).
 3. Make the Rev P2 schematic and outline changes: CHRESET to U8 pin 15 (finding
    1), 74LVC8T245 parts (finding 2), `-ADL` to U8 channel 7 (finding 3),
@@ -339,8 +370,16 @@ around the unmodified FPGA design. It models:
   reset input (as built) or the U8 14/15 bridge.
 - **the Teensy**, using the same register timing as `difnift.ino` and the same
   mailbox handshakes as DIFDIAG, checking every value.
+- **the planar's central arbiter and DMA controller**: `-PREEMPT`, a 300 ns
+  arbitration cycle with the ARB bus resolved by open-collector drivers, the
+  winner releasing `-PREEMPT` within 50 ns (T42), two-cycle DMA transfers
+  (memory then I/O for sector writes, I/O then memory for sector reads) with
+  `-TC` on the last one, and a new arbitration cycle 30 ns (limit) or 100 ns
+  (typical) after every transfer. A second DMA device at a higher or lower
+  priority competes for the bus, and the CPU does unrelated I/O in between; the
+  card must never answer those cycles.
 
-Run `verilog/run_sim72.sh` (about 30 seconds for 162 simulations;
+Run `verilog/run_sim72.sh` (about 50 seconds for 162 simulations;
 `run_sim72.sh quick` runs one delay set). Results **before** the Verilog fixes:
 
 | Board | POS | Timing | Result (all three machines) |
@@ -351,7 +390,8 @@ Run `verilog/run_sim72.sh` (about 30 seconds for 162 simulations;
 | Bridged | either | IBM limits | Host writes fail on 7 of 8 delay sets (finding 9); reads pass |
 
 **After** the fixes, the bridged board and Rev P2 pass everything with POS
-enabled. See "Verilog fixes" above.
+enabled, including DMA in both directions with competing devices. See
+"Verilog fixes" above.
 
 The simulated FPGA has no internal delays (it's RTL simulation), and a floating
 input is modelled as "unknown", so on real hardware finding 1 would show up as

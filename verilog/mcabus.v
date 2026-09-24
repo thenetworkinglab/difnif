@@ -164,7 +164,8 @@ module mcabus(
     reg tg_sifr = 1'b0;     // host read SIFR
     reg tg_treq = 1'b0;     // host or DMA accessed DREG
 
-    wire la_io = la_addressed & la_cd_setup_l;
+    // A DMA I/O cycle only ever touches DREG, whatever address is on the bus
+    wire la_io = la_addressed & la_cd_setup_l & ~la_dma_selected;
 
     always @ (posedge cmd_l) begin
         if (la_io & la_write & (la_addr == REG_ATN))    tg_atn  <= ~tg_atn;
@@ -345,7 +346,20 @@ module mcabus(
     // arb_gnt_l = input to monitor arbitration and grant cycle
     // tc_l = input to monitor for last cycle in burst
 
-    wire dma_requested = control_dma_enable & flag_treq & card_enable;
+    // A DREG access (including a DMA transfer) that the 50 MHz domain hasn't
+    // absorbed yet. It rises as -CMD rises and falls one clock after
+    // flag_treq clears, so dma_requested can't glitch between them.
+    reg s_treq3 = 1'b0;
+    always @ (posedge clk) begin
+        s_treq3 <= s_treq[2];
+    end
+    wire treq_pending = tg_treq ^ s_treq3;
+
+    // Drop the request as soon as the transfer's -CMD rises rather than when
+    // flag_treq clears 40-60 ns later: the next arbitration can start 30 ns
+    // after the end of a transfer (T41), and bidding with a request that has
+    // already been serviced would fetch a word the Teensy isn't ready for.
+    wire dma_requested = control_dma_enable & flag_treq & card_enable & ~treq_pending;
     //wire dma_requested = test3; // & cmd_l? FIXME: & card_enable
     reg dma_cycle = 1'b0; // latch is set when we are in a dma cycle
     wire arb_won;
