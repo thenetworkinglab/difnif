@@ -9732,7 +9732,7 @@
 		)
 		(pad "a2" connect custom
 			(at -41.91 0.381 270)
-			(size 1.524 6.858)
+			(size 1 6.858)
 			(layers "F.Cu")
 			(net 187 "/DifNifBus/A13_5V")
 			(pinfunction "Pin_a2")
@@ -9746,14 +9746,14 @@
 				(gr_line
 					(start 0 -2.159)
 					(end 0 -3.429)
-					(width 1.524)
+					(width 1)
 				)
 			)
 			(uuid "c25a4062-8012-4420-a955-e04061ab061b")
 		)
 		(pad "a3" connect custom
 			(at -39.37 0.381 270)
-			(size 1.524 6.858)
+			(size 1 6.858)
 			(layers "F.Cu")
 			(net 2 "GND")
 			(pinfunction "Pin_a3")
@@ -9767,7 +9767,7 @@
 				(gr_line
 					(start 0 -2.159)
 					(end 0 -3.429)
-					(width 1.524)
+					(width 1)
 				)
 			)
 			(uuid "9a084f69-724c-48d6-aba9-635a601dbcf8")
@@ -10488,7 +10488,7 @@
 		)
 		(pad "b2" connect custom
 			(at -41.91 0.381 270)
-			(size 1.524 6.858)
+			(size 1 6.858)
 			(layers "B.Cu")
 			(net 197 "/DifNifBus/A14_5V")
 			(pinfunction "Pin_b2")
@@ -10502,14 +10502,14 @@
 				(gr_line
 					(start 0 -2.159)
 					(end 0 -3.429)
-					(width 1.524)
+					(width 1)
 				)
 			)
 			(uuid "ac6a8e1f-44a2-439a-a16f-17d95c240250")
 		)
 		(pad "b3" connect custom
 			(at -39.37 0.381 270)
-			(size 1.524 6.858)
+			(size 1 6.858)
 			(layers "B.Cu")
 			(net 2 "GND")
 			(pinfunction "Pin_b3")
@@ -10523,7 +10523,7 @@
 				(gr_line
 					(start 0 -2.159)
 					(end 0 -3.429)
-					(width 1.524)
+					(width 1)
 				)
 			)
 			(uuid "67945817-6320-4ac8-9c1a-9e2f26eaf710")
@@ -24584,13 +24584,54 @@
 	)
 	(gr_line
 		(start 91.2 129.8)
+		(end 91.2 44.36)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "Edge.Cuts")
+		(uuid "740613d5-6a4f-4157-9fc5-b3a9645bfb43")
+	)
+	(gr_line
+		(start 91.2 44.36)
+		(end 99.4 44.36)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "Edge.Cuts")
+		(uuid "3cca7166-2728-41fb-95ea-6f3cb9d73a93")
+	)
+	(gr_arc
+		(start 99.4 44.36)
+		(mid 99.9 43.86)
+		(end 99.4 43.36)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "Edge.Cuts")
+		(uuid "c62b5988-1ef7-43b5-a754-d1eee37ad63f")
+	)
+	(gr_line
+		(start 99.4 43.36)
+		(end 91.2 43.36)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "Edge.Cuts")
+		(uuid "bf9f2bf3-1348-45ca-ad22-1240432462f2")
+	)
+	(gr_line
+		(start 91.2 43.36)
 		(end 91.2 39.2)
 		(stroke
 			(width 0.1)
 			(type solid)
 		)
 		(layer "Edge.Cuts")
-		(uuid "f375d991-bcc5-4876-b6df-0381b0ba1e7f")
+		(uuid "ecc3af07-8e3a-4820-980a-a1017ec89350")
 	)
 	(gr_line
 		(start 92.4 38)

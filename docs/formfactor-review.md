@@ -149,14 +149,18 @@ fills the roughly 1.0 mm gap between them. The key ridge in the 55SX
 flat-flex cable socket measures about **0.7 mm** thick, and the cable is keyed
 at both ends. The Model 70 riser is assumed to be keyed the same way.
 
-- **Rev P2:** add a slot about 0.9-1.0 mm wide and 11.7 mm deep, centred
-  between pins 2 and 3. That clears the 0.7 mm ridge. IBM's slot touches the
-  fingers; a board house will want some copper-to-edge clearance, so narrow
-  fingers a2/a3 and b2/b3 slightly on the slot side if the fab requires it.
-  Check the minimum routed slot width, which is often 1.0 mm.
+- **Rev P2 (done):** a slot 1.0 mm wide and **8.7 mm** deep, centred between
+  pins 2 and 3, with a rounded end, and fingers a2/a3/b2/b3 narrowed to 1.0 mm
+  (centred) for 0.27 mm of copper-to-edge clearance. The slot doesn't need
+  IBM's 11.7 mm: the drive goes only 7.5-7.8 mm into the 55SX cable socket
+  (measured by fitting the socket on the WD-3158), so the key ridge can't
+  reach further than that. 8.7 mm is the deepest slot that clears the existing
+  traces fanning out from fingers A1/A2/B1/B2 (8.8 mm touches `A13`), leaving
+  about 1 mm of margin. Check the board house's minimum routed slot width
+  (often 1.0 mm) and copper-to-edge clearance.
 - **Rev P1:** could be keyed by hand. A fine jeweller's saw (about 0.8 mm kerf)
-  cutting down the 1.0 mm gap between fingers 2 and 3 to 11.7 mm deep would
-  clear the 0.7 mm ridge.
+  cutting down the 1.0 mm gap between fingers 2 and 3, about 8.5 mm deep,
+  would clear the 0.7 mm ridge.
 
 ### 9. Write data captured at the falling edge of `-CMD`
 
@@ -426,12 +430,10 @@ Not changed in the schematic:
    (routed via J4 pin 11, whose through-hole pad doubles as a via); and J4 pins
    4-14 to their signals. Route the U12 pin 12 stub on the top layer away from
    pin 13, so pin 13 keeps its ground connection to the pour.
-2. **Key slot** (finding 8), in Edge.Cuts: 1.0 mm wide, 11.7 mm deep, centred
-   between pins 2 and 3. On the current layout that's x = 91.2 to 102.9 mm,
-   y = 43.36 to 44.36 mm. The gap between fingers 2 and 3 is only 1.016 mm, so
-   also narrow pads a2, a3, b2 and b3 to 1.0 mm wide, keeping them centred on
-   their pins. That leaves about 0.27 mm of copper-to-edge clearance; check it
-   against the board house's minimum. The socket's key ridge is 0.7 mm.
+2. ~~**Key slot** (finding 8).~~ Done: Edge.Cuts slot x = 91.2 to 99.9 mm
+   (8.7 mm deep, rounded end), y = 43.36 to 44.36 mm; pads a2, a3, b2 and b3
+   narrowed to 1.0 mm, centred. DRC shows nothing new, and the ground pour is
+   intact.
 3. Rerun `python3 tools/check_board.py` and KiCad's DRC, and bump the silkscreen
    revision to P2.
 
