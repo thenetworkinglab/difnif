@@ -139,11 +139,21 @@ board outline and the fab Gerber (`DifNif-Edge_Cuts.gbr` in the RevP1 zip) are
 a plain 98.8 x 93.0 mm rectangle with no slot. If the 55SX cable-end socket or
 the Model 70 riser socket has a key ridge, Rev P1 won't go in.
 
-- **Rev P2:** add the slot to Edge.Cuts. Take its width and depth from a real
-  drive with calipers. The gap between adjacent fingers is only about 1.0 mm
-  (2.54 mm pitch, 1.524 mm fingers), so the slot has to be narrower than that.
-- **Rev P1 (if built):** check whether the sockets actually have a key before
-  cutting anything by hand.
+Measured on a WD-3158: the slot is **11.7 mm deep** and about **1.0 mm wide**,
+cut right up against the edges of fingers 2 and 3 with no copper margin. The
+IBM fingers are about 1.5 mm wide, the same as Eric's 1.524 mm, so the slot
+fills the roughly 1.0 mm gap between them. The key ridge in the 55SX
+flat-flex cable socket measures about **0.7 mm** thick, and the cable is keyed
+at both ends. The Model 70 riser is assumed to be keyed the same way.
+
+- **Rev P2:** add a slot about 0.9-1.0 mm wide and 11.7 mm deep, centred
+  between pins 2 and 3. That clears the 0.7 mm ridge. IBM's slot touches the
+  fingers; a board house will want some copper-to-edge clearance, so narrow
+  fingers a2/a3 and b2/b3 slightly on the slot side if the fab requires it.
+  Check the minimum routed slot width, which is often 1.0 mm.
+- **Rev P1:** could be keyed by hand. A fine jeweller's saw (about 0.8 mm kerf)
+  cutting down the 1.0 mm gap between fingers 2 and 3 to 11.7 mm deep would
+  clear the 0.7 mm ridge.
 
 ## Mechanical
 
@@ -156,42 +166,67 @@ Confirmed against a real drive (IBM FRU 6128291, model WD-3158, 120 MB):
 | Finger length | about 7 mm (from photo) | 6.86 mm | Yes |
 | Row A side | top of PCB, facing the drive casing | F.Cu, the component side | Yes |
 | Pin 1 end | A1 on the right, looking down with fingers pointing away | a1 on the right, same view | Yes |
-| Board thickness | 1.5 mm (measured) | 1.6 mm | Probably. Standard edge sockets take 1.57 mm nominal; recheck with calipers |
+| Board thickness | 1.6 mm (measured across fingers) | 1.6 mm | Yes |
+| Finger width | about 1.5 mm | 1.524 mm | Yes |
 | Key slot | between pins 2 and 3 | none | **No** (finding 8) |
 
-`mech/difnif_PS2_drive_sled.STL` is a 102 x 155 x 18.5 mm open ladder frame
-with side rails, roughly the 3.5" drive footprint. Its two corner holes are
-85 mm apart, which matches the board's mounting-hole spacing (H1/H2 and
-H3/H4). So it was designed around this board, presumably for Eric's 50Z. It's
-not yet known whether it fits the 55SX or Model 70 drive bays.
+Where the connector sits on the drive:
 
-Machine notes:
+- The finger tips stick out **23.8 mm** past the end of the drive's black
+  aluminium frame.
+- The drive PCB sits about **1 mm above** the bottom of the frame.
+- The frame has recesses along its sides for the screw holes, and the drive PCB
+  has matching cutouts plus a few others.
 
-- **55SX:** low-profile case, horizontal MCA cards. A card-edge connector on top
-  of the MCA riser carries a wide, fragile flat-flex cable in a large yoke. The
-  drive's 72-pin edge plugs into the far end. The drive itself is a standard
-  3.5" form factor.
-- **70:** a riser card with female edge connectors for the floppy drive(s) on
-  one side and the hard drive on the other.
-- **Reference drive:** IBM FRU P/N 6128291, model WD-3158.
+### Approach
 
-Still to measure:
+We are **not** trying to make a board shaped like the drive's own PCB that
+bolts to a drive chassis. The DifNif stays a small board (Rev P1 is 93 x 98.8 mm)
+that plugs into the machine's connector. A **3D-printed carrier** for each
+machine then mounts in the drive bay the way the IBM drive does and holds the
+board so its connector lands where the drive's did. Eric's
+`mech/difnif_PS2_drive_sled.STL` already follows this pattern: it's a
+102 x 155 x 18.5 mm open frame with side rails, and its two corner holes are
+85 mm apart, matching the board's mounting holes.
 
-- Key slot width and depth (calipers)
-- How far the finger tips stick out past the drive's black frame, and how high
-  the PCB sits above the bottom of the frame. Together these fix where the
-  connector ends up in the bay
-- Whether the 55SX cable-end socket and the Model 70 riser socket have a key
-  ridge
-- How the drive is held in each machine (rails, screws, tray), to compare with
-  the sled
+Carriers are cheap to print and reprint, so fitting them can be done by trial
+without touching the PCB. The PCB only has to get the edge connector right
+(width, pitch, key, thickness) and keep its mounting holes where the carrier
+expects them.
+
+Still to measure, per machine, when it's time to design carriers:
+
+- How the drive is held in the bay (rails, screws, tray) and the positions of
+  those mounting points
+- Clearance above and below the drive, including the 55SX cable yoke
+- Whether the tall parts (the socketed Teensy 4.1) and the microSD slot fit and
+  stay reachable
 
 ## Suggested next steps
 
-1. Mechanical measurements (above).
-2. Install the FPGA toolchain (oss-cad-suite) and get Eric's existing testbench
-   (`verilog/sim.sh`) running unchanged.
-3. Extend the testbench with a host model that behaves like real Micro Channel
+1. ~~Install the FPGA toolchain and get Eric's existing testbench running.~~
+   Done. See "Toolchain status" below.
+2. Extend the testbench with a host model that behaves like real Micro Channel
    timing (pipelined address, `-ADL`), reproduce findings 1 and 3, then fix
    them in Verilog.
-4. Make the Rev P2 schematic changes and rerun `tools/check_board.py` until it's clean.
+3. Make the Rev P2 schematic and outline changes (including the key slot) and
+   rerun `tools/check_board.py` until it's clean.
+4. Measure the drive bays and design the per-machine carriers. This can happen
+   any time, since printed carriers don't depend on the PCB beyond its mounting
+   holes.
+
+## Toolchain status
+
+oss-cad-suite 2026-09-23 build (Yosys 0.69, nextpnr 0.11.1, Icarus Verilog 14
+devel), installed in `/opt/oss-cad-suite`.
+
+- **FPGA build (`make` in `verilog/`)** works unchanged. The nextpnr and icetime
+  timing estimate is about 80 MHz worst case, against the 50 MHz internal clock.
+- **Simulation (`verilog/sim.sh`)** failed with Icarus 14: `mcabus.v` used six
+  signals before declaring them, which newer Icarus rejects. The declarations
+  were moved to the top of the module. A Yosys formal equivalence check
+  (`equiv_make`/`equiv_induct`) proved the reordered module identical to the
+  original: 297 of 297 equivalence points proven. The testbench now runs to
+  completion and writes `sim.vcd`.
+- The testbench has no self-checks yet: it drives bus cycles and dumps
+  waveforms but never compares results. Adding checks is part of the next step.

@@ -77,6 +77,14 @@ module mcabus(
     output [39:0] t_pos_regs
     );
 
+    // Declared early: used before their definitions below
+    reg flag_isr = 1'b0;
+    reg [15:0] reg_dreg_write = 16'h0000; // Data register (MCA bus write direction only)
+    wire control_int_enable;
+    wire dma_selected;
+    wire addressed;
+    reg la_sbhe_l;
+
     // Writable registers
     localparam REG_CIFR_L = 4'd0;
     localparam REG_CIFR_H = 4'd1;
@@ -107,15 +115,11 @@ module mcabus(
     assign t_cifr = reg_cifr;
     assign t_dreg_out = reg_dreg_write;
 
-    // Data register (MCA bus write direction only)
-    reg [15:0] reg_dreg_write = 16'h0000;
-
     // Flags
     reg flag_atn = 1'b0;
     reg flag_busy = 1'b0;
     reg flag_ci_full = 1'b0;
     reg flag_si_full = 1'b0;
-    reg flag_isr = 1'b0;
     reg flag_treq = 1'b0;
     reg flag_treq_16 = 1'b0;
 
@@ -289,7 +293,6 @@ module mcabus(
 
     // Control lines
     wire control_dma_enable;
-    wire control_int_enable;
 
 
     // Basic Status Register
@@ -376,11 +379,9 @@ module mcabus(
 
     // dma_selected acts like another address select. This should enable access
     // by the bus to the DREG.
-    wire dma_selected = arb_won & ~m_io_l & ~arb_gnt_l;
+    assign dma_selected = arb_won & ~m_io_l & ~arb_gnt_l;
 
     // Only support IO ports. Only respond when not in reset.
-    wire addressed;
-
 `ifdef MCA_NO_POS
     assign addressed = (~addr_sel_l) & ~m_io_l & ~chreset;
 `else
@@ -402,7 +403,6 @@ module mcabus(
     // Also includes data being written to us.
     reg la_cd_setup_l;
     reg [3:0] la_addr;
-    reg la_sbhe_l;
     reg la_data_read;
 
     reg la_dma_selected;
