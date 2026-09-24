@@ -60,6 +60,7 @@ PORT_SIGNAL = {
     "sbhe_l": "-SBHE",
     "cd_ds16_l": "-CD DS 16",
     "cd_chrdy_l": "CD CHRDY",
+    "cd_sfdbk_l": "-CD SFDBK",
     "irq14_l": "-IRQ 14",
     "arb_gnt_l": "ARB/-GNT",
     "tc_l": "-TC",

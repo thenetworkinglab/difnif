@@ -26,6 +26,7 @@ module difnif_top(
     input sbhe_l,       // With bus_a0, selects 8 or 16 bit transfer
     output cd_ds16_l,   // Assert low to request 16-bit transfer
     output cd_chrdy_l,  // Channel ready (inserts wait states)
+    output cd_sfdbk_l,  // Card selected feedback (72-pin only)
 
     inout[15:0]bus_d,   // Bidirectional data bus
     output data_dir,    // Data bus buffer direction control
@@ -92,7 +93,7 @@ module difnif_top(
 
     wire [39:0] t_pos_regs;
 
-    reg addr_sel_l;
+    wire addr_sel_l;
     wire fulladdr2_l;
 
     // Use pullup on fulladdr_l signal.
@@ -104,14 +105,12 @@ module difnif_top(
         .D_IN_0(fulladdr2_l)
     );
 
-    // Address decoder for 72-pin version
-    always @ (*) begin
-        if (fulladdr2_l) begin
-            addr_sel_l <= addr_sel_in_l;
-        end else begin
-            addr_sel_l <= ~(bus_a[15:4] == 12'h351);
-        end
-    end
+    // Address decoder for 72-pin version: 3510-3517, or 3518-351F when
+    // POS 2 bit 1 selects the alternate address. The ThinkPad's system board
+    // decodes the address itself and supplies addr_sel_in_l.
+    wire alt_addr = t_pos_regs[17];
+    assign addr_sel_l = fulladdr2_l ? addr_sel_in_l : ~(bus_a[15:3] == {12'h351, alt_addr});
+    wire [3:0] reg_sel = fulladdr2_l ? bus_a[3:0] : {1'b0, bus_a[2:0]};
 
     mcabus mca1 (
         .clk(clk),
@@ -123,10 +122,11 @@ module difnif_top(
         .m_io_l(m_io_l),
         .cd_setup_l(cd_setup_l),
         .addr_sel_l(addr_sel_l),
-        .bus_a(bus_a[3:0]),
+        .bus_a(reg_sel),
         .sbhe_l(sbhe_l),
         .cd_ds16_l(cd_ds16_l),
         .cd_chrdy_l(cd_chrdy_l),
+        .cd_sfdbk_l(cd_sfdbk_l),
 
         .bus_d(bus_d),
         .data_dir(data_dir),

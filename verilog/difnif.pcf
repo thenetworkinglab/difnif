@@ -73,6 +73,11 @@ set_io bus_a[15]    61
 
 set_io fulladdr_l   62
 
+# Card selected feedback, 72-pin only. Needs Rev P2: drives the /OE of the
+# spare 74VHCT125 section (U12 pin 13) as an open-drain output to J1 B08.
+# Pin 134 is unconnected on Rev P1; the final pin is chosen in the P2 layout.
+set_io cd_sfdbk_l   134
+
 ### Teensy connections
 # Data port (bidirectional)
 set_io tn_d[0]      29

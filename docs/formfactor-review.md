@@ -30,12 +30,12 @@ because the level-shifter pins are typed "bidirectional".
 | 1 | Critical | FPGA `chreset` input is floating | 72-pin only |
 | 2 | High | 74LVC4245 supply rails are swapped (5 V on a 4.6 V abs-max pin) | Both boards |
 | 3 | Low | `-ADL` not connected (IBM allows latching on `-CMD` instead; simulation passes) | 72-pin only |
-| 4 | Medium | `-CD SFDBK` not driven | 72-pin only |
-| 5 | Low | Address decode ignores POS alternate address, answers at 0x3518-351F | 72-pin only |
-| 6 | Low | `addr_sel_l` is a `wire` assigned in an `always` block | Verilog |
+| 4 | Medium | `-CD SFDBK` not driven (Verilog fixed; needs Rev P2 wiring) | 72-pin only |
+| 5 | Low | Address decode ignores POS alternate address, answers at 0x3518-351F (fixed) | 72-pin only |
+| 6 | Low | `addr_sel_l` is a `wire` assigned in an `always` block (fixed) | Verilog |
 | 7 | Low | Only 6 debug signals reach the logic-analyzer header | Both boards |
 | 8 | High | No key slot in the board outline | 72-pin only |
-| 9 | High | Write data is captured on the falling edge of `-CMD`, where IBM guarantees 0 ns setup | Both boards |
+| 9 | High | Write data is captured on the falling edge of `-CMD`, where IBM guarantees 0 ns setup (fixed) | Both boards |
 | 10 | High | Eric's default build hides the POS registers, including the `DF9F` adapter ID | Build setting |
 | 11 | Low | Status register can change during a read cycle | Both boards |
 
@@ -244,19 +244,70 @@ Still to measure, per machine, when it's time to design carriers:
 - Whether the tall parts (the socketed Teensy 4.1) and the microSD slot fit and
   stay reachable
 
+## Verilog fixes
+
+Findings 4, 5, 6 and 9 are fixed in `verilog/`.
+
+**Write capture (finding 9), [mcabus.v](../verilog/mcabus.v):**
+
+- Address, status, byte enable, "addressed" and "DMA selected" are latched on
+  the falling edge of `-CMD`, as before.
+- Write data (CIFR, ATN, BCR, DREG, POS 2-4, and DMA writes to DREG) is stored
+  on the rising edge of `-CMD`, using those latched values.
+- The host-side mailbox events (ATN written, CIFR written, ISR read, SIFR read,
+  DREG accessed) flip a toggle on the rising edge of `-CMD`. The 50 MHz domain
+  detects each flip through a two-stage synchronizer. Each host cycle produces
+  exactly one event, and the Teensy never sees a "full" flag before its data.
+- Side effect: ISR, SIFR and DREG flags now clear as soon as the host's read
+  ends, instead of partway into the host's *next* bus cycle. The old behaviour
+  meant the last word of a transfer stayed "requested" until the host did
+  something else.
+
+**Address decode (finding 5), [difnif_top.v](../verilog/difnif_top.v):** the
+72-pin decode compares A15-A3 against 3510 or, when POS 2 bit 1 is set, 3518.
+Registers are selected by A2-A0, so both bases work. A disabled card (POS 2
+bit 0 clear) now answers only setup cycles, including for `-CD DS 16`. The
+ThinkPad path (`fulladdr_l` high) is unchanged.
+
+**`-CD SFDBK` (finding 4):** new output `cd_sfdbk_l`, asserted from the
+unlatched decode whenever the card is selected by the processor or DMA, but not
+by `-CD SETUP` (IBM notes 1 and 3). It's assigned to FPGA pin 134 in
+[difnif.pcf](../verilog/difnif.pcf), which is unconnected on Rev P1. Rev P2
+needs it wired to U12 pin 13 (/OE of the spare 74VHCT125 section, input pin 12
+at GND) with the output (pin 11) to J1 B08. `tools/check_board.py` reports it
+until then.
+
+**Results:** `run_sim72.sh` passes every test on the bridged Rev P1 and Rev P2
+models, on all three machines, at typical timing and at IBM's limits for all 8
+delay sets, with POS enabled. In POS bypass mode only the two POS tests fail, by
+design. Rev P2 also passes the `-CD SFDBK` timing check (valid within 60 ns of
+the address, T14). The FPGA build uses 438 of 7680 logic cells, and the
+`-CMD`-clocked logic reports about 88 MHz, far above what a 90 ns `-CMD` pulse
+needs.
+
+Because POS writes are now stored as `-CMD` rises, a new POS setting takes
+effect when the POS write cycle ends. A host cycle overlapping that write still
+sees the old setting. That's normal for Micro Channel cards.
+
+**Not yet verified:**
+
+- **DMA.** The new testbench doesn't do DMA transfers, and DMA writes into DREG
+  now use the rising edge. Eric's original `mcabus_t.v` still runs but has no
+  checks. The PS/2 BIOS likely uses DMA for disk transfers, so a DMA test is
+  next.
+- **The ThinkPad 700C.** Finding 9's fix changes the ThinkPad build too. It's
+  per IBM's timing rules, but nobody has run it on a 700C.
+
 ## Suggested next steps
 
-1. ~~Install the FPGA toolchain and get Eric's existing testbench running.~~
-   Done.
-2. ~~Build a host model with real Micro Channel timing and reproduce the
-   failures.~~ Done: see "Simulation" below.
-3. Fix findings 9, 5 and 4 in Verilog (write-data capture, address decode,
-   `-CD SFDBK` output), and rerun `run_sim72.sh` until the bridged board passes
-   everything at IBM's timing limits.
-4. Post-place-and-route timing check of the FPGA's internal delays (finding 3).
-5. Make the Rev P2 schematic and outline changes (including the key slot) and
-   rerun `tools/check_board.py` until it's clean.
-6. Measure the drive bays and design the per-machine carriers.
+1. Add DMA transfers (arbitration, both directions, terminal count) to
+   `difnif72_t.v`.
+2. Post-place-and-route timing check of the FPGA's internal delays (finding 3).
+3. Make the Rev P2 schematic and outline changes: CHRESET to U8 pin 15 (finding
+   1), 74LVC8T245 parts (finding 2), `-ADL` to U8 channel 7 (finding 3),
+   `-CD SFDBK` through U12 (finding 4), debug test points (finding 7) and the key
+   slot (finding 8). Rerun `tools/check_board.py` until it's clean.
+4. Measure the drive bays and design the per-machine carriers.
 
 ## Toolchain status
 
@@ -289,7 +340,8 @@ around the unmodified FPGA design. It models:
 - **the Teensy**, using the same register timing as `difnift.ino` and the same
   mailbox handshakes as DIFDIAG, checking every value.
 
-Run `verilog/run_sim72.sh` (21 seconds for 108 simulations). Results:
+Run `verilog/run_sim72.sh` (about 30 seconds for 162 simulations;
+`run_sim72.sh quick` runs one delay set). Results **before** the Verilog fixes:
 
 | Board | POS | Timing | Result (all three machines) |
 |---|---|---|---|
@@ -297,6 +349,9 @@ Run `verilog/run_sim72.sh` (21 seconds for 108 simulations). Results:
 | Bridged | bypass | typical | Mailboxes pass; POS tests fail (finding 10); 3518 answered (finding 5) |
 | Bridged | enabled | typical | All pass except 3518 answered (finding 5) |
 | Bridged | either | IBM limits | Host writes fail on 7 of 8 delay sets (finding 9); reads pass |
+
+**After** the fixes, the bridged board and Rev P2 pass everything with POS
+enabled. See "Verilog fixes" above.
 
 The simulated FPGA has no internal delays (it's RTL simulation), and a floating
 input is modelled as "unknown", so on real hardware finding 1 would show up as

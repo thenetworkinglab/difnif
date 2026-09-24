@@ -19,7 +19,8 @@
 // Parameters (override with iverilog -P difnif72_t.NAME=value):
 //   CYCLE        default I/O cycle in ns: 300 = 50Z, 250 = 55SX, 200 = Model 70
 //   WORST        0 = typical 50Z timing, 1 = Figure 2-34 limits
-//   FIX_CHRESET  0 = Rev P1 as built, 1 = U8 pins 14/15 bridged
+//   BOARD        0 = Rev P1 as built, 1 = Rev P1 with U8 pins 14/15 bridged,
+//                2 = Rev P2 (bridged, plus -CD SFDBK wired to J1 B08)
 //   SEED         selects the per-pin level-shifter delays and clock phase
 //   N_ITER       values sent through each mailbox
 //
@@ -42,7 +43,7 @@ module difnif72_t;
 
     parameter integer CYCLE = 300;
     parameter integer WORST = 0;
-    parameter integer FIX_CHRESET = 0;
+    parameter integer BOARD = 0;
     parameter integer SEED = 1;
     parameter integer N_ITER = 16;
 
@@ -71,6 +72,7 @@ module difnif72_t;
     localparam real T_DS16    = 55;                 // T13 -CD DS 16 valid from address
     localparam real T_RD      = 60;                 // T20 read data valid from -CMD
     localparam real T_RD_OFF  = 40;                 // T22 read data off from -CMD rising
+    localparam real T_SFDBK   = 60;                 // T14 -CD SFDBK valid from address
 
     // ESDI registers (primary address)
     localparam [15:0] A_CIFR = 16'h3510;  // write: command interface, read: status
@@ -99,7 +101,7 @@ module difnif72_t;
 
     tri1 [15:0] h_d;          // undriven data bus reads as FFFF
     assign h_d = h_wdrive ? h_wdata : 16'bz;
-    tri1 h_ds16_l, h_irq14_l, h_chrdy;
+    tri1 h_ds16_l, h_irq14_l, h_chrdy, h_sfdbk_l;
     tri1 [3:0] h_arb;
     tri1 h_burst_l, h_preempt_l;
 
@@ -126,18 +128,19 @@ module difnif72_t;
 
     // Rev P1: B14 (CHRESET) reaches FPGA pin 52 (chreset_l, unused) and the
     // FPGA's chreset input (pin 76) comes from the unconnected U8 pin 15.
-    wire f_chreset   = FIX_CHRESET ? f_chreset_pin : 1'bx;
+    wire f_chreset   = BOARD >= 1 ? f_chreset_pin : 1'bx;
     wire f_chreset_l = f_chreset_pin;
 
     // FPGA outputs back to the connector
-    wire f_ds16_l, f_irq14_l, f_chrdy_l, f_burst_o_l, f_preempt_o_l, f_data_dir;
+    wire f_ds16_l, f_irq14_l, f_chrdy_l, f_burst_o_l, f_preempt_o_l, f_data_dir, f_sfdbk_l;
     wire [3:0] f_arb_o;
-    wire [8:0] b_out, f_out = {f_ds16_l, f_irq14_l, f_chrdy_l, f_burst_o_l, f_preempt_o_l, f_arb_o};
+    wire [9:0] b_out, f_out = {f_sfdbk_l, f_ds16_l, f_irq14_l, f_chrdy_l, f_burst_o_l, f_preempt_o_l, f_arb_o};
     generate
-        for (gi = 0; gi < 9; gi = gi + 1) begin : out_path
+        for (gi = 0; gi < 10; gi = gi + 1) begin : out_path
             lvl #(.D10(pin_delay(SEED, 100 + gi))) u (.a(f_out[gi]), .y(b_out[gi]));
         end
     endgenerate
+    assign h_sfdbk_l = (BOARD >= 2 && !b_out[9]) ? 1'b0 : 1'bz;  // Rev P2: spare 74VHCT125
     assign h_ds16_l = b_out[8];                     // 74VHCT125, push-pull
     assign h_irq14_l = b_out[7] ? 1'bz : 1'b0;      // 74VHCT125 used as open drain
     assign h_chrdy = b_out[6] ? 1'bz : 1'b0;
@@ -194,6 +197,7 @@ module difnif72_t;
         .sbhe_l(f_sbhe_l),
         .cd_ds16_l(f_ds16_l),
         .cd_chrdy_l(f_chrdy_l),
+        .cd_sfdbk_l(f_sfdbk_l),
         .bus_d(f_d),
         .data_dir(f_data_dir),
         .irq14_l(f_irq14_l),
@@ -307,7 +311,8 @@ module difnif72_t;
     // One I/O or setup cycle. For reads, rdata is the byte or word as the
     // planar would see it after data steering.
     task automatic mca_cycle(input rd, input setup, input [15:0] addr, input word,
-                             input expect_ds16, input [15:0] wdata, output [15:0] rdata);
+                             input expect_ds16, input expect_sel, input [15:0] wdata,
+                             output [15:0] rdata);
         realtime t0, t_rise;
         reg ds16, card16;
         reg [15:0] raw, early;
@@ -335,6 +340,13 @@ module difnif72_t;
                 spec($sformatf("-CD DS 16 = %b at %h, expected %0s", h_ds16_l, addr,
                                expect_ds16 ? "asserted" : "not asserted"));
             card16 = (ds16 === 1'b1);
+
+            if (BOARD >= 2) begin
+                wait_until(t0 - T_ADDR_SU + T_SFDBK);
+                if (h_sfdbk_l === 1'bx || ~h_sfdbk_l !== expect_sel)
+                    spec($sformatf("-CD SFDBK = %b at %h, expected %0s", h_sfdbk_l, addr,
+                                   expect_sel ? "asserted" : "not asserted"));
+            end
 
             wait_until(t0 - T_ADL_ON);
             h_adl_l = 1'b0;
@@ -396,31 +408,38 @@ module difnif72_t;
         end
     endtask
 
+    // Where the card should answer: 3510-3517, or 3518-351F with the
+    // alternate address selected in POS 2
+    reg alt_base = 1'b0;
+    function selected(input [15:0] addr);
+        selected = (addr[15:3] == {12'h351, alt_base});
+    endfunction
+
     // ESDI register numbers 0, 1 and 4 are 16-bit (mcabus.v cd_ds16_l)
     function is16(input [15:0] addr);
-        is16 = (addr[15:4] == 12'h351) && (addr[3:1] == 3'b000 || addr[3:0] == 4'h4);
+        is16 = selected(addr) && (addr[2:1] == 2'b00 || addr[2:0] == 3'h4);
     endfunction
 
     task automatic host_in(input [15:0] addr, input word, output [15:0] d);
-        mca_cycle(1, 0, addr, word, is16(addr), 16'h0, d);
+        mca_cycle(1, 0, addr, word, is16(addr), selected(addr), 16'h0, d);
     endtask
 
     task automatic host_out(input [15:0] addr, input word, input [15:0] d);
         reg [15:0] dummy;
-        mca_cycle(0, 0, addr, word, is16(addr), d, dummy);
+        mca_cycle(0, 0, addr, word, is16(addr), selected(addr), d, dummy);
     endtask
 
     task automatic pos_in(input [2:0] r, output [7:0] d);
         reg [15:0] w;
         begin
-            mca_cycle(1, 1, 16'h0100 + r, 0, 0, 16'h0, w);
+            mca_cycle(1, 1, 16'h0100 + r, 0, 0, 0, 16'h0, w);
             d = w[7:0];
         end
     endtask
 
     task automatic pos_out(input [2:0] r, input [7:0] d);
         reg [15:0] dummy;
-        mca_cycle(0, 1, 16'h0100 + r, 0, 0, {8'h00, d}, dummy);
+        mca_cycle(0, 1, 16'h0100 + r, 0, 0, 0, {8'h00, d}, dummy);
     endtask
 
     // Poll the basic status register until a bit has the wanted value
@@ -529,6 +548,33 @@ module difnif72_t;
             host_in(addr, 0, d);
             watch_en = 1'b0;
             if (drove) fail($sformatf("card drove the data bus for a read of %h", addr));
+            end_test;
+        end
+    endtask
+
+    // POS 2 bit 1 moves the card to the alternate address
+    task automatic test_alt_address;
+        reg [15:0] d;
+        begin
+            begin_test("POS 2 alternate address moves card to 3518");
+            // POS registers are stored as -CMD rises, so the new address takes
+            // effect only after the POS write ends. Let it finish before the
+            // next cycle starts rather than overlapping it.
+            pos_out(2, 8'b0_1_1110_1_1);
+            wait_until(t_next_cmd);
+            alt_base = 1'b1;
+            drove = 1'b0;
+            watch_en = 1'b1;
+            host_in(16'h3512, 0, d);
+            watch_en = 1'b0;
+            if (drove) fail("card still answers at 3512");
+            host_in(16'h351A, 0, d);
+            if (d[7:0] !== 8'h00) fail($sformatf("BSR at 351A = %h", d[7:0]));
+            pos_out(2, 8'b0_1_1110_0_1);
+            wait_until(t_next_cmd);
+            alt_base = 1'b0;
+            host_in(A_BSR, 0, d);
+            if (d[7:0] !== 8'h00) fail($sformatf("BSR back at 3512 = %h", d[7:0]));
             end_test;
         end
     endtask
@@ -732,7 +778,7 @@ module difnif72_t;
 
         $display("difnif72_t: CYCLE=%0d ns, %0s timing, board %0s, POS %0s, seed %0d",
                  CYCLE, WORST ? "Figure 2-34 limit" : "typical 50Z",
-                 FIX_CHRESET ? "with U8 14/15 bridged" : "Rev P1 as built",
+                 BOARD == 2 ? "Rev P2" : BOARD == 1 ? "Rev P1 with U8 14/15 bridged" : "Rev P1 as built",
 `ifdef MCA_USE_POS
                  "enabled",
 `else
@@ -747,6 +793,9 @@ module difnif72_t;
         test_reset_state;
         test_not_selected(16'h0080, "no response at 0080 (unrelated port)");
         test_not_selected(16'h3518, "no response at 3518 (alternate ESDI address)");
+`ifdef MCA_USE_POS
+        test_alt_address;
+`endif
         test_cifr;
         test_sifr;
         test_atn;
@@ -754,8 +803,8 @@ module difnif72_t;
         test_dreg_write;
         test_dreg_read;
 
-        $display("RESULT: cycle=%0d worst=%0d fix_chreset=%0d pos=%0d seed=%0d tests=%0d failed=%0d spec=%0d",
-                 CYCLE, WORST, FIX_CHRESET,
+        $display("RESULT: cycle=%0d worst=%0d board=%0d pos=%0d seed=%0d tests=%0d failed=%0d spec=%0d",
+                 CYCLE, WORST, BOARD,
 `ifdef MCA_USE_POS
                  1,
 `else

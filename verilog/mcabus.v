@@ -29,6 +29,7 @@ module mcabus(
     input sbhe_l,       // With bus_a0, selects 8 or 16 bit transfer
     output cd_ds16_l,   // Assert low to request 16-bit transfer
     output cd_chrdy_l,  // Channel ready (inserts wait states)
+    output cd_sfdbk_l,  // Card selected feedback
 
     inout[15:0]bus_d,   // Bidirectional data bus
     output data_dir,    // Data bus buffer direction control. 0=in, 1=out
@@ -88,6 +89,12 @@ module mcabus(
     wire dma_selected;
     wire addressed;
     reg la_sbhe_l;
+    reg la_cd_setup_l;
+    reg [3:0] la_addr;
+    reg la_addressed;
+    reg la_write;
+    reg la_read;
+    reg la_dma_selected;
 
     // Writable registers
     localparam REG_CIFR_L = 4'd0;
@@ -145,28 +152,73 @@ module mcabus(
         clear_all <= t_clear_all | t_hard_reset;
     end
 
-    // ATN register full
-    reg flag_atn_set = 1'b0;
-    always @ (negedge cmd_l) begin
-        flag_atn_set <= addressed & cd_setup_l & ~s0_w_l & (bus_a == REG_ATN);
+    // Host-side events. Each host cycle that writes a mailbox register, or
+    // reads one the Teensy is waiting on, flips a toggle on the rising edge
+    // of -CMD, after the write data has been stored (see "Data input
+    // latches"). The 50 MHz domain sees each flip as exactly one event, so
+    // back-to-back cycles can't merge, and the Teensy never sees a flag
+    // before the data behind it.
+    reg tg_atn = 1'b0;      // host wrote ATN
+    reg tg_cifr = 1'b0;     // host wrote CIFR
+    reg tg_isr = 1'b0;      // host read ISR
+    reg tg_sifr = 1'b0;     // host read SIFR
+    reg tg_treq = 1'b0;     // host or DMA accessed DREG
+
+    wire la_io = la_addressed & la_cd_setup_l;
+
+    always @ (posedge cmd_l) begin
+        if (la_io & la_write & (la_addr == REG_ATN))    tg_atn  <= ~tg_atn;
+        if (la_io & la_write & (la_addr == REG_CIFR_L)) tg_cifr <= ~tg_cifr;
+        if (la_io & la_read  & (la_addr == REG_ISR))    tg_isr  <= ~tg_isr;
+        if (la_io & la_read  & (la_addr == REG_SIFR_L)) tg_sifr <= ~tg_sifr;
+        if ((la_io & (la_read | la_write) & (la_addr == REG_DREG)) | la_dma_selected)
+            tg_treq <= ~tg_treq;
     end
 
-    reg [1:0] reg_atn_set;
-    reg [1:0] reg_t_atn_read;
-    reg [1:0] reg_t_busy_clear;
+    // Two synchronizer stages, then a third to detect each flip
+    reg [2:0] s_atn = 3'b000;
+    reg [2:0] s_cifr = 3'b000;
+    reg [2:0] s_isr = 3'b000;
+    reg [2:0] s_sifr = 3'b000;
+    reg [2:0] s_treq = 3'b000;
 
     always @ (posedge clk) begin
-        reg_atn_set <= {reg_atn_set[0], flag_atn_set};
-        reg_t_atn_read <= {reg_t_atn_read[0], t_atn_read};
-        reg_t_busy_clear <= {reg_t_busy_clear[0], t_busy_clear};
+        s_atn  <= {s_atn[1:0], tg_atn};
+        s_cifr <= {s_cifr[1:0], tg_cifr};
+        s_isr  <= {s_isr[1:0], tg_isr};
+        s_sifr <= {s_sifr[1:0], tg_sifr};
+        s_treq <= {s_treq[1:0], tg_treq};
     end
 
-    wire reg_atn_set_match = (reg_atn_set == 2'b01);
+    wire ev_atn  = s_atn[2] ^ s_atn[1];
+    wire ev_cifr = s_cifr[2] ^ s_cifr[1];
+    wire ev_isr  = s_isr[2] ^ s_isr[1];
+    wire ev_sifr = s_sifr[2] ^ s_sifr[1];
+    wire ev_treq = s_treq[2] ^ s_treq[1];
 
+    // Teensy-side strobes
+    reg [1:0] reg_t_atn_read;
+    reg [1:0] reg_t_busy_clear;
+    reg [1:0] reg_t_cifr_read;
+    reg [1:0] reg_t_isr_write;
+    reg [1:0] reg_t_sifr_write;
+    reg [1:0] reg_treq_set;
+
+    always @ (posedge clk) begin
+        reg_t_atn_read <= {reg_t_atn_read[0], t_atn_read};
+        reg_t_busy_clear <= {reg_t_busy_clear[0], t_busy_clear};
+        reg_t_cifr_read <= {reg_t_cifr_read[0], t_cifr_read};
+        reg_t_isr_write <= {reg_t_isr_write[0], t_isr_write};
+        reg_t_sifr_write <= {reg_t_sifr_write[0], t_sifr_write};
+        reg_treq_set <= {reg_treq_set[0], t_treq_set};
+    end
+
+    // ATN register full: set when the host writes ATN, cleared when the
+    // Teensy reads it
     always @ (posedge clk) begin
         if (clear_all || (reg_t_atn_read == 2'b10)) begin
             flag_atn <= 1'b0;
-        end else if (reg_atn_set_match) begin
+        end else if (ev_atn) begin
             flag_atn <= 1'b1;
         end
     end
@@ -175,49 +227,24 @@ module mcabus(
     always @ (posedge clk) begin
         if (clear_all || (reg_t_busy_clear == 2'b10)) begin
             flag_busy <= 1'b0;
-        end else if (reg_atn_set_match) begin
+        end else if (ev_atn) begin
             flag_busy <= 1'b1;
         end
     end
 
     // Command Interface Register Full
-    reg flag_ci_full_set = 1'b0;
-    always @ (negedge cmd_l) begin
-        flag_ci_full_set <= addressed & cd_setup_l & ~s0_w_l & (bus_a == REG_CIFR_L);
-    end
-
-    reg [1:0] reg_ci_full_set;
-    reg [1:0] reg_t_cifr_read;
-
-    always @ (posedge clk) begin
-        reg_ci_full_set <= {reg_ci_full_set[0], flag_ci_full_set};
-        reg_t_cifr_read <= {reg_t_cifr_read[0], t_cifr_read};
-    end
-
     always @ (posedge clk) begin
         if (clear_all || (reg_t_cifr_read == 2'b10)) begin
             flag_ci_full <= 1'b0;
-        end else if (reg_ci_full_set == 2'b01) begin
+        end else if (ev_cifr) begin
             flag_ci_full <= 1'b1;
         end
     end
 
-    // ISR register full
-    reg flag_isr_clear = 1'b0;
-    always @ (negedge cmd_l) begin
-        flag_isr_clear <= addressed & cd_setup_l & ~s1_r_l & (bus_a == REG_ISR);
-    end
-
-    reg [1:0] reg_isr_clear;
-    reg [1:0] reg_t_isr_write;
-
+    // ISR register full: set when the Teensy writes it, cleared once the
+    // host's read of it has finished
     always @ (posedge clk) begin
-        reg_isr_clear <= {reg_isr_clear[0], flag_isr_clear};
-        reg_t_isr_write <= {reg_t_isr_write[0], t_isr_write};
-    end
-
-    always @ (posedge clk) begin
-        if (clear_all || (reg_isr_clear == 2'b10)) begin
+        if (clear_all || ev_isr) begin
             flag_isr <= 1'b0;
         end else if (reg_t_isr_write == 2'b01) begin
             flag_isr <= 1'b1;
@@ -225,46 +252,21 @@ module mcabus(
     end
 
     // Status Interface Register Full
-    reg flag_sifr_clear = 1'b0;
-    always @ (negedge cmd_l) begin
-        flag_sifr_clear <= addressed & cd_setup_l & ~s1_r_l & (bus_a == REG_SIFR_L);
-    end
-    reg [1:0] reg_sifr_clear;
-    reg [1:0] reg_t_sifr_write;
-
-    always @ (posedge clk) begin
-        reg_sifr_clear <= {reg_sifr_clear[0], flag_sifr_clear};
-        reg_t_sifr_write <= {reg_t_sifr_write[0], t_sifr_write};
-    end
     // Clear register at end of MCA transaction
     // Set register when Teensy latches new value
     always @ (posedge clk) begin
-        if (clear_all || (reg_sifr_clear == 2'b10)) begin
+        if (clear_all || ev_sifr) begin
             flag_si_full <= 1'b0;
         end else if (reg_t_sifr_write == 2'b01) begin
             flag_si_full <= 1'b1;
         end
     end
 
-    // Data register drequest
-    reg treq_clear1 = 1'b0;
-    always @ (negedge cmd_l) begin
-        treq_clear1 <= (addressed & cd_setup_l & (~s1_r_l | ~s0_w_l) & (bus_a == REG_DREG));
-    end
-
-    // FIXME
-    //wire treq_clear = treq_clear1 | (la_dma_selected & ~cmd_l);
-    wire treq_clear = treq_clear1 | (dma_selected & ~cmd_l);
-
-    reg [1:0] reg_treq_clear;
-    reg [1:0] reg_treq_set;
+    // Data register transfer request: set by the Teensy, cleared at the end
+    // of each host or DMA access to DREG
     // We can tell if it is an 8-bit or 16-bit transfer if la_sbhe_l is low
     always @ (posedge clk) begin
-        reg_treq_clear <= {reg_treq_clear[0], treq_clear};
-        reg_treq_set <= {reg_treq_set[0], t_treq_set};
-    end
-    always @ (posedge clk) begin
-        if (clear_all || (reg_treq_clear == 2'b10)) begin
+        if (clear_all || ev_treq) begin
             flag_treq <= 1'b0;
         end else if (reg_treq_set == 2'b10) begin
             flag_treq <= 1'b1;
@@ -386,10 +388,11 @@ module mcabus(
     assign dma_selected = arb_won & ~m_io_l & ~arb_gnt_l;
 
     // Only support IO ports. Only respond when not in reset.
+    // A disabled card answers only setup (POS) cycles.
 `ifdef MCA_NO_POS
-    assign addressed = (~addr_sel_l) & ~m_io_l & ~chreset;
+    assign addressed = (~addr_sel_l & card_enable) & ~m_io_l & ~chreset;
 `else
-    assign addressed = (~addr_sel_l | ~cd_setup_l) & ~m_io_l & ~chreset;
+    assign addressed = ((~addr_sel_l & card_enable) | ~cd_setup_l) & ~m_io_l & ~chreset;
 `endif
 
     // Data bus steering
@@ -403,44 +406,52 @@ module mcabus(
                          ((bus_a[3:1] == 3'b000) |
                           (bus_a[3:0] == 4'b0100)) | dma_selected);
 
-    // Logic latched on falling edge of CMD
-    // Also includes data being written to us.
-    reg la_cd_setup_l;
-    reg [3:0] la_addr;
+    // Card selected feedback: required whenever the card is selected by the
+    // processor or DMA controller, but not by -CD SETUP. Like -CD DS 16 it
+    // comes from the unlatched decode (IBM Figure 2-34, notes 1 and 3).
+    assign cd_sfdbk_l = ~(cd_setup_l & addressed | dma_selected);
+
+    // Address, status and byte enables are latched on the falling edge of
+    // -CMD. They are guaranteed valid for only 30 ns after it (T9, T10).
     reg la_data_read;
 
-    reg la_dma_selected;
-
-    // Data input latches
     always @ (negedge cmd_l) begin
         la_addr <= bus_a;
         la_cd_setup_l <= cd_setup_l;
         la_sbhe_l <= sbhe_l;
+        la_addressed <= addressed;
+        la_write <= ~s0_w_l;
+        la_read <= ~s1_r_l;
 
         la_data_read <= ~s1_r_l & (addressed | dma_selected);
         //la_data_read <= ~s1_r_l & (addressed | dma_selected) & cd_setup_l; // Use this to disable POS
         la_dma_selected <= dma_selected;
+    end
 
-        // Data written to us on this edge
+    // Data input latches
+    // Write data is stored on the rising edge of -CMD. It is guaranteed
+    // valid only 0 ns before -CMD falls (T17), but for 30 ns after -CMD
+    // rises (T18).
+    always @ (posedge cmd_l) begin
         // SBHE: useful really only when the host writes to us. Only write to the upper byte
         // when this is asserted low.
-        if (~s0_w_l & (addressed | dma_selected)) begin
-            if (cd_setup_l & card_enable) begin
-                if (~dma_selected) begin
-                    case (bus_a)
-                        REG_CIFR_L  : reg_cifr <= sbhe_l ? {reg_cifr[15:8], bus_d[7:0]} : bus_d;
-                        REG_CIFR_H  : reg_cifr <= sbhe_l ? reg_cifr : {bus_d[15:8], reg_cifr[7:0]};
+        if (la_write & (la_addressed | la_dma_selected)) begin
+            if (la_cd_setup_l & card_enable) begin
+                if (~la_dma_selected) begin
+                    case (la_addr)
+                        REG_CIFR_L  : reg_cifr <= la_sbhe_l ? {reg_cifr[15:8], bus_d[7:0]} : bus_d;
+                        REG_CIFR_H  : reg_cifr <= la_sbhe_l ? reg_cifr : {bus_d[15:8], reg_cifr[7:0]};
                         REG_BCR     : reg_bcr  <= bus_d[7:0];
                         REG_ATN     : reg_atn  <= bus_d[7:0];
-                        REG_DREG    : reg_dreg_write <= sbhe_l ? {reg_dreg_write[15:8], bus_d[7:0]} : bus_d;
+                        REG_DREG    : reg_dreg_write <= la_sbhe_l ? {reg_dreg_write[15:8], bus_d[7:0]} : bus_d;
                         // Doesn't make sense to access the high byte alone of REG_DREG
                     endcase
                 end else begin
                     // DMA ignores address
-                    reg_dreg_write <= sbhe_l ? {reg_dreg_write[15:8], bus_d[7:0]} : bus_d;
+                    reg_dreg_write <= la_sbhe_l ? {reg_dreg_write[15:8], bus_d[7:0]} : bus_d;
                 end
-            end else if (~cd_setup_l) begin
-                case (bus_a)
+            end else if (~la_cd_setup_l) begin
+                case (la_addr)
                     4'h2       : reg_pos2 <= bus_d[7:0];
                     4'h3       : reg_pos3 <= bus_d[7:0];
                     4'h4       : reg_pos4 <= bus_d[7:0];
