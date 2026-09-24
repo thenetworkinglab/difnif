@@ -146,7 +146,7 @@ module difnif72_t;
             lvl #(.D10(pin_delay(SEED, 100 + gi))) u (.a(f_out[gi]), .y(b_out[gi]));
         end
     endgenerate
-    assign h_sfdbk_l = (BOARD >= 2 && !b_out[9]) ? 1'b0 : 1'bz;  // Rev P2: spare 74VHCT125
+    assign h_sfdbk_l = (BOARD >= 2) ? b_out[9] : 1'bz;           // Rev P2: spare 74VHCT125, push-pull
     assign h_ds16_l = b_out[8];                     // 74VHCT125, push-pull
     assign h_irq14_l = b_out[7] ? 1'bz : 1'b0;      // 74VHCT125 used as open drain
     assign h_chrdy = b_out[6] ? 1'bz : 1'b0;

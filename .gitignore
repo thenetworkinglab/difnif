@@ -5,3 +5,12 @@ build/
 sim*
 *.oldv
 *.blif
+
+# KiCad working files
+*-backups/
+_autosave-*
+~*.lck
+*.lck
+
+# macOS
+.DS_Store

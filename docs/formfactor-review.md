@@ -105,10 +105,12 @@ Pin B08 is `-CD SFDBK` (card selected feedback). The board leaves it open.
 IBM Figure 2-34, note 1: "All slaves must drive -CD SFDBK whenever selected."
 It has to come from the unlatched address decode (note 3).
 
-- **Rev P2:** drive it through an open-drain or tri-state buffer. U12's fourth
-  74VHCT125 section is spare: output pin 11, input pin 12 and /OE pin 13 are all
-  currently tied off. Put the FPGA signal on /OE (pin 13) with the input (pin 12)
-  at GND. Assert it for the duration of an addressed cycle.
+- **Rev P2:** drive it through U12's spare fourth 74VHCT125 section: FPGA signal
+  on the input (pin 12), /OE (pin 13) grounded, output (pin 11) to B08. That
+  makes it push-pull, which is the driver type Micro Channel specifies for
+  `-CD SFDBK`, the same as `-CD DS 16`. (An earlier version used the enable pin
+  as an open-drain driver; it was swapped during layout, see "Rev P2 schematic
+  changes".)
 
 ### 5. Address decode
 
@@ -246,7 +248,8 @@ Where the connector sits on the drive:
 
 - The finger tips stick out **23.8 mm** past the end of the drive's black
   aluminium frame.
-- The drive PCB sits about **1 mm above** the bottom of the frame.
+- The drive PCB is recessed about **1 mm** into the frame: the bottom edge of
+  the frame sticks out about 1 mm further than the PCB's underside.
 - The frame has recesses along its sides for the screw holes, and the drive PCB
   has matching cutouts plus a few others.
 
@@ -303,9 +306,9 @@ ThinkPad path (`fulladdr_l` high) is unchanged.
 unlatched decode whenever the card is selected by the processor or DMA, but not
 by `-CD SETUP` (IBM notes 1 and 3). It's assigned to FPGA pin 134 in
 [difnif.pcf](../verilog/difnif.pcf), which is unconnected on Rev P1. Rev P2
-needs it wired to U12 pin 13 (/OE of the spare 74VHCT125 section, input pin 12
-at GND) with the output (pin 11) to J1 B08. `tools/check_board.py` reports it
-until then.
+needs it wired to U12 pin 12 (input of the spare 74VHCT125 section, /OE pin 13
+grounded) with the output (pin 11) to J1 B08, push-pull. `tools/check_board.py`
+reports it until then.
 
 **Results:** `run_sim72.sh` passes every test on the bridged Rev P1 and Rev P2
 models, on all three machines, at typical timing and at IBM's limits for all 8
@@ -389,7 +392,7 @@ fewer problems and no new ones.
 |---|---|
 | 1 | Net at J1 B14 renamed `~{CHRESET}_5V` -> `CHRESET_5V`, which joins B14 to U8 pins 14 **and** 15. The FPGA's `chreset` (pin 76) now sees the real CHRESET; pin 52 gets it too, unused. |
 | 2 | U6-U10, U14: value `74LVC8T245`, Mouser `595-SN74LVC8T245PWR` (was 74LVC4245 / 771-74LVC4245APW-T). Same TSSOP-24 footprint and pinout; the existing supply wiring (pin 1 = 3.3 V, pins 23/24 = 5 V) is correct for this part. Symbol graphics unchanged. |
-| 4 | U12 section 4 is the `-CD SFDBK` driver: ground symbol removed from pin 13 (/OE), which now connects to new hierarchical net `~{CD_SFDBK}` -> sheet pin -> FPGA pin 134. Pin 12 stays grounded; pin 11 (output) connects to J1 B08 via `~{CD_SFDBK}_5V`. No-connect flags removed from U12 pin 11 and J1 B08. |
+| 4 | U12 section 4 is the `-CD SFDBK` driver, push-pull: pin 12 (input) connects to new hierarchical net `~{CD_SFDBK}` -> sheet pin -> FPGA pin 134 (and J4 pin 11); pin 13 (/OE) stays grounded; pin 11 (output) connects to J1 B08 via `~{CD_SFDBK}_5V`. No-connect flags removed from U12 pin 11 and J1 B08. First done with the signal on pin 13 (open-drain); swapped during layout because routing to pin 13 cut pin 12's ground off from the top pour, and push-pull is what IBM specifies anyway. |
 | 7 | Logic-analyzer header J4: its 11 unused data pins now carry FPGA-side bus signals (below). No new parts. |
 
 J4 (HP logic analyzer pod) assignments:
@@ -406,22 +409,23 @@ J4 (HP logic analyzer pod) assignments:
 Not changed in the schematic:
 
 - **`-ADL`** (finding 3): not needed, so A20 stays unconnected.
-- **Pull-ups on the FPGA-driven buffer enables.** `-CD SFDBK`, like Eric's
-  existing `-IRQ14` and `-CHRDY`, is driven through a buffer enable straight
-  from the FPGA. Before the FPGA has loaded its configuration, those pins only
-  have whatever pull-up the iCE40 applies during configuration. If that isn't
-  guaranteed, a 10 k pull-up to 3.3 V on each enable would keep them quiet at
-  power-up. Worth checking in Lattice's configuration documentation before
-  layout.
+- **Pull-ups on the FPGA-driven buffer inputs.** Eric's `-IRQ14` and `-CHRDY`
+  are driven through buffer enables, and `-CD DS 16` and `-CD SFDBK` through
+  buffer inputs, straight from the FPGA. Before the FPGA has loaded its
+  configuration, those pins only have whatever pull-up the iCE40 applies during
+  configuration. If that isn't guaranteed, a 10 k pull-up to 3.3 V on each
+  would keep them quiet at power-up. Worth checking in Lattice's configuration
+  documentation.
 - **The ThinkPad board** has the same swapped-supply 74LVC4245s (finding 2). The
   same part swap would fix it; not done here.
 
 ### Layout work (in KiCad's PCB editor)
 
 1. **Update PCB from Schematic** (Tools menu, or F8). New connections to route:
-   J1 B14 to U8 pin 15; J1 B08 to U12 pin 11; U12 pin 13 to FPGA pin 134; and
-   J4 pins 4-14 to their signals. U12 pin 13's old ground connection must be
-   removed; DRC will flag the leftover copper.
+   J1 B14 to U8 pin 15; J1 B08 to U12 pin 11; U12 pin 12 to FPGA pin 134
+   (routed via J4 pin 11, whose through-hole pad doubles as a via); and J4 pins
+   4-14 to their signals. Route the U12 pin 12 stub on the top layer away from
+   pin 13, so pin 13 keeps its ground connection to the pour.
 2. **Key slot** (finding 8), in Edge.Cuts: 1.0 mm wide, 11.7 mm deep, centred
    between pins 2 and 3. On the current layout that's x = 91.2 to 102.9 mm,
    y = 43.36 to 44.36 mm. The gap between fingers 2 and 3 is only 1.016 mm, so
