@@ -29,7 +29,7 @@ because the level-shifter pins are typed "bidirectional".
 |---|----------|---------|---------|
 | 1 | Critical | FPGA `chreset` input is floating | 72-pin only |
 | 2 | High | 74LVC4245 supply rails are swapped (5 V on a 4.6 V abs-max pin) | Both boards |
-| 3 | Low | `-ADL` not connected (IBM allows latching on `-CMD` instead; simulation passes) | 72-pin only |
+| 3 | Resolved | `-ADL` not connected: not needed (IBM allows latching on `-CMD`; 17 ns hold margin) | 72-pin only |
 | 4 | Medium | `-CD SFDBK` not driven (Verilog fixed; needs Rev P2 wiring) | 72-pin only |
 | 5 | Low | Address decode ignores POS alternate address, answers at 0x3518-351F (fixed) | 72-pin only |
 | 6 | Low | `addr_sel_l` is a `wire` assigned in an `always` block (fixed) | Verilog |
@@ -90,16 +90,14 @@ and [difnif_top.v](../verilog/difnif_top.v) decodes A15-A4 without a latch. The
 result is sampled on the falling edge of `-CMD`, and `-ADL` (pin A20) isn't
 connected.
 
-**Downgraded after checking IBM's timing tables.** Figure 2-34 guarantees that
-address and status stay valid for at least 30 ns after `-CMD` falls (T9, T10),
-and note 2 explicitly allows latching on the leading edge of `-CMD` instead of
-`-ADL`. The simulation (below) passes the address-hold cases with the address
-going invalid exactly at the 30 ns limit. The remaining risk is the FPGA's
-internal clock-versus-data delay, which the RTL simulation doesn't model. A
-post-place-and-route timing check can settle that.
+**Resolved: `-ADL` isn't needed.** Figure 2-34 guarantees that address and
+status stay valid for at least 30 ns after `-CMD` falls (T9, T10), and note 2
+explicitly allows latching on the leading edge of `-CMD` instead of `-ADL`. The
+simulation passes with the address going invalid exactly at the 30 ns limit,
+and the timing check below leaves 17 ns of hold margin inside the FPGA.
 
-- **Rev P2:** still worth routing A20 to the spare U8 channel (after
-  finding 1) so `-ADL` is available if needed.
+- **Rev P2 (optional):** A20 could still go to the spare U8 channel, freed by
+  the finding 1 fix, as a debug aid. Nothing depends on it.
 
 ### 4. `-CD SFDBK` not driven
 
@@ -330,12 +328,62 @@ trigger mailbox flags, whatever address the DMA controller puts on the bus
 - **The ThinkPad 700C.** Finding 9's fix changes the ThinkPad build too. It's
   per IBM's timing rules, but nobody has run it on a 700C.
 
+## Timing check
+
+The simulations treat the FPGA as having no internal delay.
+[tools/timing_budget.py](../tools/timing_budget.py) closes that gap. It builds
+the design with yosys and nextpnr, takes nextpnr's worst delay for each class
+of path, adds the clock-network delay from nextpnr's SDF file, allowances for
+the FPGA's pad buffers, and worst-case delays of the board's other chips from
+their datasheets, then compares the total with IBM's limits:
+
+| IBM | Requirement | Limit | Budget | Margin |
+|---|---|---|---|---|
+| T13 | `-CD DS 16` from address | 55 max | 30.6 | 24.4 |
+| T14 | `-CD SFDBK` from address | 60 max | 30.6 | 29.4 |
+| T2/T15 | address/status setup at `-CMD` falling | 0 min | 39.8 | 39.8 |
+| T9/T10 | address/status hold after `-CMD` falling | 2.4 min | 19.8 | 17.4 |
+| T16/T17 | write data setup at `-CMD` rising | 0 min | 78.0 | 78.0 |
+| T18 | write data hold after `-CMD` rising | 2.4 min | 19.8 | 17.4 |
+| T16 | falling-edge latches to rising-edge logic | 0 min | 84.3 | 84.3 |
+| T20 | read data valid from `-CMD` falling | 60 max | 35.6 | 24.4 |
+| T22 | read data released after `-CMD` rising | 40 max | 30.6 | 9.4 |
+| T42 | `-PREEMPT` released after `ARB/-GNT` low | 50 max | 22.2 | 27.8 |
+| T45 | ARB drivers on after `ARB/-GNT` high | 50 max | 25.8 | 24.2 |
+| T45A/T47 | ARB driver follows another ARB line | 50 max | 27.6 | 22.4 |
+| T41 | DMA request dropped before next `ARB/-GNT` (finding 12) | 0 min | 17.8 | 17.8 |
+
+All values in ns, default build; the `--pos` build is within 1 ns of these.
+Every requirement passes. The tightest is T22 (the card letting go of the data
+bus after a read) at 9.4 ns, and that's with the pessimistic assumptions below.
+
+How pessimistic the numbers are:
+
+- **FPGA:** each row uses the worst path nextpnr found in its whole class. For
+  example, every pin-to-pin row uses 10.6 ns, the Teensy address-to-data path,
+  not the faster address decoder paths. nextpnr doesn't model the pad buffers,
+  so 1.5 ns is added at each pad. That matches Lattice's worst-case 7.3 ns for
+  a pin-to-LUT-to-pin path on HX parts (85 °C, minimum core voltage).
+- **Board:** level shifters use 7 ns worst case in either direction (SN74LVC8T245
+  at 3.3 V/5 V is 6.0 and 4.4), 15 ns for the data transceivers to turn around,
+  and 10 ns for the 74VHCT125 (from TI's equivalent SN74AHCT125 at 50 pF). The
+  74LCX07 uses 7 ns, double TI's SN74LVC07A figure, because I couldn't get ST's
+  datasheet.
+- **Hold checks** assume the data path inside the FPGA takes 0 ns and the clock
+  path takes its maximum.
+- **Not covered:** Rev P1's 74LVC4245As have their supplies swapped (finding 2),
+  so their delays aren't specified at all. PCB trace delays (about 0.2 ns) are
+  left out. The rise time of open-drain lines depends on the planar's pull-ups.
+
+Rerun it after any Verilog change, since placement moves paths around:
+`python3 tools/timing_budget.py` and `python3 tools/timing_budget.py --pos`.
+
 ## Suggested next steps
 
 1. ~~Add DMA transfers to `difnif72_t.v`.~~ Done.
-2. Post-place-and-route timing check of the FPGA's internal delays (finding 3).
+2. ~~Timing check of the FPGA's internal delays.~~ Done: see "Timing check".
 3. Make the Rev P2 schematic and outline changes: CHRESET to U8 pin 15 (finding
-   1), 74LVC8T245 parts (finding 2), `-ADL` to U8 channel 7 (finding 3),
+   1), 74LVC8T245 parts (finding 2), optionally `-ADL` to U8 channel 7 (finding 3),
    `-CD SFDBK` through U12 (finding 4), debug test points (finding 7) and the key
    slot (finding 8). Rerun `tools/check_board.py` until it's clean.
 4. Measure the drive bays and design the per-machine carriers.
