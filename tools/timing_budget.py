@@ -49,7 +49,7 @@ BOARD = {
     "xcvr_on":    15.0,         # DIR change until bus side drives (A disable 8.2 + B enable 6.8)
     "xcvr_off":   10.0,         # DIR change until bus side releases (8T245 6.3; 4245 OE->B 10)
     "vhct125":    10.0,         # -CD DS16 / -CD SFDBK / IRQ buffer (SN74AHCT125 50 pF: tpd 8.5, en 8, dis 10)
-    "lcx07":      7.0,          # ARB/-PREEMPT open drain (SN74LVC07A 3.3 V: 3.6; doubled, ST part not checked)
+    "lcx07":      7.0,          # ARB/-PREEMPT open drain (SN74LVC07A 3.3 V: 3.6; doubled, fitted Toshiba 74LCX07FT not checked)
 }
 
 # nextpnr's report leaves out the FPGA's input and output pad buffers. Lattice

@@ -607,7 +607,7 @@
 		(path "/78d98f44-3152-4de7-839f-c3effe832ce2/ef0cbbd3-9218-4ba7-81cf-9535b755052c")
 		(sheetname "/DifNifBus/")
 		(sheetfile "DifNifBus.kicad_sch")
-		(attr through_hole)
+		(attr smd)
 		(fp_line
 			(start 2.2 4.1)
 			(end -2.2 4.1)
@@ -2107,7 +2107,7 @@
 		(path "/78d98f44-3152-4de7-839f-c3effe832ce2/f1277e00-6824-4a80-b244-d6e8b685b67f")
 		(sheetname "/DifNifBus/")
 		(sheetfile "DifNifBus.kicad_sch")
-		(attr through_hole)
+		(attr smd)
 		(fp_line
 			(start 2.2 4.1)
 			(end -2.2 4.1)
@@ -8815,7 +8815,7 @@
 		(path "/78d98f44-3152-4de7-839f-c3effe832ce2/328b0cf1-0e00-4564-8bd7-1543f7772a43")
 		(sheetname "/DifNifBus/")
 		(sheetfile "DifNifBus.kicad_sch")
-		(attr through_hole)
+		(attr smd)
 		(fp_line
 			(start 2.2 4.1)
 			(end -2.2 4.1)
@@ -14070,7 +14070,7 @@
 		(path "/b7cdbf56-648f-4b61-a929-f6df4844931e")
 		(sheetname "/")
 		(sheetfile "DifNif.kicad_sch")
-		(attr through_hole)
+		(attr smd)
 		(fp_line
 			(start 10.2 10.2)
 			(end 9.2 10.2)
@@ -19549,7 +19549,7 @@
 		(path "/78d98f44-3152-4de7-839f-c3effe832ce2/6a0d192a-3303-48e8-b5be-3e1ea48160c4")
 		(sheetname "/DifNifBus/")
 		(sheetfile "DifNifBus.kicad_sch")
-		(attr through_hole)
+		(attr smd)
 		(fp_line
 			(start 2.2 4.1)
 			(end -2.2 4.1)
@@ -20981,7 +20981,7 @@
 		(path "/78d98f44-3152-4de7-839f-c3effe832ce2/60a42fa2-9611-47fe-8d44-493ed1a992b4")
 		(sheetname "/DifNifBus/")
 		(sheetfile "DifNifBus.kicad_sch")
-		(attr through_hole)
+		(attr smd)
 		(fp_line
 			(start 2.2 4.1)
 			(end -2.2 4.1)
@@ -23987,7 +23987,7 @@
 		(path "/78d98f44-3152-4de7-839f-c3effe832ce2/31d9ff12-65d5-46c5-b37d-36c2a19fb857")
 		(sheetname "/DifNifBus/")
 		(sheetfile "DifNifBus.kicad_sch")
-		(attr through_hole)
+		(attr smd)
 		(fp_line
 			(start 2.2 4.1)
 			(end -2.2 4.1)
