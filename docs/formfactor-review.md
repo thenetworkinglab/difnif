@@ -34,6 +34,7 @@ because the level-shifter pins are typed "bidirectional".
 | 5 | Low | Address decode ignores POS alternate address, answers at 0x3518-351F | 72-pin only |
 | 6 | Low | `addr_sel_l` is a `wire` assigned in an `always` block | Verilog |
 | 7 | Low | Only 6 debug signals reach the logic-analyzer header | Both boards |
+| 8 | High | No key slot in the board outline | 72-pin only |
 
 ### 1. FPGA `chreset` input is floating
 
@@ -129,9 +130,42 @@ reuses as test outputs. For the first Rev P2 board, add test points or a second
 header on `-ADL`, `-CMD`, `-S0`/`-S1`, `CHRESET`, the address decode, and
 `-CD DS16`.
 
-## Mechanical: still open
+### 8. No key slot in the board outline
 
-What we know so far:
+The IBM drive's edge connector has a key slot between pins 2 and 3, visible
+on both rows of a WD-3158. Eric's `BUS_DBA_ESDI` footprint draws the slot, at
+the right position (1.27 mm past pin 2), but only on the `Dwgs.User` layer. The
+board outline and the fab Gerber (`DifNif-Edge_Cuts.gbr` in the RevP1 zip) are
+a plain 98.8 x 93.0 mm rectangle with no slot. If the 55SX cable-end socket or
+the Model 70 riser socket has a key ridge, Rev P1 won't go in.
+
+- **Rev P2:** add the slot to Edge.Cuts. Take its width and depth from a real
+  drive with calipers. The gap between adjacent fingers is only about 1.0 mm
+  (2.54 mm pitch, 1.524 mm fingers), so the slot has to be narrower than that.
+- **Rev P1 (if built):** check whether the sockets actually have a key before
+  cutting anything by hand.
+
+## Mechanical
+
+Confirmed against a real drive (IBM FRU 6128291, model WD-3158, 120 MB):
+
+| Item | WD-3158 | Rev P1 board | Match |
+|---|---|---|---|
+| Connector tab width | 93 mm (measured) | 93.0 mm (Edge.Cuts) | Yes |
+| Finger pitch | 2.54 mm, 36 per side | 2.54 mm, 36 per side | Yes |
+| Finger length | about 7 mm (from photo) | 6.86 mm | Yes |
+| Row A side | top of PCB, facing the drive casing | F.Cu, the component side | Yes |
+| Pin 1 end | A1 on the right, looking down with fingers pointing away | a1 on the right, same view | Yes |
+| Board thickness | 1.5 mm (measured) | 1.6 mm | Probably. Standard edge sockets take 1.57 mm nominal; recheck with calipers |
+| Key slot | between pins 2 and 3 | none | **No** (finding 8) |
+
+`mech/difnif_PS2_drive_sled.STL` is a 102 x 155 x 18.5 mm open ladder frame
+with side rails, roughly the 3.5" drive footprint. Its two corner holes are
+85 mm apart, which matches the board's mounting-hole spacing (H1/H2 and
+H3/H4). So it was designed around this board, presumably for Eric's 50Z. It's
+not yet known whether it fits the 55SX or Model 70 drive bays.
+
+Machine notes:
 
 - **55SX:** low-profile case, horizontal MCA cards. A card-edge connector on top
   of the MCA riser carries a wide, fragile flat-flex cable in a large yoke. The
@@ -141,15 +175,16 @@ What we know so far:
   one side and the hard drive on the other.
 - **Reference drive:** IBM FRU P/N 6128291, model WD-3158.
 
-To measure on the WD-3158 before any layout work:
+Still to measure:
 
-- Edge-connector position relative to the 3.5" mounting holes (X/Y/Z offset
-  from the bottom-side holes)
-- Board thickness at the fingers and bevel. Rev P1 is 1.6 mm with gold fingers
-- Key position (between pins 2 and 3 per the IBM pinout) and which side is row A
-- Overall envelope: height above and below the PCB, and clearance to the case
-  and cable yoke
-- Whether `mech/difnif_PS2_drive_sled.STL` matches the drive's mounting holes
+- Key slot width and depth (calipers)
+- How far the finger tips stick out past the drive's black frame, and how high
+  the PCB sits above the bottom of the frame. Together these fix where the
+  connector ends up in the bay
+- Whether the 55SX cable-end socket and the Model 70 riser socket have a key
+  ridge
+- How the drive is held in each machine (rails, screws, tray), to compare with
+  the sled
 
 ## Suggested next steps
 
