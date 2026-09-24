@@ -378,14 +378,65 @@ How pessimistic the numbers are:
 Rerun it after any Verilog change, since placement moves paths around:
 `python3 tools/timing_budget.py` and `python3 tools/timing_budget.py --pos`.
 
+## Rev P2 schematic changes
+
+Made directly in `pcb_formfactor/DifNif.kicad_sch` and `DifNifBus.kicad_sch`
+(still KiCad 6 format; KiCad 9 converts them when saved). After the changes,
+`tools/check_board.py` reports 0 errors (it was 9), and KiCad's ERC shows 12
+fewer problems and no new ones.
+
+| Finding | Change |
+|---|---|
+| 1 | Net at J1 B14 renamed `~{CHRESET}_5V` -> `CHRESET_5V`, which joins B14 to U8 pins 14 **and** 15. The FPGA's `chreset` (pin 76) now sees the real CHRESET; pin 52 gets it too, unused. |
+| 2 | U6-U10, U14: value `74LVC8T245`, Mouser `595-SN74LVC8T245PWR` (was 74LVC4245 / 771-74LVC4245APW-T). Same TSSOP-24 footprint and pinout; the existing supply wiring (pin 1 = 3.3 V, pins 23/24 = 5 V) is correct for this part. Symbol graphics unchanged. |
+| 4 | U12 section 4 is the `-CD SFDBK` driver: ground symbol removed from pin 13 (/OE), which now connects to new hierarchical net `~{CD_SFDBK}` -> sheet pin -> FPGA pin 134. Pin 12 stays grounded; pin 11 (output) connects to J1 B08 via `~{CD_SFDBK}_5V`. No-connect flags removed from U12 pin 11 and J1 B08. |
+| 7 | Logic-analyzer header J4: its 11 unused data pins now carry FPGA-side bus signals (below). No new parts. |
+
+J4 (HP logic analyzer pod) assignments:
+
+| J4 pin | Pod bit | Signal | | J4 pin | Pod bit | Signal |
+|---|---|---|---|---|---|---|
+| 4 | D15 | `-CMD` | | 5 | D14 | `-S0` |
+| 6 | D13 | `-S1` | | 7 | D12 | `M/-IO` |
+| 8 | D11 | `-CD SETUP` | | 9 | D10 | `CHRESET` |
+| 10 | D9 | `-CD DS 16` | | 11 | D8 | `-CD SFDBK` |
+| 12 | D7 | `DATA_DIR` | | 13 | D6 | `ARB/-GNT` |
+| 14 | D5 | `-PREEMPT` | | 3, 15-19 | CLK, D4-D0 | SD-card pins, as before |
+
+Not changed in the schematic:
+
+- **`-ADL`** (finding 3): not needed, so A20 stays unconnected.
+- **Pull-ups on the FPGA-driven buffer enables.** `-CD SFDBK`, like Eric's
+  existing `-IRQ14` and `-CHRDY`, is driven through a buffer enable straight
+  from the FPGA. Before the FPGA has loaded its configuration, those pins only
+  have whatever pull-up the iCE40 applies during configuration. If that isn't
+  guaranteed, a 10 k pull-up to 3.3 V on each enable would keep them quiet at
+  power-up. Worth checking in Lattice's configuration documentation before
+  layout.
+- **The ThinkPad board** has the same swapped-supply 74LVC4245s (finding 2). The
+  same part swap would fix it; not done here.
+
+### Layout work (in KiCad's PCB editor)
+
+1. **Update PCB from Schematic** (Tools menu, or F8). New connections to route:
+   J1 B14 to U8 pin 15; J1 B08 to U12 pin 11; U12 pin 13 to FPGA pin 134; and
+   J4 pins 4-14 to their signals. U12 pin 13's old ground connection must be
+   removed; DRC will flag the leftover copper.
+2. **Key slot** (finding 8), in Edge.Cuts: 1.0 mm wide, 11.7 mm deep, centred
+   between pins 2 and 3. On the current layout that's x = 91.2 to 102.9 mm,
+   y = 43.36 to 44.36 mm. The gap between fingers 2 and 3 is only 1.016 mm, so
+   also narrow pads a2, a3, b2 and b3 to 1.0 mm wide, keeping them centred on
+   their pins. That leaves about 0.27 mm of copper-to-edge clearance; check it
+   against the board house's minimum. The socket's key ridge is 0.7 mm.
+3. Rerun `python3 tools/check_board.py` and KiCad's DRC, and bump the silkscreen
+   revision to P2.
+
 ## Suggested next steps
 
 1. ~~Add DMA transfers to `difnif72_t.v`.~~ Done.
 2. ~~Timing check of the FPGA's internal delays.~~ Done: see "Timing check".
-3. Make the Rev P2 schematic and outline changes: CHRESET to U8 pin 15 (finding
-   1), 74LVC8T245 parts (finding 2), optionally `-ADL` to U8 channel 7 (finding 3),
-   `-CD SFDBK` through U12 (finding 4), debug test points (finding 7) and the key
-   slot (finding 8). Rerun `tools/check_board.py` until it's clean.
+3. ~~Rev P2 schematic changes.~~ Done: see "Rev P2 schematic changes".
+   Remaining: the layout work listed there.
 4. Measure the drive bays and design the per-machine carriers.
 
 ## Toolchain status
