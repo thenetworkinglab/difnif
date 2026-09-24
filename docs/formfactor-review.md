@@ -434,8 +434,29 @@ Not changed in the schematic:
    (8.7 mm deep, rounded end), y = 43.36 to 44.36 mm; pads a2, a3, b2 and b3
    narrowed to 1.0 mm, centred. DRC shows nothing new, and the ground pour is
    intact.
-3. Rerun `python3 tools/check_board.py` and KiCad's DRC, and bump the silkscreen
-   revision to P2.
+3. ~~Silkscreen.~~ Done: front reads "REV P2 / 09/26"; the back credits add
+   "thenetworkinglab: Rev P2 changes".
+4. **Debug header J4:** 10 of the 11 new debug connections are left unrouted
+   for now (only `-CD SFDBK` on pin 11 is routed). DRC lists them as
+   unconnected; the silkscreen still marks those pins "n".
+
+### Fab files
+
+`pcb_formfactor/fab/DifNifFormFactor-RevP2.zip`, the same 11 files as Eric's
+RevP1 zip (9 Gerber layers with X2 attributes, separate PTH/NPTH Excellon
+drill files in mm), exported with KiCad 9 after refilling the ground pours.
+
+When ordering:
+
+- **1.6 mm** FR-4, 2 layers.
+- **Gold fingers** on the edge connector (hard gold if the board house offers
+  it; ENIG is a cheaper second best for a board that won't be plugged in often).
+- **Bevelled edge** on the connector side, typically 30-45 degrees.
+- The key slot is a **1.0 mm routed slot** with 0.27 mm between it and the
+  nearest finger copper. Check both against the board house's minimum slot
+  width and copper-to-edge clearance.
+- Look the files over in a Gerber viewer first (KiCad's GerbView works): the
+  slot on Edge.Cuts, the narrowed fingers 2 and 3, and the silkscreen text.
 
 ## Suggested next steps
 
