@@ -63,7 +63,7 @@ module teensy(
     localparam REG_POS23 = 4'd8;
     localparam REG_POS4 = 4'd9;
 
-    wire [15:0] tn_d_out;
+    reg [15:0] tn_d_out;
 
     wire [15:0] flags_out;
     reg [15:0] flags_in = 16'H0000;

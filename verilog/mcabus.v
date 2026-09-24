@@ -6,7 +6,11 @@
 
 `default_nettype none
 
+// POS bypass: card always enabled, POS registers not visible to the host.
+// Build with -DMCA_USE_POS to enable the POS registers instead.
+`ifndef MCA_USE_POS
 `define MCA_NO_POS
+`endif
 
 module mcabus(
     input clk,

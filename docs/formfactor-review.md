@@ -29,12 +29,15 @@ because the level-shifter pins are typed "bidirectional".
 |---|----------|---------|---------|
 | 1 | Critical | FPGA `chreset` input is floating | 72-pin only |
 | 2 | High | 74LVC4245 supply rails are swapped (5 V on a 4.6 V abs-max pin) | Both boards |
-| 3 | High | `-ADL` not connected; address decode is not latched | 72-pin only |
+| 3 | Low | `-ADL` not connected (IBM allows latching on `-CMD` instead; simulation passes) | 72-pin only |
 | 4 | Medium | `-CD SFDBK` not driven | 72-pin only |
 | 5 | Low | Address decode ignores POS alternate address, answers at 0x3518-351F | 72-pin only |
 | 6 | Low | `addr_sel_l` is a `wire` assigned in an `always` block | Verilog |
 | 7 | Low | Only 6 debug signals reach the logic-analyzer header | Both boards |
 | 8 | High | No key slot in the board outline | 72-pin only |
+| 9 | High | Write data is captured on the falling edge of `-CMD`, where IBM guarantees 0 ns setup | Both boards |
+| 10 | High | Eric's default build hides the POS registers, including the `DF9F` adapter ID | Build setting |
+| 11 | Low | Status register can change during a read cycle | Both boards |
 
 ### 1. FPGA `chreset` input is floating
 
@@ -77,32 +80,30 @@ outside their ratings can behave marginally or degrade over time.
   DIR. The function table is the same (DIR low = B to A, high = A to B), so
   the Verilog doesn't change. This applies to both the 72-pin and ThinkPad boards.
 
-### 3. `-ADL` not connected; address decode not latched
+### 3. `-ADL` not connected
 
 On the ThinkPad connector, the system board decodes the address and hands the
 drive `-ADDR_SEL` plus A0-A3. On the 72-pin connector the card gets A0-A15 raw,
-and [difnif_top.v](../verilog/difnif_top.v) compares A15-A4 with no latch. The
-result, together with A0-A3, M/-IO, -S0 and -S1, is then sampled on the falling
-edge of `-CMD`. Micro Channel allows the address and status lines to move on to
-the next cycle while `-CMD` is still active (address pipelining), which is why
-cards latch them with `-ADL`. `-ADL` is on pin A20, which isn't connected.
+and [difnif_top.v](../verilog/difnif_top.v) decodes A15-A4 without a latch. The
+result is sampled on the falling edge of `-CMD`, and `-ADL` (pin A20) isn't
+connected.
 
-- **Rev P1 rework (after finding 1):** cut the trace from B14 to U8 pin 14 on
-  the far side of the 14/15 bridge, and wire A20 to U8 pin 14. `-ADL` then
-  reaches FPGA pin 52, which is a global-buffer input.
-- **Rev P2:** route A20 to U8 channel 7 properly.
-- **Verilog:** latch the decode, A0-A3, M/-IO, -S0/-S1 and -SBHE while `-ADL`
-  is low, and use the latched copies in the `-CMD` logic. `-CD DS16` stays
-  combinational from the live address, as MCA requires.
-- **To confirm in simulation:** the MCA hold times for address and status
-  relative to `-CMD`. The existing testbench notes that its timings are
-  guesses.
+**Downgraded after checking IBM's timing tables.** Figure 2-34 guarantees that
+address and status stay valid for at least 30 ns after `-CMD` falls (T9, T10),
+and note 2 explicitly allows latching on the leading edge of `-CMD` instead of
+`-ADL`. The simulation (below) passes the address-hold cases with the address
+going invalid exactly at the 30 ns limit. The remaining risk is the FPGA's
+internal clock-versus-data delay, which the RTL simulation doesn't model. A
+post-place-and-route timing check can settle that.
+
+- **Rev P2:** still worth routing A20 to the spare U8 channel (after
+  finding 1) so `-ADL` is available if needed.
 
 ### 4. `-CD SFDBK` not driven
 
-Pin B08 is `-CD SFDBK` (card selected feedback), driven by the drive. The board
-leaves it open. The system may not need it for I/O cycles, but a real drive
-drives it.
+Pin B08 is `-CD SFDBK` (card selected feedback). The board leaves it open.
+IBM Figure 2-34, note 1: "All slaves must drive -CD SFDBK whenever selected."
+It has to come from the unlatched address decode (note 3).
 
 - **Rev P2:** drive it through an open-drain or tri-state buffer. U12's fourth
   74VHCT125 section is spare: output pin 11, input pin 12 and /OE pin 13 are all
@@ -155,6 +156,47 @@ at both ends. The Model 70 riser is assumed to be keyed the same way.
   cutting down the 1.0 mm gap between fingers 2 and 3 to 11.7 mm deep would
   clear the 0.7 mm ridge.
 
+### 9. Write data captured at the falling edge of `-CMD`
+
+[mcabus.v](../verilog/mcabus.v) stores host writes (CIFR, ATN, BCR, DREG and
+POS registers) on `negedge cmd_l`. IBM Figure 2-34 only guarantees write data
+**0 ns** before `-CMD` falls (T17), and 30 ns after `-CMD` *rises* (T18). With
+data arriving at the limit, any data line whose path through the level shifter
+is slower than the `-CMD` line's gets captured before the new value arrives.
+
+The simulation reproduces this: at IBM's timing limits, host writes fail on 7
+of 8 randomly chosen sets of level-shifter delays, on all three machines. Reads
+are unaffected. Eric's measurements on his 50Z show about 50 ns of write setup,
+which is why typical timing passes. How much setup the 55SX and Model 70 really
+give is unknown.
+
+This affects both boards and could contribute to the README's "sector written
+is shifted by one byte" bug, though that isn't proven.
+
+- **Verilog fix:** latch the address and status on the falling edge (as now),
+  but store the write data on the rising edge of `-CMD`, where it is guaranteed
+  valid for another 30 ns. The Teensy-facing "register full" flags have to move
+  with it, so the Teensy never sees a flag before its data.
+
+### 10. POS registers hidden in Eric's default build
+
+`mcabus.v` defines `MCA_NO_POS` ("POS bypass", added January 2026). The card
+is then always enabled but never answers setup cycles, so the host can't read
+the `DF9F` adapter ID. The ThinkPad presumably doesn't need it. On the 72-pin
+connector the drive has its own `-CD SETUP` line, and the 50Z/55SX/70 BIOS
+probably reads the ID to find the drive. The define can now be overridden with
+`-DMCA_USE_POS` without changing the default, and the simulation passes the POS
+tests in that mode.
+
+### 11. Status register can change during a read
+
+The basic status register is read live, not snapshotted when the cycle starts.
+If a flag changes while `-CMD` is low (for example the Teensy emptying CIFR),
+the data on the bus changes mid-cycle. IBM wants read data valid within 60 ns
+of `-CMD` falling (T20). Each bit is either the old or the new value, so this is
+usually harmless, but a snapshot at the start of the cycle would be cleaner.
+The simulation reports these as SPEC notes, not failures.
+
 ## Mechanical
 
 Confirmed against a real drive (IBM FRU 6128291, model WD-3158, 120 MB):
@@ -205,15 +247,16 @@ Still to measure, per machine, when it's time to design carriers:
 ## Suggested next steps
 
 1. ~~Install the FPGA toolchain and get Eric's existing testbench running.~~
-   Done. See "Toolchain status" below.
-2. Extend the testbench with a host model that behaves like real Micro Channel
-   timing (pipelined address, `-ADL`), reproduce findings 1 and 3, then fix
-   them in Verilog.
-3. Make the Rev P2 schematic and outline changes (including the key slot) and
+   Done.
+2. ~~Build a host model with real Micro Channel timing and reproduce the
+   failures.~~ Done: see "Simulation" below.
+3. Fix findings 9, 5 and 4 in Verilog (write-data capture, address decode,
+   `-CD SFDBK` output), and rerun `run_sim72.sh` until the bridged board passes
+   everything at IBM's timing limits.
+4. Post-place-and-route timing check of the FPGA's internal delays (finding 3).
+5. Make the Rev P2 schematic and outline changes (including the key slot) and
    rerun `tools/check_board.py` until it's clean.
-4. Measure the drive bays and design the per-machine carriers. This can happen
-   any time, since printed carriers don't depend on the PCB beyond its mounting
-   holes.
+6. Measure the drive bays and design the per-machine carriers.
 
 ## Toolchain status
 
@@ -230,3 +273,40 @@ devel), installed in `/opt/oss-cad-suite`.
   completion and writes `sim.vcd`.
 - The testbench has no self-checks yet: it drives bus cycles and dumps
   waveforms but never compares results. Adding checks is part of the next step.
+
+## Simulation
+
+[verilog/difnif72_t.v](../verilog/difnif72_t.v) is a self-checking testbench
+around the unmodified FPGA design. It models:
+
+- **the host**, following IBM's Figure 2-34 timing either at its limits or at
+  typical values Eric measured on a 50Z, with 300, 250 and 200 ns cycles
+  (50Z, 55SX, Model 70). Address and status really do go invalid (`x`) once
+  their hold times expire, and unused data lanes carry garbage.
+- **the Rev P1 board**, with each level-shifter channel given its own delay in
+  the datasheet's 1.0-7.0 ns range (varied by `SEED`), and the floating FPGA
+  reset input (as built) or the U8 14/15 bridge.
+- **the Teensy**, using the same register timing as `difnift.ino` and the same
+  mailbox handshakes as DIFDIAG, checking every value.
+
+Run `verilog/run_sim72.sh` (21 seconds for 108 simulations). Results:
+
+| Board | POS | Timing | Result (all three machines) |
+|---|---|---|---|
+| As built | either | either | Every register test fails (finding 1) |
+| Bridged | bypass | typical | Mailboxes pass; POS tests fail (finding 10); 3518 answered (finding 5) |
+| Bridged | enabled | typical | All pass except 3518 answered (finding 5) |
+| Bridged | either | IBM limits | Host writes fail on 7 of 8 delay sets (finding 9); reads pass |
+
+The simulated FPGA has no internal delays (it's RTL simulation), and a floating
+input is modelled as "unknown", so on real hardware finding 1 would show up as
+intermittent failures rather than constant ones. That matches "some sort of
+timing error".
+
+The existing [verilog/sim.sh](../verilog/sim.sh) (Eric's DMA-focused testbench)
+still runs as before.
+
+To make `difnif_top.v` and `teensy.v` compile in Icarus, two trailing commas
+were removed and two `wire`s assigned in `always` blocks became `reg`s
+(finding 6). Yosys proved the result logically identical to the original:
+845 of 845 equivalence points.

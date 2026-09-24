@@ -58,7 +58,7 @@ module difnif_top(
     inout [15:0]tn_d,
     output tn_int,
     output tn_clk,
-    input tn30,
+    input tn30
     );
 
     reg[22:0] counter;
@@ -92,7 +92,7 @@ module difnif_top(
 
     wire [39:0] t_pos_regs;
 
-    wire addr_sel_l;
+    reg addr_sel_l;
     wire fulladdr2_l;
 
     // Use pullup on fulladdr_l signal.
@@ -101,7 +101,7 @@ module difnif_top(
         .PULLUP(1'b1)
     ) fulladdr_pad (
         .PACKAGE_PIN(fulladdr_l),
-        .D_IN_0(fulladdr2_l),
+        .D_IN_0(fulladdr2_l)
     );
 
     // Address decoder for 72-pin version
