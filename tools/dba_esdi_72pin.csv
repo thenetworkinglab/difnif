@@ -1,0 +1,84 @@
+# IBM DBA-ESDI 2x36 card-edge connector (PS/2 50Z, 55SX, 70, ...)
+#
+# Source: https://ardent-tool.com/storage/DBA_ESDI.html (pin assignment table)
+# Direction is from the SYSTEM's point of view, as in the IBM tables:
+#   O   = system drives, drive/card receives
+#   I   = drive/card drives, system receives
+#   I/O = bidirectional
+#   PWR = power or ground
+# Row letters match the KiCad symbol pin names (a1..a36, b1..b36).
+#
+# This file is part of a fork of DifNif; CERN-OHL-S-2.0.
+pin,dir,signal
+a1,O,-CD SETUP
+a2,O,A 13
+a3,PWR,GND
+a4,O,A 11
+a5,O,A 10
+a6,O,A 09
+a7,PWR,+5V
+a8,O,A 08
+a9,O,A 07
+a10,O,A 06
+a11,PWR,GND
+a12,O,A 05
+a13,O,A 04
+a14,O,A 03
+a15,PWR,+5V
+a16,O,A 02
+a17,O,A 01
+a18,O,A 00
+a19,PWR,+12V
+a20,O,-ADL
+a21,I,-PREEMPT
+a22,I,-BURST
+a23,PWR,+5V
+a24,I,ARB 00
+a25,I,ARB 01
+a26,I,ARB 02
+a27,PWR,+12V
+a28,I,ARB 03
+a29,O,ARB/-GNT
+a30,O,-TC
+a31,PWR,+5V
+a32,O,-S0
+a33,O,-S1
+a34,O,M/-IO
+a35,PWR,GND
+a36,I,CD CHRDY
+b1,O,A 15
+b2,O,A 14
+b3,PWR,GND
+b4,O,RESERVED (14.3 MHz OSC on some models)
+b5,PWR,GND
+b6,O,A 12
+b7,O,-CMD
+b8,I,-CD SFDBK
+b9,PWR,GND
+b10,I/O,D 01
+b11,I/O,D 03
+b12,I/O,D 04
+b13,PWR,GND
+b14,O,CHRESET
+b15,I/O,D 08
+b16,I/O,D 09
+b17,PWR,GND
+b18,I/O,D 12
+b19,I/O,D 14
+b20,I/O,D 15
+b21,PWR,GND
+b22,I/O,D 00
+b23,I/O,D 02
+b24,I/O,D 05
+b25,PWR,GND
+b26,I/O,D 06
+b27,I/O,D 07
+b28,I/O,D 10
+b29,PWR,GND
+b30,I/O,D 11
+b31,I/O,D 13
+b32,O,-SBHE
+b33,PWR,GND
+b34,I,-CD DS 16
+b35,I,-IRQ 14
+b36,PWR,GND
