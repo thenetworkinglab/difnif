@@ -24781,7 +24781,7 @@
 			(justify right)
 		)
 	)
-	(gr_text "REV P1\n11/23"
+	(gr_text "REV P2\n09/26"
 		(at 112.3 42 0)
 		(layer "F.SilkS")
 		(uuid "4006bb8f-3d1a-485d-bc4b-3631b4de2bf9")
