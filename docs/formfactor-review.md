@@ -147,7 +147,10 @@ cut right up against the edges of fingers 2 and 3 with no copper margin. The
 IBM fingers are about 1.5 mm wide, the same as Eric's 1.524 mm, so the slot
 fills the roughly 1.0 mm gap between them. The key ridge in the 55SX
 flat-flex cable socket measures about **0.7 mm** thick, and the cable is keyed
-at both ends. The Model 70 riser is assumed to be keyed the same way.
+at both ends. The Model 70's riser socket is **not** keyed (checked on a real
+machine): its chassis makes it practically impossible to fit a drive upside
+down, whereas the 55SX's loose flex cable could be plugged in either way with
+the machine apart. The slot is harmless in the Model 70.
 
 - **Rev P2 (done):** a slot 1.0 mm wide and **8.7 mm** deep, centred between
   pins 2 and 3, with a rounded end, and fingers a2/a3/b2/b3 narrowed to 1.0 mm
@@ -395,7 +398,7 @@ fewer problems and no new ones.
 | Finding | Change |
 |---|---|
 | 1 | Net at J1 B14 renamed `~{CHRESET}_5V` -> `CHRESET_5V`, which joins B14 to U8 pins 14 **and** 15. The FPGA's `chreset` (pin 76) now sees the real CHRESET; pin 52 gets it too, unused. |
-| 2 | U6-U10, U14: value `74LVC8T245`, Mouser `595-SN74LVC8T245PWR` (was 74LVC4245 / 771-74LVC4245APW-T). Same TSSOP-24 footprint and pinout; the existing supply wiring (pin 1 = 3.3 V, pins 23/24 = 5 V) is correct for this part. Symbol graphics unchanged. |
+| 2 | U6-U10, U14: value `74LVC8T245`, Mouser `595-SN74LVC8T245PWR` (was 74LVC4245 / 771-74LVC4245APW-T). Same TSSOP-24 footprint and pinout; the existing supply wiring (pin 1 = 3.3 V, pins 23/24 = 5 V) is correct for this part. The schematic symbol is renamed `74LVC8T245`, with TI's pin names (A1-A8 on pins 3-10, B1-B8 on pins 21-14; Nexperia calls the same pins A0-A7/B0-B7), TI's datasheet link, /OE typed as an input, and the DIR notes confirmed against TI's function table. Netlist connectivity is identical before and after the rename. |
 | 4 | U12 section 4 is the `-CD SFDBK` driver, push-pull: pin 12 (input) connects to new hierarchical net `~{CD_SFDBK}` -> sheet pin -> FPGA pin 134 (and J4 pin 11); pin 13 (/OE) stays grounded; pin 11 (output) connects to J1 B08 via `~{CD_SFDBK}_5V`. No-connect flags removed from U12 pin 11 and J1 B08. First done with the signal on pin 13 (open-drain); swapped during layout because routing to pin 13 cut pin 12's ground off from the top pour, and push-pull is what IBM specifies anyway. |
 | 7 | Logic-analyzer header J4: its 11 unused data pins now carry FPGA-side bus signals (below). No new parts. |
 
