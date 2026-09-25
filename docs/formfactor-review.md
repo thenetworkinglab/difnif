@@ -139,8 +139,9 @@ The IBM drive's edge connector has a key slot between pins 2 and 3, visible
 on both rows of a WD-3158. Eric's `BUS_DBA_ESDI` footprint draws the slot, at
 the right position (1.27 mm past pin 2), but only on the `Dwgs.User` layer. The
 board outline and the fab Gerber (`DifNif-Edge_Cuts.gbr` in the RevP1 zip) are
-a plain 98.8 x 93.0 mm rectangle with no slot. If the 55SX cable-end socket or
-the Model 70 riser socket has a key ridge, Rev P1 won't go in.
+a plain 98.8 x 93.0 mm rectangle with no slot. The 55SX's cable-end socket has a
+key ridge, so Rev P1 won't go into a 55SX without a slot cut by hand. The Model
+70's riser socket has no key, so Rev P1 fits there as it is.
 
 Measured on a WD-3158: the slot is **11.7 mm deep** and about **1.0 mm wide**,
 cut right up against the edges of fingers 2 and 3 with no copper margin. The
