@@ -245,7 +245,7 @@ Confirmed against a real drive (IBM FRU 6128291, model WD-3158, 120 MB):
 |---|---|---|---|
 | Connector tab width | 93 mm (measured) | 93.0 mm (Edge.Cuts) | Yes |
 | Finger pitch | 2.54 mm, 36 per side | 2.54 mm, 36 per side | Yes |
-| Finger length | about 7 mm (from photo) | 6.86 mm | Yes |
+| Finger length | about 7 mm (from photo); the gold stops about 1 mm short of the edge | 6.86 mm, running to the edge (Rev P2: starting 1.15 mm in) | Yes |
 | Row A side | top of PCB, facing the drive casing | F.Cu, the component side | Yes |
 | Pin 1 end | A1 on the right, looking down with fingers pointing away | a1 on the right, same view | Yes |
 | Board thickness | 1.6 mm (measured across fingers) | 1.6 mm | Yes |
@@ -456,11 +456,16 @@ When ordering:
 - **Gold fingers** on the edge connector (hard gold if the board house offers
   it; ENIG is a cheaper second best for a board that won't be plugged in often).
 - **Bevelled edge** on the connector side, typically 30-45 degrees.
+- The fingers start **1.15 mm in from the edge**, so the bevel doesn't grind
+  into the gold. PCBWay asked for this clearance for a 30 degree bevel leaving
+  0.5 mm at the tip, and is trimming the ordered boards to match; the files now
+  show it. The IBM drive's own fingers stop about 1 mm short of the edge.
 - The key slot is a **1.0 mm routed slot** with 0.27 mm between it and the
   nearest finger copper. Check both against the board house's minimum slot
   width and copper-to-edge clearance.
 - Look the files over in a Gerber viewer first (KiCad's GerbView works): the
-  slot on Edge.Cuts, the narrowed fingers 2 and 3, and the silkscreen text.
+  slot on Edge.Cuts, the narrowed fingers 2 and 3, the gap between the finger
+  tips and the edge, and the silkscreen text.
 
 ## Suggested next steps
 
