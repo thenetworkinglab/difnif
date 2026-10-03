@@ -1,85 +1,205 @@
-# DifNif DBA-ESDI Solid State Drive Replacement For Thinkpad 700C Computers (For Now)
+# DifNif: DBA-ESDI Solid State Drive Replacement for IBM PS/2 Computers
 
-**ALPHA VERSION**
+DifNif is a drive emulator that replaces an IBM DBA-ESDI hard drive. 
+It was designed by Eric Schlaepfer ([schlae/difnif](https://github.com/schlae/difnif)),
+with the project's initial release intended to replace the hard drive in 
+IBM ThinkPad 700C laptops, also including an alpha version of a PS/2 desktop 
+form-factor emulator.  This fork is an attempt to complete 
+the development of the 72-pin board for PS/2 desktops; the changes are 
+listed in [docs/formfactor-review.md](docs/formfactor-review.md).
 
-IBM PS/2 computers from the late 1980s and early 1990s typically used an IBM-proprietary disk interface called DBA-ESDI (Direct Bus Attach - Enhanced Small Device Interface). It is not the same as the industry-standard ESDI drives (which had a separate controller); instead, it is more like an IDE drive, but the register interface is not compatible and it uses the Micro Channel bus instead of the ISA bus.
+And before you ask: the name 'DifNif' comes from DF9F, 
+the Micro Channel adapter ID that IBM's DBA-ESDI drives report.
 
-These special DBA-ESDI drives are getting harder to find and often don't work due to mechanical problems or damage from leaking electrolytic capacitors. DifNif is my solution to this problem. It uses an SD card for storage and modern electronics to implement the DBA-ESDI interface. DifNif is named after the Micro Channel POS ID commonly used by these drives (DF9Fh).
+**Status: alpha.** See "Status" below before building anything.
 
-SCSI cards can be found for older PS/2 systems but aren't always compatible with software, particularly old versions of OS/2.
+## Background
 
-Many PS/2 systems require an IML (initial microcode load) partition located at the end of the disk, and these systems will often only be able to do this with DBA-ESDI drives.
+IBM PS/2 computers from the late 1980s and early 1990s typically used a
+disk interface called DBA-ESDI (Direct Bus Attach - Enhanced
+Small Device Interface). A DBA-ESDI drive has its controller integrated
+with the drive electronics, and sits directly on the Micro Channel
+bus, more like an IDE drive, but with its own register interface.
 
-*This project more or less functions but only on the Thinkpad 700C. There's another form factor designed to fit 50Z-style desktop PS/2s, but timing issues seem to prevent it from working properly.*
+These drives are becoming rare because many have failed mechanically or
+been damaged by leaking capacitors. MCA SCSI cards are an alternative on some
+machines, but are getting expensive and difficult to find as well and 
+aren't compatible with all PS/2s. Some PS/2s also need an IML (initial microcode load)
+partition on their disk, and can only load it from a DBA-ESDI drive.
 
-![An IBM Thinkpad 700C with a DifNif assembly sticking out the front, happily running Windows 3.1](photos/running.jpg)
+DifNif uses a Teensy 4.1 microcontroller and a Lattice iCE40 FPGA to implement the
+DBA-ESDI interface, and stores the disk as an image file on an SD card. 
 
-This is an advanced construction project that you should only attempt if you are comfortable with surface mount soldering. You'll also be flashing two programmable devices, so it helps to have some experience with that. And you'll probably have to do some debugging, so you'll want an oscilloscope and a logic analyzer.
+## Two boards, one design
 
-**Data Loss Note**
+The boards share the FPGA design (`verilog/`) and the Teensy firmware
+(`difnift/`), and differ in how they connect to the computer.
 
-This is a hobby project. I don't have the resources for an entire QA team, so it is entirely possible to experience data corruption if you use this with your computer. I recommend keeping backup copies of all disk images. This is also an alpha version and I don't have the time to support it, so if you attempt building it, I hope you know what you're doing.
+| | ThinkPad board | PS/2 desktop board |
+|---|---|---|
+| Folder | [pcb_thinkpad](pcb_thinkpad/) | [pcb_formfactor](pcb_formfactor/) |
+| Machines | ThinkPad 700C | PS/2 desktops that take a 72-pin DBA-ESDI drive, such as the 50Z, 55SX and 70 |
+| Connector | 2 mm header, wired to the flex cable taken from a stock 700-series 2.5" drive | 72-pin (2 x 36) card edge, plugging straight into the drive socket |
+| Carrier | [mech/df9f_carrier.STL](mech/df9f_carrier.STL) | [mech/difnif_PS2_drive_sled.STL](mech/difnif_PS2_drive_sled.STL), replacing the IBM drive sled |
+| FPGA build | `make` | `make BOARD=ps2` |
 
-## Overview
+There are also debugging aids:
 
-There are a number of separate PC boards and 3D printed fixtures associated with them.
+- [pcb_finglonger](pcb_finglonger/), the "Fing Longer", for the ThinkPad board.
+  It fits a 3D-printed sled ([mech/finglong.STL](mech/finglong.STL)) held by two
+  clips ([mech/2finglong.STL](mech/2finglong.STL)). One acts as an extender
+  that brings the connector forward, and a second as a breakout for logic
+  analyzer probes on the bus lines.
+- For the 72-pin board, a card in a spare Micro Channel slot gives access to
+  the bus signals; Eric used a spare
+  [Snark Barker MCA](https://github.com/schlae/snark-barker-mca).
 
-First, the [pcb\_thinkpad](pcb\_thinkpad/) directory contains the board files for the main Thinkpad 700C 2.5" form factor drive. There is a 3D-printable sled that the board attaches to, see [mech/df9f\_carrier.stl](mech/df9f\_carrier.STL). The board has a 2mm header that is designed to attach to the flex cable harvested from a stock IBM 2.5" drive for the 700 series Thinkpads. The flex cable has the special connector that plugs into laptop.
+## Status
 
-![A red circuit board with a Teensy plugged into it](photos/difnif.jpg)
+- **ThinkPad board:** Eric's board works in a ThinkPad 700C,
+  running Windows 3.1. The FPGA design has since been changed in this fork (see
+  [docs/formfactor-review.md](docs/formfactor-review.md)), and those changes
+  have **not** been tested on a ThinkPad. Eric's original files are on the
+  `main` branch.
+- **PS/2 desktop board, Rev P1** (Eric's): register communication didn't work
+  reliably in a 50Z.
+- **PS/2 desktop board, Rev P2** (this fork): fixes the problems found in a
+  review of Rev P1, including a floating reset input that is the likely cause
+  of the 50Z problem. The fixes have been checked in simulation against IBM's
+  bus timing, but **Rev P2 has not yet been built or tested on real hardware.**
+- Both boards' original design powers the 74LVC4245A level shifters the wrong
+  way round, putting 5V on a supply pin rated for 4.6V at most. Rev P2 uses
+  the TI SN74LVC8T245 instead, which accepts 5V on either side and fits the
+  same footprint. The same swap should work on the ThinkPad board but hasn't
+  been tried.
+- Known bugs: writes occasionally produce a sector shifted by one byte; the
+  cause hasn't been found.
 
-To make debugging easier, I built a board called the [Fing Longer](pcb\_finglonger/) (IYKYK) that fits into a [3D-printable sled](mech/finglong.STL) and held in place with two small [clips](mech/2finglong.STL). Typically you will make more than one of these. One acts as an extender card to bring the connector forward and the second one acts as a breakout board so you can connect logic analyzer probes to the MCA bus lines. The DifNif plugs into the end of both Fing Longers.
+[docs/formfactor-review.md](docs/formfactor-review.md) has the full list of
+findings and changes, and [docs/verify-findings.md](docs/verify-findings.md)
+explains how to check each one against Eric's original files and IBM's
+documents.
 
-![Another red circuit board with a finger logo and a bunch of logic analyzer probe cables coming out of it](photos/finglonger.jpg)
+**Data loss:** this is a hobby project with no formal testing. Keep backup
+copies of all disk images.
 
-The second version of the DifNif is a [72-pin card](pcb\_formfactor/) that is designed for machines like the 50Z and others which have a riser card bridging the DBA-ESDI connector to the Micro Channel bus. Debugging this version requires a card that plugs into a spare MCA slot. I use a spare [Snark Barker MCA](https://github.com/schlae/snark-barker-mca) board because it has the proper logic analyzer connectors on it already.
+## Building
 
+This is an advanced project. It needs surface-mount soldering (or an
+assembly service), two programmable devices to load, and probably debugging
+with an oscilloscope and a logic analyzer.
 
-## Software
+### Boards
 
-The [Teensy software](difnift/difnift.ino) is relatively easy to load with the Arduino IDE and the Teensy 4.1 extensions. Nothing unusual there.
+Each board folder has a `fab/` folder with Gerber and drill files. For the
+Rev P2 PS/2 board, `pcb_formfactor/fab/` also has a parts list
+(`DifNifFormFactor-RevP2-BOM.csv`) and a placement file
+(`DifNifFormFactor-RevP2-positions.csv`) for an assembly service. The
+ordering notes in [docs/formfactor-review.md](docs/formfactor-review.md)
+cover board thickness, gold fingers and the bevelled edge.
 
-The FPGA bitstream is built using the ICE40 yosys/nextpnr toolchain. You can use iceprog and an FTDI adapter just like for the Graphics Gremlin. See [that readme](https://github.com/schlae/graphics-gremlin/) for information about building the project and programming the EEPROM.
+The Teensy 4.1 plugs into two 24-pin female header strips (2.54 mm pitch, rows
+15.24 mm apart). The SD card goes in the Teensy's own card slot.
 
-There are several source files in the project:
+### Teensy firmware
 
-* difnif\_top.v - Top level module that wires up the other modules
-* mcabus.v - Micro Channel bus interface that implements the MCA ESDI interface registers, POS registers, and DMA.
-* teensy.v - Teensy register interface that allows the Teensy (in another clock domain) to access the ESDI interface mailbox registers and flags
+Load [difnift/difnift.ino](difnift/difnift.ino) with the Arduino IDE and
+PJRC's Teensy board support, selecting Teensy 4.1.
 
+For register loopback testing with DIFDIAG, comment out the two lines at the
+start of `loop()` that call `esdiReset()` and `mainLoop()`. The serial monitor
+then accepts the single-letter test commands listed at startup.
 
-## Drive Images
+### FPGA
 
-To assemble a fresh disk image, use dd to generate a blank file. The file must be a multiple of 512 (?) bytes. Put the file on the SD card in the Teensy (for now it must be named "disk0.img"). On the Thinkpad, use the reference disk to create the IML and reference partitions, and then run the DOS installer to partition and format the rest of the disk.
+The FPGA design is built with the open-source iCE40 tools (yosys, nextpnr and
+icestorm, for example from
+[oss-cad-suite](https://github.com/YosysHQ/oss-cad-suite-build)). In
+`verilog/`:
+
+    make                  # ThinkPad board
+    make BOARD=ps2        # PS/2 desktop board
+
+The PS/2 build turns on the POS registers, so the card reports its `DF9F`
+ID. Each build goes into its own folder, `build/thinkpad/` or `build/ps2/`.
+
+The FPGA loads its program from an SPI flash chip on the board, which is
+written through header J2 with an FTDI FT232H or FT2232H adapter and
+`iceprog`:
+
+    make prog BOARD=ps2
+
+| J2 pin | Signal | FT232H pin |
+|---|---|---|
+| 1 | Flash chip select | AD4 |
+| 2 | CDONE | AD6 |
+| 3 | SCK | AD0 |
+| 4 | CRESET | AD7 |
+| 5 | Flash data out (CIPO) | AD2 |
+| 6 | GND | GND |
+| 7 | Flash data in (COPI) | AD1 |
+| 8 | +3.3 V (board supply, leave unconnected) | |
+
+The board must be powered while programming. The Teensy's USB connection can
+power it on the bench.
+
+The source files are:
+
+- `difnif_top.v`: top level, wiring up the other modules.
+- `mcabus.v`: the Micro Channel bus interface, with the ESDI registers, POS
+  registers and DMA.
+- `teensy.v`: the register interface that lets the Teensy, in its own clock
+  domain, reach the ESDI mailbox registers and flags.
+
+The self-checking bus simulation for the PS/2 board is `difnif72_t.v`, run with
+`./run_sim72.sh` (needs Icarus Verilog).
+
+## Drive images
+
+The Teensy firmware uses a file called `disk0.img` in the root of the SD card.
+Its size must be a whole number of megabytes, up to 1023 MB; for example, for
+120 MB:
+
+    dd if=/dev/zero of=disk0.img bs=1048576 count=120
+
+Then use the machine's reference disk to create the IML and reference
+partitions, and install DOS to partition and format the rest of the disk.
 
 ## DIFDIAG
 
-I've written a diagnostic utility for DBA-ESDI drives. It works by accessing the drive hardware directly at a very low level. Don't use it on drives containing data you care about! It can be useful for troubleshooting dead drives, however.
-
-It compiles using the Borland C++ compiler with the Large memory model.
+[difdiag/DIFDIAG.CPP](difdiag/DIFDIAG.CPP) is a diagnostic utility for
+DBA-ESDI drives that works directly with the drive hardware at a very low
+level. Don't use it on drives containing data you care about, but it can help
+with troubleshooting dead drives. It compiles with Borland C++ using the Large
+memory model.
 
 Menus:
 
-* Settings - DMA configuration. Autoconfigure attempts to get the DMA channel assignment with a BIOS call, and if that fails, directly from the extended BIOS data area (EBDA). Or you can manually assign it. You can also set it to PIO mode if you don't want to test DMA.
-* Mailbox tests - Not for use on a real drive. If you put the DifNif into a loopback test mode (comment out two lines in loop() in difnift.ino), you can use this to run a few million cycles and ensure that register accesses don't have any timing issues.
-* Low level commands - These are the lowest level commands. You have to run them in a specific sequence, following the flowcharts in the [ESDI spec](https://ardent-tool.com/docs/pdf/j_mcspec.pdf).
-* Drive information - These send various query commands to the drive to get information about it. Generally safe to run on real drives.
-* POST tests - These tests are modeled after the drive tests run by the IBM PS/2 BIOS.
-* Run diagnostics - Runs the low-level hardware diag command provided by the DBA-ESDI interface.
-* Int13 tests - This destructive test uses BIOS int13 routines to write arbitrary data to the drive, read it back, and compare it to look for mismatches.
-* Read sector - This test reads one or more sectors from the drive and dumps them to the screen in hex.
+- **Settings:** DMA configuration. Autoconfigure tries to get the DMA channel
+  through a BIOS call, and failing that from the extended BIOS data area
+  (EBDA). The channel can also be set by hand, or PIO mode chosen instead.
+- **Mailbox tests:** not for real drives. With DifNif in loopback test mode
+  (see "Teensy firmware"), runs millions of register cycles to look for timing
+  problems.
+- **Low level commands:** the lowest-level commands, which must be run in the
+  sequence given by the flowcharts in the
+  [ESDI spec](https://ardent-tool.com/docs/pdf/j_mcspec.pdf).
+- **Drive information:** query commands; generally safe on real drives.
+- **POST tests:** modelled on the drive tests run by the PS/2 BIOS.
+- **Run diagnostics:** the DBA-ESDI interface's own low-level hardware
+  diagnostic command.
+- **Int13 tests:** destructive. Writes data through the BIOS int13 routines,
+  reads it back and compares.
+- **Read sector:** reads one or more sectors and shows them in hex.
 
-## Bugs
+## Reference documents
 
-* There seem to be occasional errors when writing sectors. The sector written is shifted by one byte, so it's clearly an off-by-one error somewhere.
-* The version for the 50Z has some sort of timing error and register communications don't work correctly.
-* And probably more!
-
-## Reference Documents
-
-* [IBM DBA-ESDI reference](https://ardent-tool.com/docs/pdf/j_mcspec.pdf).
+- [IBM DBA-ESDI reference](https://ardent-tool.com/docs/pdf/j_mcspec.pdf)
+- [DBA-ESDI 72-pin connector pinout](https://ardent-tool.com/storage/DBA_ESDI.html)
+- [IBM PS/2 Hardware Interface Technical Reference, Micro Channel chapter](https://ardent-tool.com/docs/pdf/ps2_50-60_techref_ch2_microchannel_architecture.pdf)
 
 ## License
 
-This design is secured under the [CERN Open Hardware Licence Version 2 - Strongly Reciprocal](https://ohwr.org/cern_ohl_s_v2.txt).
-
+Designed by Eric Schlaepfer; modified in this fork by thenetworkinglab (2026).
+Licensed under the
+[CERN Open Hardware Licence Version 2 - Strongly Reciprocal](https://ohwr.org/cern_ohl_s_v2.txt).
