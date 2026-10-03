@@ -40,6 +40,7 @@ because the level-shifter pins are typed "bidirectional".
 | 11 | Low | Status register can change during a read cycle | Both boards |
 | 12 | High | Card can bid for DMA again with a request already serviced (fixed) | Both boards |
 | 13 | Note | Card relies on the planar re-arbitrating after every DMA transfer | Both boards |
+| 14 | Low | The Teensy's "16-bit transfer" flag shows the width of the last bus cycle of any kind, not the last data transfer | Both boards |
 
 ### 1. FPGA `chreset` input is floating
 
@@ -239,6 +240,60 @@ would treat the CPU's next I/O cycles as DMA transfers. IBM's timing (T41) and
 Eric's note about the real 50Z in `mcabus_t.v` indicate the planar does
 re-arbitrate after each transfer, and the simulation models it that way. This
 is worth confirming with a logic analyzer on real hardware.
+
+### 14. "16-bit transfer" flag tracks every bus cycle
+
+The FPGA gives the Teensy a flag (`t_treq_16`, flag register bit 9,
+`FLAG_TRANSFER_16` in `difnift.ino`) meant to say whether the last data
+register (DREG) transfer was 8 or 16 bits wide. [mcabus.v](../verilog/mcabus.v)
+sets it from `-SBHE`, which is latched on the falling edge of `-CMD` in
+**every** bus cycle, including other devices' cycles and the host's own status
+polls. In simulation it read 0 after every transfer, even 16-bit ones, because
+the host's 8-bit reads of the status register came in between.
+
+The firmware never reads the flag; it treats every transfer as 16 bits. That's
+fine as long as the host always moves sector data 16 bits at a time, which it
+should, since the card asserts `-CD DS 16` for DREG and DMA cycles. If 8-bit
+transfers ever need supporting, the FPGA should latch `-SBHE` only on DREG and
+DMA cycles, and the firmware should check the flag.
+
+### The "shifted by one byte" write bug (open)
+
+Eric's README reports occasional sector writes that come out shifted by one
+byte. The cause isn't known. Checked so far:
+
+- **8-bit transfers: ruled out as the cause.** A temporary simulation had the
+  host write known bytes to DREG with 8-bit cycles, while a Teensy model
+  stored two bytes per transfer as `difnift.ino` does. The host sent
+  `11 22 33 44`; the Teensy stored `11 88 22 88 33 88 44 88` (the `88` left
+  over from an earlier 16-bit write). An 8-bit transfer interleaves junk bytes
+  and doubles the length; it doesn't shift the data by one byte.
+- **The Teensy's read-then-write of the flag register: harmless.** `setFlag`
+  and `clearFlag` read the flags and write them back. In
+  [teensy.v](../verilog/teensy.v) the only stored bits are the Teensy's own
+  (command in progress and clear all); "set transfer request" (bit 5) reads
+  back as 0 and "clear busy" (bit 7) as 1, so writing back what was read never
+  triggers either.
+- **Finding 12, stale DMA requests: no data corruption seen.** With the fix
+  undone, the card wins the bus once more after its last transfer and then
+  disturbs the host's next I/O cycles, but in simulation every sector word
+  still reached the Teensy intact.
+- **Finding 9, write data timing:** would corrupt individual words rather than
+  shift them, and Eric's 50Z gives about 50 ns of setup, so it probably isn't
+  the cause either.
+
+To try on real hardware:
+
+- **Turn off the USB serial output.** The firmware prints for every command
+  and sector, and prints the first word of each sector written. The data
+  handshake waits for the Teensy, so slowness alone shouldn't lose data, but
+  the extra time changes the timing and could expose a race or a host timeout.
+  Comparing runs with and without the prints is a cheap test.
+- **Look at a damaged sector.** Whether the shift is really one byte or one
+  16-bit word points in different directions: a word shift means a transfer
+  lost or repeated, a byte shift needs some byte-wide event.
+- **Reproduce it with DIFDIAG's Int13 test** (writes, reads back and compares)
+  while capturing the bus with a logic analyzer.
 
 ## Mechanical
 
