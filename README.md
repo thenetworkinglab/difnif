@@ -1,4 +1,4 @@
-# DifNif: DBA-ESDI Solid State Drive Replacement for IBM PS/2 Computers
+# DifNif: DBA-ESDI Solid State Drive Emulator
 
 DifNif is a drive emulator that replaces an IBM DBA-ESDI hard drive. 
 It was designed by Eric Schlaepfer ([schlae/difnif](https://github.com/schlae/difnif)),
