@@ -272,15 +272,18 @@ that plugs into the machine's connector. A **3D-printed carrier** for each
 machine then mounts in the drive bay the way the IBM drive does and holds the
 board so its connector lands where the drive's did. Eric's
 `mech/difnif_PS2_drive_sled.STL` already follows this pattern: it's a
-102 x 155 x 18.5 mm open frame with side rails, and its two corner holes are
-85 mm apart, matching the board's mounting holes.
+102 x 155 x 18.5 mm open frame with side rails that replaces the IBM drive
+sled, and its four 2.5 mm holes (85 x 77 mm apart) match the board's four
+2.7 mm mounting holes, for M2.5 screws. Rev P2 keeps those holes where they
+were, so the plan is to print Eric's sled and test-fit it in a 55SX and a
+Model 70 before designing anything new.
 
 Carriers are cheap to print and reprint, so fitting them can be done by trial
 without touching the PCB. The PCB only has to get the edge connector right
 (width, pitch, key, thickness) and keep its mounting holes where the carrier
 expects them.
 
-Still to measure, per machine, when it's time to design carriers:
+To check during the test fit, per machine:
 
 - How the drive is held in the bay (rails, screws, tray) and the positions of
   those mounting points
@@ -474,9 +477,12 @@ When ordering:
 
 1. ~~Add DMA transfers to `difnif72_t.v`.~~ Done.
 2. ~~Timing check of the FPGA's internal delays.~~ Done: see "Timing check".
-3. ~~Rev P2 schematic changes.~~ Done: see "Rev P2 schematic changes".
-   Remaining: the layout work listed there.
-4. Measure the drive bays and design the per-machine carriers.
+3. ~~Rev P2 schematic changes and layout.~~ Done: see "Rev P2 schematic
+   changes". Boards ordered (PCBWay, assembled).
+4. Print Eric's `mech/difnif_PS2_drive_sled.STL` and test-fit it in a 55SX and
+   a Model 70.
+5. Bring-up: program the FPGA (`make BOARD=ps2`, then `make prog BOARD=ps2`),
+   then test in a machine.
 
 ## Toolchain status
 
