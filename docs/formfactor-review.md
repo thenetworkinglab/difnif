@@ -196,7 +196,10 @@ the `DF9F` adapter ID. The ThinkPad presumably doesn't need it. On the 72-pin
 connector the drive has its own `-CD SETUP` line, and the 50Z/55SX/70 BIOS
 probably reads the ID to find the drive. The define can now be overridden with
 `-DMCA_USE_POS` without changing the default, and the simulation passes the POS
-tests in that mode.
+tests in that mode. Build the 72-pin board's FPGA program with
+`make BOARD=ps2` in `verilog/`, which sets it (plain `make` builds the
+ThinkPad version, POS bypassed, into a separate folder). Program it with
+`make prog BOARD=ps2`.
 
 ### 11. Status register can change during a read
 
@@ -482,6 +485,8 @@ devel), installed in `/opt/oss-cad-suite`.
 
 - **FPGA build (`make` in `verilog/`)** works unchanged. The nextpnr and icetime
   timing estimate is about 80 MHz worst case, against the 50 MHz internal clock.
+  The Makefile now takes `BOARD=thinkpad` (the default) or `BOARD=ps2`
+  (the 72-pin board, POS registers on) and builds each into `build/<board>/`.
 - **Simulation (`verilog/sim.sh`)** failed with Icarus 14: `mcabus.v` used six
   signals before declaring them, which newer Icarus rejects. The declarations
   were moved to the top of the module. A Yosys formal equivalence check
