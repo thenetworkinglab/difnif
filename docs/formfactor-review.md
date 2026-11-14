@@ -528,6 +528,116 @@ When ordering:
   slot on Edge.Cuts, the narrowed fingers 2 and 3, the gap between the finger
   tips and the edge, and the silkscreen text.
 
+## Bring-up
+
+A staged checklist for the first Rev P2 boards, so that nothing reaches a PS/2
+until it has passed on the bench. Stop at the first step that fails.
+
+### How the board is powered
+
+The edge connector's +5 V feeds the level shifters' bus side (VCCB), U11 and
+U12 directly. It reaches everything else (`+5VD`: the Teensy's VIN and the
+3.3 V and 1.2 V regulators, U4 and U5) only through the Schottky diode D3.
+
+- The Teensy's USB connection, which is joined to its VIN, can power the
+  Teensy, FPGA and regulators on the bench. D3 keeps it off the edge
+  connector, so the bus side stays unpowered.
+- With the board in a PS/2 and USB connected, the Mac powers `+5VD` (USB's
+  5 V is higher than the PS/2's 5 V after D3's drop) and the PS/2 powers the
+  bus side. Neither can feed the other, so USB serial output is safe to use
+  in a machine.
+- With the bus side unpowered, the SN74LVC8T245s put all their outputs in
+  high impedance and U11/U12 have power-off protection on their inputs, so
+  the board doesn't drive anything into an unpowered PS/2.
+
+### The one dangerous mistake
+
+**Inserting the board upside down in the Model 70.** Its riser socket isn't
+keyed. Flipped, the PS/2's +12 V lands on signal pins and its +5 V on ground
+pins, which could damage both the board and the machine. The 55SX socket is
+keyed and the Rev P2 slot matches it, so the board can't go in wrongly there;
+do the first live test in the 55SX.
+
+For the Model 70, line the DifNif up against the original drive first: the
+DifNif's component side (where `A01` is printed) goes the same way as the
+side of the drive PCB that faces the drive casing. With the components facing
+you and the fingers pointing away, A01 is on the right.
+
+### Step 0: inspect and measure, unpowered
+
+Inspect under magnification for solder bridges (especially the FPGA and the
+level shifters), loose parts and damaged fingers.
+
+Fingers are counted from the A01 end on the component side; A01 and A02 are
+before the key slot, so A3 is the first finger after it. Each regulator (U4,
+U5) has three legs on one side: with the fingers toward you, top is 5 V in,
+middle is ground, bottom is the output (3.3 V on U4, 1.2 V on U5).
+
+| Measure between | Expect | Stop if |
+|---|---|---|
+| A7 (+5 V) and A3 (GND) | some resistance | under about 10 ohms |
+| U4 top leg (`+5VD`) and U4 middle leg | some resistance | under about 10 ohms |
+| U4 bottom leg (3.3 V) and middle leg | some resistance | under about 10 ohms |
+| U5 bottom leg (1.2 V) and middle leg | some resistance, possibly low | near 0 ohms |
+| A19 and A27 (PS/2 +12 V) to GND and to +5 V | open | any reading |
+
+Exact values depend on the chips; measure all four boards and look for the
+one that disagrees.
+
+### Step 1: fit the headers
+
+J2 (needed for programming), optionally J4, and the two 24-pin socket strips
+for the Teensy, soldered with the Teensy plugged into them to keep the rows
+aligned.
+
+### Step 2: first power, from USB, no PS/2
+
+Plug the Teensy in with its **USB connector at the end next to the LEDs and
+the "+" corner** (the socket's pin 1); backwards would short its VIN to
+ground. Connect USB and keep a finger near the FPGA and regulators for the
+first 30 seconds. Then measure:
+
+| Point | Expect |
+|---|---|
+| U4 top leg | about 5 V |
+| U4 bottom leg | 3.3 V |
+| U5 bottom leg | 1.2 V |
+| Finger A7 | about 0 V (D3 keeping USB off the bus side) |
+
+### Step 3: program the FPGA
+
+Wire an FT232H to J2 (table in the README) and run `make BOARD=ps2`, then
+`make prog BOARD=ps2`, in `verilog/`. iceprog reads the flash chip's ID
+first, which checks the SPI wiring.
+
+With a scope: CDONE (J2 pin 2) steady at 3.3 V, 10 MHz at X1 pin 3, and an
+11.92 Hz square wave (50 MHz / 2^22) at the FPGA end of R13, which also makes
+LED D2 flicker.
+
+### Step 4: bench test of the Teensy-to-FPGA link
+
+Load [difbench/difbench.ino](../difbench/difbench.ino) on the Teensy and open
+the Serial Monitor. It checks that the FPGA answers, all 16 data and 4
+address lines (naming the Teensy and FPGA pins of any that fail), which FPGA
+build is loaded, the Teensy-owned flags, the FPGA's clock and the interrupt
+line, then runs 200,000 random writes and reads at `difnift.ino`'s timing
+with a small table of timing margins. It can't test the PS/2 side, which is
+unpowered on the bench. Bench only: not with the board in a PS/2.
+
+### Step 5: first time in a PS/2 (55SX)
+
+1. **No Teensy, no USB.** With the original drive removed and the machine
+   unplugged, fit the DifNif, then power on. The PS/2 should start and
+   complain about the fixed disk; the card starts disabled until the BIOS
+   configures it. Measure 5 V at A7 and the regulator outputs, keep the run
+   short, and watch for heat.
+2. **With the Teensy and USB serial.** Load `difnift.ino` and have the
+   Reference Diskette ready, since the machine will probably want to be
+   reconfigured. Commands from the BIOS appearing in the serial output mean
+   the board and the PC are talking.
+
+Only then the Model 70, after checking the orientation as above.
+
 ## Suggested next steps
 
 1. ~~Add DMA transfers to `difnif72_t.v`.~~ Done.
@@ -536,8 +646,7 @@ When ordering:
    changes". Boards ordered (PCBWay, assembled).
 4. Print Eric's `mech/difnif_PS2_drive_sled.STL` and test-fit it in a 55SX and
    a Model 70.
-5. Bring-up: program the FPGA (`make BOARD=ps2`, then `make prog BOARD=ps2`),
-   then test in a machine.
+5. Bring-up: follow the checklist in "Bring-up".
 
 ## Toolchain status
 
