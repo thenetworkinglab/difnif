@@ -306,8 +306,20 @@ module mcabus(
     assign reg_bsr = {control_dma_enable, flag_isr, t_cmd_in_progress, flag_busy,
                       flag_si_full, flag_ci_full, flag_treq, flag_isr};
 
+    // Channel reset (CHRESET, active high) from the planar returns the card
+    // to its power-on state, as it does every adapter. The registers written
+    // by bus cycles (BCR, POS 2-4) and the arbitration state reset
+    // asynchronously; this synchronized copy clears the flags and tells the
+    // Teensy, through the hard-reset flag, to restart. Without it the card
+    // kept its settings and any pending DMA request across a reset whenever
+    // it stayed powered while the host didn't (Teensy on USB).
+    reg [1:0] s_chreset = 2'b00;
+    always @ (posedge clk) begin
+        s_chreset <= {s_chreset[0], chreset};
+    end
+
     // Basic Control Register
-    assign t_hard_reset = reg_bcr[7];      // Setting this bit resets the MCU
+    assign t_hard_reset = reg_bcr[7] | s_chreset[1]; // Resets the MCU
     // TODO: Make it so completing a DMA transfer
     // auto-clears the DMA enable
     assign control_dma_enable = reg_bcr[1]; // Set to allow DMA operation
@@ -323,10 +335,11 @@ module mcabus(
     wire [15:0] reg_pos01 = 16'hDF9F;
 // LSB is card enable bit FIXME: add debug mode?
 `ifdef MCA_NO_POS
-    reg [7:0] reg_pos2 = 8'b0_1_1110_0_1; // Default to card enabled, 3510, arb e, fairness on
+    localparam [7:0] POS2_DEFAULT = 8'b0_1_1110_0_1; // Card enabled, 3510, arb e, fairness on
 `else
-    reg [7:0] reg_pos2 = 8'b0_1_1110_0_0; // Default to card disabled, 3510, arb e, fairness on
+    localparam [7:0] POS2_DEFAULT = 8'b0_1_1110_0_0; // Card disabled, 3510, arb e, fairness on
 `endif
+    reg [7:0] reg_pos2 = POS2_DEFAULT;
     reg [7:0] reg_pos3 = 8'b0_0_00_0000;
     reg [7:0] reg_pos4 = 8'b00000_00_0;
 
@@ -385,13 +398,19 @@ module mcabus(
 
     //FIXME: may need to prevent DMA access during our own IO ops.
 
-    always @ (negedge arb_gnt_l) begin
-        la_arb_won <= arb_won;
+    always @ (negedge arb_gnt_l or posedge chreset) begin
+        if (chreset)
+            la_arb_won <= 1'b0;
+        else
+            la_arb_won <= arb_won;
     end
 
     // DMA cycle begins and ends when arb/gnt pulses high.
-    always @ (posedge arb_gnt_l) begin
-        dma_cycle <= dma_requested;
+    always @ (posedge arb_gnt_l or posedge chreset) begin
+        if (chreset)
+            dma_cycle <= 1'b0;
+        else
+            dma_cycle <= dma_requested;
     end
 
     // Deassert preempt as soon as we win arbitration
@@ -455,7 +474,7 @@ module mcabus(
                     case (la_addr)
                         REG_CIFR_L  : reg_cifr <= la_sbhe_l ? {reg_cifr[15:8], bus_d[7:0]} : bus_d;
                         REG_CIFR_H  : reg_cifr <= la_sbhe_l ? reg_cifr : {bus_d[15:8], reg_cifr[7:0]};
-                        REG_BCR     : reg_bcr  <= bus_d[7:0];
+                        // REG_BCR: see below
                         REG_ATN     : reg_atn  <= bus_d[7:0];
                         REG_DREG    : reg_dreg_write <= la_sbhe_l ? {reg_dreg_write[15:8], bus_d[7:0]} : bus_d;
                         // Doesn't make sense to access the high byte alone of REG_DREG
@@ -464,6 +483,22 @@ module mcabus(
                     // DMA ignores address
                     reg_dreg_write <= la_sbhe_l ? {reg_dreg_write[15:8], bus_d[7:0]} : bus_d;
                 end
+            end
+        end
+    end
+
+    // The registers the BIOS sets up, the BCR and POS 2-4, stored the same
+    // way but returned to their power-on values by a channel reset
+    always @ (posedge cmd_l or posedge chreset) begin
+        if (chreset) begin
+            reg_bcr <= 8'h00;
+            reg_pos2 <= POS2_DEFAULT;
+            reg_pos3 <= 8'h00;
+            reg_pos4 <= 8'h00;
+        end else if (la_write & (la_addressed | la_dma_selected)) begin
+            if (la_cd_setup_l & card_enable) begin
+                if (~la_dma_selected && la_addr == REG_BCR)
+                    reg_bcr <= bus_d[7:0];
             end else if (~la_cd_setup_l) begin
                 case (la_addr)
                     4'h2       : reg_pos2 <= bus_d[7:0];

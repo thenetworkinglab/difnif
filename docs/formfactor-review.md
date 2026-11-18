@@ -41,6 +41,7 @@ because the level-shifter pins are typed "bidirectional".
 | 12 | High | Card can bid for DMA again with a request already serviced (fixed) | Both boards |
 | 13 | Note | Card relies on the planar re-arbitrating after every DMA transfer | Both boards |
 | 14 | Low | The Teensy's "16-bit transfer" flag shows the width of the last bus cycle of any kind, not the last data transfer | Both boards |
+| 15 | High | Channel reset (CHRESET) doesn't reset the card: POS, BCR, flags and DMA state survive it, and the Teensy isn't told (fixed) | Both boards |
 
 ### 1. FPGA `chreset` input is floating
 
@@ -257,6 +258,45 @@ should, since the card asserts `-CD DS 16` for DREG and DMA cycles. If 8-bit
 transfers ever need supporting, the FPGA should latch `-SBHE` only on DREG and
 DMA cycles, and the firmware should check the flag.
 
+### 15. Channel reset doesn't reset the card
+
+Found on real hardware. With the Teensy's USB connected, a 55SX cold boot
+stopped after the memory test and disk check; with USB unplugged it booted.
+
+In Eric's [mcabus.v](../verilog/mcabus.v), `chreset` only gates `addressed`
+(the card ignores the bus while it's asserted). Nothing is reset: POS 2-4
+(card enable, arbitration level, address), the BCR (DMA and interrupt
+enables), the mailbox flags and the arbitration state (`dma_cycle`,
+`la_arb_won`) keep their values, and the Teensy has no way to see CHRESET.
+Micro Channel adapters are expected to return to their power-on state on
+channel reset.
+
+Normally this is hidden because the board is powered from the host, so it
+powers up with it. The ThinkPad board is always powered that way. On the
+72-pin board, the Teensy's USB connection keeps the FPGA and Teensy powered
+while the PS/2 is off (D3 keeps it off the bus side), so the next power-on
+found the card still enabled, with DMA enabled and possibly a DMA request
+pending from the previous session. While the PS/2 is off the FPGA's bus
+inputs also float, which can leave junk in those registers.
+
+- **Verilog fix:** the BCR and POS 2-4 are written in their own block with an
+  asynchronous reset on `chreset` (POS 2 back to its default: card disabled in
+  the POS build, enabled in the bypass build); `dma_cycle` and `la_arb_won`
+  reset the same way. A synchronized copy of `chreset` is ORed into
+  `t_hard_reset`, which clears the flags and sets the Teensy's hard-reset flag;
+  `difnift.ino` already waits on that flag and restarts its drive emulation
+  (`esdiReset`) when it clears, so the firmware is unchanged.
+- **Both boards** drive FPGA pin 76 from the connector's CHRESET (the ThinkPad
+  board through U8 from J1 pin 2), so the reset can't fire from a floating
+  input in a running machine.
+- **Simulation:** a new test leaves the card enabled with DMA and interrupts
+  on and a transfer requested, pulses CHRESET, and checks the Teensy sees the
+  reset, the request is dropped, POS 2 is back to 78 (POS build) and the card
+  stops answering until it's reconfigured, and the BSR reads 00. Against the
+  old `mcabus.v` it fails; with the fix, the full matrix passes as before.
+- **Until the fixed FPGA is loaded:** have USB unplugged when the PS/2 is
+  switched on, and plug it in afterwards.
+
 ### The "shifted by one byte" write bug (open)
 
 Eric's README reports occasional sector writes that come out shifted by one
@@ -354,7 +394,8 @@ To check during the test fit, per machine:
 
 ## Verilog fixes
 
-Findings 4, 5, 6 and 9 are fixed in `verilog/`.
+Findings 4, 5, 6, 9, 12 and 15 are fixed in `verilog/` (12 and 15 are
+described with the findings).
 
 **Write capture (finding 9), [mcabus.v](../verilog/mcabus.v):**
 
@@ -432,6 +473,9 @@ their datasheets, then compares the total with IBM's limits:
 | T41 | DMA request dropped before next `ARB/-GNT` (finding 12) | 0 min | 17.8 | 17.8 |
 
 All values in ns, default build; the `--pos` build is within 1 ns of these.
+Rerun with `--pos` after the finding 15 fix: everything still passes, with
+T22 the tightest at 9.2 ns, the hold rows at 17.1 ns and every other margin
+over 17 ns.
 Every requirement passes. The tightest is T22 (the card letting go of the data
 bus after a read) at 9.4 ns, and that's with the pessimistic assumptions below.
 
@@ -648,7 +692,15 @@ strobe.
 2. **With the Teensy and USB serial.** Load `difnift.ino` and have the
    Reference Diskette ready, since the machine will probably want to be
    reconfigured. Commands from the BIOS appearing in the serial output mean
-   the board and the PC are talking.
+   the board and the PC are talking. With an FPGA built before the finding
+   15 fix, switch the PS/2 on with USB unplugged and plug it in afterwards.
+
+First board, 55SX (November 2026): POSTs; the Reference Diskette's
+configuration found the drive as "Integrated Fixed Disk and Controller"
+(primary address, arbitration level 5), and the serial log showed POS info,
+seek, soft reset, and DMA sector reads and writes. DOS 6.22 partitioned and
+formatted the disk. A cold boot with USB connected hung, which led to
+finding 15.
 
 Only then the Model 70, after checking the orientation as above.
 
@@ -714,8 +766,8 @@ Run `verilog/run_sim72.sh` (about 50 seconds for 162 simulations;
 | Bridged | either | IBM limits | Host writes fail on 7 of 8 delay sets (finding 9); reads pass |
 
 **After** the fixes, the bridged board and Rev P2 pass everything with POS
-enabled, including DMA in both directions with competing devices. See
-"Verilog fixes" above.
+enabled, including DMA in both directions with competing devices and a
+channel reset in the middle of use (finding 15). See "Verilog fixes" above.
 
 The simulated FPGA has no internal delays (it's RTL simulation), and a floating
 input is modelled as "unknown", so on real hardware finding 1 would show up as

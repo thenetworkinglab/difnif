@@ -91,7 +91,8 @@ module difnif72_t;
 
     // Teensy-side registers and flag bits (teensy.v, difnift.ino)
     localparam [3:0] TN_FLAGS = 1, TN_ATN = 2, TN_ISR = 3, TN_CIFR = 4, TN_SIFR = 5, TN_DREG = 6;
-    localparam FL_ATN = 0, FL_ISR = 1, FL_CIFR = 2, FL_SIFR = 3, FL_TREQ_SET = 5, FL_TREQ = 8;
+    localparam FL_ATN = 0, FL_ISR = 1, FL_CIFR = 2, FL_SIFR = 3, FL_HARD_RESET = 4, FL_TREQ_SET = 5,
+               FL_TREQ = 8;
 
     localparam integer MAX_POLL = 400;
 
@@ -448,8 +449,10 @@ module difnif72_t;
     // Where the card should answer: 3510-3517, or 3518-351F with the
     // alternate address selected in POS 2
     reg alt_base = 1'b0;
+    reg card_on = 1'b1;     // cleared while the POS build's card is disabled
+    reg [3:0] card_level = 4'hE;    // arbitration level set in POS 2
     function selected(input [15:0] addr);
-        selected = (addr[15:3] == {12'h351, alt_base});
+        selected = card_on && (addr[15:3] == {12'h351, alt_base});
     endfunction
 
     // ESDI register numbers 0, 1 and 4 are 16-bit (mcabus.v cd_ds16_l)
@@ -612,6 +615,53 @@ module difnif72_t;
             alt_base = 1'b0;
             host_in(A_BSR, 0, d);
             if (d[7:0] !== 8'h00) fail($sformatf("BSR back at 3512 = %h", d[7:0]));
+            end_test;
+        end
+    endtask
+
+    // Channel reset: leave the card in use (DMA and interrupts enabled in the
+    // BCR, a transfer requested so it's bidding for the bus), pulse CHRESET,
+    // and check it's back in its power-on state with the Teensy told
+    task automatic test_channel_reset;
+        reg [15:0] d, fl;
+        reg [7:0] p2;
+        begin
+            begin_test("channel reset returns the card to its power-on state");
+            host_out(A_BSR, 0, 16'h0003);
+            tn_write(TN_FLAGS, 16'h0001 << FL_TREQ_SET);
+            #1000;
+            if (h_preempt_l !== 1'b0) fail("set-up: card isn't requesting the bus before the reset");
+            wait_until(t_next_cmd);
+
+            h_chreset = 1'b1;
+            #2000;
+            tn_read(TN_FLAGS, fl);
+            if (fl[FL_HARD_RESET] !== 1'b1) fail("Teensy isn't told about the reset (hard-reset flag clear)");
+            if (h_preempt_l !== 1'b1) fail("card still requesting the bus during the reset");
+            h_chreset = 1'b0;
+            #2000;
+            if (t_next_cmd < $realtime) t_next_cmd = $realtime;
+
+            tn_read(TN_FLAGS, fl);
+            if (fl[FL_HARD_RESET] !== 1'b0) fail("hard-reset flag still set after the reset");
+            if (fl[FL_TREQ] !== 1'b0) fail("transfer request survived the reset");
+            if (h_preempt_l !== 1'b1) fail("card requesting the bus after the reset");
+`ifdef MCA_USE_POS
+            pos_in(2, p2);
+            if (p2 !== 8'b0_1_1110_0_0) fail($sformatf("POS 2 = %h after the reset, expected 78 (card disabled)", p2));
+            card_on = 1'b0;
+            drove = 1'b0;
+            watch_en = 1'b1;
+            host_in(A_BSR, 0, d);
+            watch_en = 1'b0;
+            if (drove) fail("disabled card answered at 3512 after the reset");
+            // Configure it again, as the BIOS would
+            pos_out(2, {2'b01, card_level, 2'b01});
+            wait_until(t_next_cmd);
+            card_on = 1'b1;
+`endif
+            host_in(A_BSR, 0, d);
+            if (d[7:0] !== 8'h00) fail($sformatf("BSR = %h after the reset, expected 00 (BCR and flags cleared)", d[7:0]));
             end_test;
         end
     endtask
@@ -786,7 +836,6 @@ module difnif72_t;
     // ------------------------------------------------------------------
     // Central arbiter and DMA controller
     // ------------------------------------------------------------------
-    reg [3:0] card_level = 4'hE;    // arbitration level set in POS 2
     integer dma_done;               // transfers completed for the card
     integer dma_extra;              // transfers the card won with nothing to send
     reg [15:0] dma_buf [0:255];     // "system memory"
@@ -1036,6 +1085,7 @@ module difnif72_t;
         test_dma_to_card(1, "DMA sector write, lower-priority device competing");
         test_dma_from_card(1, "DMA sector read, lower-priority device competing");
 `endif
+        test_channel_reset;
         test_not_selected(16'h0080, "no response at 0080 after DMA");
 
         $display("RESULT: cycle=%0d worst=%0d board=%0d pos=%0d seed=%0d tests=%0d failed=%0d spec=%0d",
