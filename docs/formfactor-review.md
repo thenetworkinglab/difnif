@@ -281,6 +281,12 @@ byte. The cause isn't known. Checked so far:
 - **Finding 9, write data timing:** would corrupt individual words rather than
   shift them, and Eric's 50Z gives about 50 ns of setup, so it probably isn't
   the cause either.
+- **Teensy-to-FPGA register timing: ruled out on the bench.** `difnift.ino`
+  raises WR almost immediately after putting data on the bus, which the
+  simulation never modelled. On the first Rev P2 board, `difbench` ran
+  200,000 random writes and reads at the firmware's timing, then 50,000 each
+  at 0, 20 and 50 ns of write setup with 200, 100, 50 and 25 ns read strobes:
+  no errors anywhere (room temperature, one board).
 
 To try on real hardware:
 
@@ -624,9 +630,17 @@ line, then runs 200,000 random writes and reads at `difnift.ino`'s timing
 with a small table of timing margins. It can't test the PS/2 side, which is
 unpowered on the bench. Bench only: not with the board in a PS/2.
 
+First board (November 2026): rails 3.33 V and 1.21 V from USB, A7 at 0 V;
+flash ID `BF 26 18`, programmed and verified with `iceprog -p` (which clears
+the SST26VF080A's power-up write protection); every `difbench` check passed,
+with no errors in the timing table even at 0 ns write setup and a 25 ns read
+strobe.
+
 ### Step 5: first time in a PS/2 (55SX)
 
-1. **No Teensy, no USB.** With the original drive removed and the machine
+1. **No Teensy, no USB.** (If the Teensy is soldered in rather than
+   socketed, leave it in and just leave USB unplugged; the PS/2 then powers
+   it through D3.) With the original drive removed and the machine
    unplugged, fit the DifNif, then power on. The PS/2 should start and
    complain about the fixed disk; the card starts disabled until the BIOS
    configures it. Measure 5 V at A7 and the regulator outputs, keep the run
