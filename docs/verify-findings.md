@@ -184,6 +184,37 @@ editor, click a pad; the Properties panel shows its net.
   - That the stale state was the cause is an inference: the fix was the only
     change between the two results.
 
+### 16. 8-bit reads drive the upper byte lane
+
+- **Board (file fact):** in the Rev P1 schematic, U6 and U7 (the data
+  buffers) both take their DIR pin from the same net (FPGA pin 130), and
+  their output enables are grounded. Eric's ThinkPad board uses the same
+  arrangement; check it the same way.
+- **Verilog (file fact):** `mcabus.v` lines 458 onwards (POS reads, `8'hFF`
+  in the upper byte), 475 (BSR) and 476 (ISR, upper byte 0). Line 452:
+  `data_dir` doesn't depend on the transfer width.
+- **Spec reading:** an 8-bit slave's data is on D0-D7; for odd addresses the
+  system does the byte steering. That a 32-bit planar does it by driving
+  D8-D15 on the bus is an inference from the result below.
+- **Hardware:** in the Model 70, DEBUG (`o 96 0b`, then `i 100` to `i 103`)
+  read `9F FF 78 FF` with the old FPGA and `9F DF 78 00` with the fix.
+
+### 17. The last write before power-off can be lost
+
+- **Firmware (file fact):** Eric's `difnift.ino` line 214 opens the card with
+  `SdioConfig(FIFO_SDIO)`, and line 306 writes each sector with
+  `file.write(transfer_buffer, 512)`; nothing ever calls `sync()` or
+  `syncDevice()`.
+- **SD driver (file fact):** in the Teensy core's SdFat,
+  `src/SdCard/SdioTeensy.cpp`, `SdioCard::writeSector` in FIFO mode starts a
+  write with `writeStart` and only ends it (`syncDevice`, CMD12) when the
+  next write isn't the next sector, or before a read.
+- **That a card can lose the open sector (spec reading, then hardware):** the
+  write isn't finished until CMD12 and the card's busy period after it. On
+  hardware, a directory sector that the firmware had logged as written was
+  missing after a power-off a minute later; with `syncDevice()` at the end
+  of each write command it survived a power-off within a second.
+
 ## Reproducing the simulations
 
 The testbench, `verilog/difnif72_t.v`, is this fork's code. Its assumptions are

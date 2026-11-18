@@ -42,6 +42,8 @@ because the level-shifter pins are typed "bidirectional".
 | 13 | Note | Card relies on the planar re-arbitrating after every DMA transfer | Both boards |
 | 14 | Low | The Teensy's "16-bit transfer" flag shows the width of the last bus cycle of any kind, not the last data transfer | Both boards |
 | 15 | High | Channel reset (CHRESET) doesn't reset the card: POS, BCR, flags and DMA state survive it, and the Teensy isn't told (fixed) | Both boards |
+| 16 | High | 8-bit reads drive `FF` on D8-D15, which fights a 32-bit planar's own byte copy: the Model 70 read the adapter ID as FF9F (fixed in the FPGA; board change for Rev P3) | Both boards |
+| 17 | High | The last sector written before the power goes off can be lost: the SD driver leaves each write open on the card (fixed in the firmware) | Firmware |
 
 ### 1. FPGA `chreset` input is floating
 
@@ -296,6 +298,99 @@ inputs also float, which can leave junk in those registers.
   old `mcabus.v` it fails; with the fix, the full matrix passes as before.
 - **Until the fixed FPGA is loaded:** have USB unplugged when the PS/2 is
   switched on, and plug it in afterwards.
+
+### 16. 8-bit reads drive the upper byte lane
+
+Found on real hardware. In the Model 70 the card wasn't recognised: POST
+error 165, then the Reference Diskette asked for a description file for the
+adapter in slot 4. In the 55SX it was fine.
+
+The adapter ID is read one byte at a time from ports 100h and 101h, during a
+setup cycle. Reading the POS registers by hand with DEBUG in the 70 gave
+`9F FF 78 FF`, where it should be `9F DF 78 00`: every **odd** address read
+`FF`.
+
+**Why:** for an 8-bit slave the data belongs on D0-D7. A 16-bit (or 32-bit)
+machine reading an odd address from such a slave has to move the byte to the
+upper lane itself, and the Model 70 does that on the bus, driving D8-D15 with
+a copy of D0-D7. The 55SX does it internally, so the upper lane doesn't
+matter there.
+
+The DifNif can't leave D8-D15 alone:
+
+- The data buffers U6 (D0-D7) and U7 (D8-D15) share one direction line,
+  `DATA_DIR` (FPGA pin 130), and both have their output enables tied to
+  ground. So whenever the card answers a read, it drives all 16 lines.
+- On 8-bit reads Eric's [mcabus.v](../verilog/mcabus.v) puts `FF` on the
+  upper byte for the POS registers, and `00` for the status (BSR) and
+  interrupt status (ISR) registers.
+- The card's buffers won against the 70's copy: 101h read `FF` instead of
+  `DF`, the only bit that differs being the one that was fought over, and
+  103h read `FF` instead of `00`.
+
+The same thing would have hit the ISR at 3513h (odd) once the drive was
+running.
+
+**Fixes:**
+
+- **FPGA:** every 8-bit read (POS 0-4, BSR, ISR) now puts the same byte on
+  both lanes. The 70's copy and the card's then agree, and a machine that
+  reads D0-D7 sees no difference. With this the 70 reads `9F DF 78 00`,
+  configures the drive and boots from it.
+- **Board, for a Rev P3:** give U7 its own direction (or output enable) line
+  from a spare FPGA pin, so the card drives D8-D15 only on 16-bit cycles,
+  which is what IBM intends. Two buffers fighting over the same value is
+  harmless in practice, but there's no reason to do it.
+- **Simulation:** the host model now checks that on every stable 8-bit read
+  whatever the card drives on D8-D15 is a copy of D0-D7. Against the
+  released FPGA it fails at 100h (`ff` on D8-D15 where `9f` is on D0-D7) and
+  101h (`ff` where `df` belongs); with the fix the full matrix passes as
+  before. The check skips reads where the status changes during the cycle
+  (finding 11), which the T20 check already reports.
+
+### 17. The last write before power-off can be lost
+
+Found on real hardware. After a 20-round copy test in the Model 70, with the
+board powered only from the PS/2, the log file's last line ("Done") was in
+its data cluster but its directory entry still had the old size, so the line
+didn't show. The PS/2 had been switched off 2-5 minutes after the test
+ended. The lost `AUTOEXEC.BAT` directory update during the DOS install
+(`FILE0001.CHK`) looks like the same thing.
+
+Tracing it:
+
+- **DOS sends the update straight away.** With the USB serial log on,
+  `ECHO hello >> D:\FCLOG.TXT` produced a write to the file's data sector
+  and, right after, to the directory sector holding its entry (RBA 245921),
+  both logged by the firmware as written.
+- **The card lost it anyway.** The PS/2 was switched off a minute later and
+  then USB was unplugged; on the Mac the directory sector still had the old
+  size. The whole image held no other copy of the entry, so the write
+  hadn't gone to a wrong sector.
+- **Cause:** `difnift.ino` opens the card with `SdioConfig(FIFO_SDIO)`. In
+  that mode the Teensy SD driver (`SdioTeensy.cpp`, `writeSector`) starts a
+  multi-block write (CMD25) and leaves it open, so the next sector can follow
+  without a new command. The write is only ended (CMD12) when the card is
+  next accessed elsewhere, or on a sync. The card is allowed to hold that
+  last sector in its buffer until then, and this one does. During a copy
+  test the next access comes almost at once, so nothing goes missing; the
+  last write before the machine goes idle stays open until the power goes.
+
+**Fix (firmware):** at the end of each write command, after its last sector
+and before the host is told the command is complete, the firmware calls the
+driver's `syncDevice()`, which ends the write and waits until the card has
+stored it (about 1.1 ms on this card). A multi-sector command still streams
+to the card as one write.
+
+With the fix, `ECHO fixed >> D:\FCLOG.TXT` twice, the second time switching
+the PS/2 off within a second, left both lines in the file. A 20-round copy
+test in the 55SX then ended with "Done" in the log.
+
+**Related:** with the board powered from USB, the Teensy doesn't restart when
+the PS/2 is switched on, and the firmware used to open the SD card only when
+it started. With the card out at that moment, the drive answered but had no
+disk. It now tries the card again at each hard reset (each PS/2 power-on)
+if the disk image isn't open.
 
 ### The "shifted by one byte" write bug (open)
 
@@ -729,23 +824,41 @@ With the finding 15 fix:
   IDE adapter (McIDE) in the same machine measures about 1.9 MB/s.
 - **Earlier problems:**
   - During the DOS install, one update to `AUTOEXEC.BAT`'s directory entry
-    was lost; CHKDSK recovered it as `FILE0001.CHK`. It hasn't recurred.
+    was lost; CHKDSK recovered it as `FILE0001.CHK`. Probably finding 17.
   - One warm-boot hang after FDISK, before the finding 15 fix, also hasn't
     recurred.
 
 Only then the Model 70, after checking the orientation as above.
 
+First board, Model 70 (November 2026), with the other adapters removed:
+
+- **Orientation:** checked against the original drive as above. No damage,
+  and the board powered up normally.
+- **With FPGA v2026.11.18-1:** POST error 165, and the Reference Diskette
+  (v1.12) asked for a description file for slot 4. DEBUG read the ID as
+  FF9F, which led to finding 16.
+- **With FPGA v2026.11.18-2:** DEBUG reads `9F DF 78 00`, the Reference
+  Diskette configures the drive, and DOS boots from it.
+- **Speed:** DiskMeter random 960 KB/s, sequential 990 KB/s, buffered
+  998 KB/s, seek 0.25 ms. That's with the same firmware that gives 705 KB/s
+  in the 55SX, so most of the time per word is the host's DMA, not the
+  Teensy.
+
 ## Suggested next steps
 
 Done: DMA in the testbench, the timing check, Rev P2 schematic and layout,
-assembled boards from PCBWay, Eric's printed sled, and bring-up in a 55SX,
-including the overnight copy test.
+assembled boards from PCBWay, Eric's printed sled, bring-up in a 55SX
+(including the overnight copy test), and the Model 70 (finding 16).
 
-1. **Model 70:** check the orientation against the original drive first (see
-   "The one dangerous mistake"), then repeat Step 5 and the copy test.
-2. **Speed:** the 55SX moves about 705 KB/s against about 1.9 MB/s for an IDE
-   adapter. Most of the time seems to go on the host's DMA arbitration for
-   every 16-bit word (about 2.5-2.8 us each). Options, in order:
+1. **Rev P3 board change:** a separate direction line for U7 (finding 16).
+   Also worth considering: a way for the firmware to see the PS/2's 5 V
+   going away, so it can finish writing before it loses power.
+2. **Speed:** the 55SX moves about 705 KB/s and the Model 70 about 990 KB/s,
+   against about 1.9 MB/s for an IDE adapter in the 55SX. The same firmware
+   is faster on the faster machine, so most of the time goes on the host's
+   side of the DMA for every 16-bit word (arbitration and the DMA
+   controller): about 2.8 us per word in the 55SX and 2.0 us in the 70.
+   Options, in order:
    - Measure it: put the scope on the Teensy's RD and WR pins and the
      ARB/-GNT line during a long read.
    - Burst DMA: keep the bus for several transfers per arbitration, ending

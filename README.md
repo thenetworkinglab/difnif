@@ -67,13 +67,17 @@ There are also debugging aids:
 - **PS/2 desktop board, Rev P2** (this fork): fixes the problems found in a
   review of Rev P1, including a floating reset input that is the likely cause
   of the 50Z problem. The fixes were checked in simulation against IBM's bus
-  timing before building. On hardware so far (one board, firmware and FPGA
-  v2026.11.18-1):
+  timing before building. On hardware so far (one board):
   - It works in a PS/2 55SX: configured with the Reference Diskette, it boots
-    DOS 6.22, from cold and warm.
-  - An overnight copy test, about 1 GB of writes, had no errors.
-  - DiskMeter measures about 705 KB/s.
-  - **Not yet tested in a Model 70 or a 50Z.**
+    DOS 6.22, from cold and warm. An overnight copy test, about 1 GB of
+    writes, had no errors. DiskMeter measures about 705 KB/s.
+  - It works in a PS/2 Model 70 with FPGA v2026.11.18-2 or later (finding
+    16): configured with the Reference Diskette, it boots DOS, and passed a
+    20-round copy test. DiskMeter measures about 990 KB/s.
+  - Use firmware v2026.11.18-2 or later: earlier firmware, including Eric's,
+    can lose the last sector written before the PS/2 is switched off
+    (finding 17).
+  - **Not yet tested in a 50Z.**
 - Both boards' original design powers the 74LVC4245A level shifters the wrong
   way round, putting 5V on a supply pin rated for 4.6V at most. Rev P2 uses
   the TI SN74LVC8T245 instead, which accepts 5V on either side and fits the
