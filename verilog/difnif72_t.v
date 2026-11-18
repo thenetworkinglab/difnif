@@ -434,6 +434,14 @@ module difnif72_t;
                 early = h_d;
                 wait_until(t_rise);
                 #0.05 raw = h_d;    // sampled as -CMD rises
+                // On an 8-bit read the data belongs on D0-D7. A 32-bit planar
+                // (Model 70) copies it onto D8-D15 itself for odd addresses,
+                // so anything else the card drives there fights that copy.
+                // (Status that changes during the read, finding 11, is
+                // reported by the T20 check below instead.)
+                if (!card16 && b_dir === 1'b1 && early === raw && raw[15:8] !== raw[7:0])
+                    fail($sformatf("8-bit read of %h: card drives %h on D8-D15, not a copy of D0-D7 (%h)",
+                                   addr, raw[15:8], raw[7:0]));
                 if (card16 && word) rdata = raw;
                 else if (card16 && addr[0]) rdata = {8'h00, raw[15:8]};
                 else rdata = {8'h00, raw[7:0]};

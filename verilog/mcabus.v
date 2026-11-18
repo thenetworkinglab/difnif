@@ -516,14 +516,19 @@ module mcabus(
     assign data_dir = la_data_read & ~cmd_l & (card_enable | ~la_cd_setup_l); // Read mode; only when CMD is low.
 
     // Data output mux
+    // 8-bit reads (POS, BSR, ISR) put the byte on both D0-D7 and D8-D15.
+    // The data belongs on D0-D7, but both data buffers share one direction
+    // pin, so the card can't leave D8-D15 alone. A 32-bit planar (Model 70)
+    // copies D0-D7 onto D8-D15 itself for odd addresses; if the card drove
+    // anything else there it would win, and the 70 read the ID as FF9F.
     always @ (*) begin
         if (la_cd_setup_l == 1'b0) begin
             case (la_addr)
-                4'h0    : data_out <= {8'hFF, reg_pos01[7:0]};
-                4'h1    : data_out <= {8'hFF, reg_pos01[15:8]};
-                4'h2    : data_out <= {8'hFF, reg_pos2};
-                4'h3    : data_out <= {8'hFF, reg_pos3};
-                4'h4    : data_out <= {8'hFF, reg_pos4};
+                4'h0    : data_out <= {2{reg_pos01[7:0]}};
+                4'h1    : data_out <= {2{reg_pos01[15:8]}};
+                4'h2    : data_out <= {2{reg_pos2}};
+                4'h3    : data_out <= {2{reg_pos3}};
+                4'h4    : data_out <= {2{reg_pos4}};
                 default     : data_out <= 16'hFFFF;
             endcase
         end else begin
@@ -536,8 +541,8 @@ module mcabus(
                     // SBHE=0, A0=1: only write bits 15:8
                     // SBHE=1, A0=1: invalid
                     REG_SIFR_H      : data_out <= la_sbhe_l ? 16'hFFFF : {t_sifr_out[15:8], 8'hFF};
-                    REG_BSR         : data_out <= reg_bsr;
-                    REG_ISR         : data_out <= t_isr_out;
+                    REG_BSR         : data_out <= {2{reg_bsr}};
+                    REG_ISR         : data_out <= {2{t_isr_out}};
                     REG_DREG        : data_out <= la_sbhe_l ? {8'hFF, t_dreg_in[7:0]} : t_dreg_in;
                     default         : data_out <= 16'hFFFF;
                 endcase
