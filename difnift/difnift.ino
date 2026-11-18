@@ -87,6 +87,26 @@ uint8_t cmd_count = 0;
 
 // Data transfer buffer
 uint8_t transfer_buffer[512];
+
+// Teensy-FPGA port timing (fork). Every access used to hold RD or WR for
+// 200 ns. The strobe now only has to be long enough for the FPGA's 50 MHz
+// logic to see it (3+ clocks) and for read data to arrive (difbench reads
+// correctly at 25 ns). But accesses that make the FPGA change a flag (writing
+// FLAGS, ISR or SIFR; reading ATN or CIFR) take effect 40-80 ns later, after
+// the FPGA's synchronizers. A flag poll sooner than that would see the old
+// state: e.g. read the same command word twice, or overwrite a data or status
+// word the host hasn't taken. The 200 ns strobes hid this; PORT_SETTLE_NS
+// keeps the same distance after those accesses.
+#define PORT_STROBE_NS 80
+#define PORT_SETTLE_NS 120
+
+// Read-ahead (fork): a multi-sector read fetches up to READ_AHEAD sectors from
+// the SD card in one go instead of one 512-byte read and seek per sector.
+// Any write empties it.
+#define READ_AHEAD 32
+uint8_t ra_buf[READ_AHEAD * 512];
+uint32_t ra_first = 0;
+uint32_t ra_count = 0;   // sectors in ra_buf; 0 = empty
 uint16_t transfer_count = 0;
 uint16_t transfer_index = 0;
 
@@ -171,10 +191,13 @@ uint16_t portRead(uint8_t address)
     digitalWriteFast(PIN_RD, 1);
     // If I want to go faster than 200ns, I will need to make this a synchronous
     // interface using a clock coming out of the FPGA.
-    delayNanoseconds(200); //ES was 3us
+    delayNanoseconds(PORT_STROBE_NS); //ES was 3us, then 200 ns
     ret = GPIO6_PSR >> 16;
     // Grab port contents
     digitalWriteFast(PIN_RD, 0);
+    if (address == REG_ATN || address == REG_CIFR) {
+      delayNanoseconds(PORT_SETTLE_NS); // Let the "full" flag clear
+    }
     return ret;
 }
 
@@ -189,9 +212,12 @@ void portWrite(uint8_t address, uint16_t data)
     setPortMode(OUTPUT);
     GPIO6_DR = (GPIO6_DR & 0xFFFF) | (data << 16);
     digitalWriteFast(PIN_WR, 1);
-    delayNanoseconds(200); //ES was 3us
+    delayNanoseconds(PORT_STROBE_NS); //ES was 3us, then 200 ns
     digitalWriteFast(PIN_WR, 0);
     setPortMode(INPUT);
+    if (address == REG_FLAGS || address == REG_ISR || address == REG_SIFR) {
+      delayNanoseconds(PORT_SETTLE_NS); // Let the flag it sets or clears change
+    }
 }
 
 
@@ -284,13 +310,34 @@ int readDiskRBA(uint32_t rba)
     return 0;
   }
   #endif
-  // TODO: check against file size limit
-  if (!file.seek((uint64_t)rba * 512)) {
-    return 1;
+  if (rba >= disk_size) {
+    // Past the end of the image: as before, try it and report failure
+    if (!file.seek((uint64_t)rba * 512)) {
+      return 1;
+    }
+    if (!file.read(transfer_buffer, 512)) {
+      return 1;
+    }
+    return 0;
   }
-  if (!file.read(transfer_buffer, 512)) {
-    return 1;
+  if (ra_count == 0 || rba < ra_first || rba >= ra_first + ra_count) {
+    // Fetch this sector and as many of the command's following ones as fit.
+    // rba_transfer_count is the number of sectors left, including this one.
+    uint32_t n = rba_transfer_count;
+    if (n < 1) n = 1;
+    if (n > READ_AHEAD) n = READ_AHEAD;
+    if (n > disk_size - rba) n = disk_size - rba;
+    ra_count = 0;
+    if (!file.seek((uint64_t)rba * 512)) {
+      return 1;
+    }
+    if (file.read(ra_buf, n * 512) != (int)(n * 512)) {
+      return 1;
+    }
+    ra_first = rba;
+    ra_count = n;
   }
+  memcpy(transfer_buffer, ra_buf + (rba - ra_first) * 512, 512);
   Serial.print("rtime: ");
   Serial.println(since_sd_op);
   return 0;
@@ -299,6 +346,7 @@ int readDiskRBA(uint32_t rba)
 int writeDiskRBA(uint32_t rba)
 {
   since_sd_op = 0;
+  ra_count = 0; // The read-ahead copy may hold this sector
   // TODO: check against file size limit
   if (!file.seek((uint64_t)rba * 512)) {
     return 1;
@@ -425,21 +473,27 @@ void prepDefaultSB()
 }
 
 
+// The flag register's writable bits (teensy.v): bits 6 (command in progress)
+// and 10 (clear all) are stored; writing 1 to bit 5 sets the transfer request
+// and writing 0 to bit 7 clears busy, as one-off actions; the other bits are
+// status and ignore writes. Keeping a copy of the stored bits makes a flag
+// change one write instead of a read and a write (fork).
+#define FLAGS_STORED (_BV(FLAG_CMD_PROG) | _BV(FLAG_CLEAR_ALL))
+uint16_t flags_stored = 0;
+
 // Sets a bit in the FPGA flag register
 void setFlag(uint16_t flag)
 {
-  uint16_t old;
-  old = portRead(REG_FLAGS);
-  portWrite(REG_FLAGS, old | flag);
+  flags_stored |= flag & FLAGS_STORED;
+  portWrite(REG_FLAGS, flags_stored | _BV(FLAG_BUSY) | (flag & _BV(FLAG_TREQ_SET)));
 }
 
 
 // Clears a bit in the FPGA flag register
 void clearFlag(uint16_t flag)
 {
-  uint16_t old;
-  old = portRead(REG_FLAGS);
-  portWrite(REG_FLAGS, old & ~flag);
+  flags_stored &= ~(flag & FLAGS_STORED);
+  portWrite(REG_FLAGS, flags_stored | (_BV(FLAG_BUSY) & ~flag));
 }
 
 
@@ -1169,6 +1223,7 @@ void loop() {
       Serial.print("Enter data for flags: ");
       d = read8();
       portWrite(REG_FLAGS, d);
+      flags_stored = d & FLAGS_STORED;
       Serial.println();
     }
     if (cmd == 'f') {
