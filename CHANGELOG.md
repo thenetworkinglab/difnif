@@ -44,6 +44,10 @@ below (built just before the version registers were added):
   - 196 rounds, about 1 GB written.
   - All 1179 `FC /B` comparisons identical, every file's SHA-256 correct.
   - CHKDSK clean on both drives.
+- Then with this release and FPGA v2026.11.18-1:
+  - `difbench` passed every check.
+  - The 20-round copy test (`TEST.BAT`) gave 120 of 120 comparisons
+    identical, with every file's SHA-256 correct.
 
 ## FPGA
 
@@ -83,4 +87,5 @@ Checked against IBM's Micro Channel timing:
 On hardware, with the build from just before the version registers: a Rev P2
 board boots DOS 6.22 in a PS/2 55SX, from cold and warm, with and without
 USB connected, and passed the overnight copy test (see the firmware entry).
+This release itself passed `difbench` and the 20-round copy test.
 **Not tested** in a Model 70 or a ThinkPad 700C.
