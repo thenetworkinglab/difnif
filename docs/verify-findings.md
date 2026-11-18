@@ -154,6 +154,36 @@ editor, click a pad; the Properties panel shows its net.
   Eric's own testbench (`mcabus_t.v`, around line 408) notes seeing that on the real
   50Z. A logic analyzer on real hardware would confirm it.
 
+### 14. The "16-bit transfer" flag tracks every bus cycle
+
+- **Verilog (file fact):**
+  - Line 414: `la_sbhe_l` is latched on every falling edge of `-CMD` (the block
+    starting at line 411 has no condition), so it follows other devices' cycles
+    and the host's status reads too.
+  - Line 268: `flag_treq_16` copies it on every clock.
+- **Firmware (file fact):** `difnift.ino` defines `FLAG_TRANSFER_16` (line 40)
+  and never uses it, so nothing goes wrong today.
+- **"Reads 0 after 16-bit transfers" (simulation).**
+
+### 15. Channel reset doesn't reset the card
+
+- **Verilog (file fact):**
+  - `chreset` appears only in `addressed` (lines 385 and 387), so the card
+    ignores the bus during a reset but keeps its state.
+  - Nothing resets `reg_bcr` (line 288), `reg_pos2` (316 or 318), `la_arb_won`
+    (365) or `dma_cycle` (370).
+  - `t_hard_reset`, the Teensy's reset flag, is only BCR bit 7 (line 300).
+- **Pin (file fact):** `difnif.pcf` line 15 puts `chreset` on FPGA pin 76.
+- **Expected behaviour (spec reading):** the Micro Channel chapter's signal
+  description of CHRESET: it resets or initializes all adapters at power-on.
+- **That it caused the hang (hardware, inference):**
+  - Observed on the first Rev P2 board in the 55SX: with the Teensy's USB
+    connected, a cold boot hung after the memory test and disk check; with USB
+    unplugged it booted.
+  - After the fix it boots either way.
+  - That the stale state was the cause is an inference: the fix was the only
+    change between the two results.
+
 ## Reproducing the simulations
 
 The testbench, `verilog/difnif72_t.v`, is this fork's code. Its assumptions are

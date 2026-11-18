@@ -346,7 +346,10 @@ To try on real hardware:
   on another computer (read-only; nothing is mounted), so the files the
   DifNif wrote are checked without relying on its own read path. One of the
   test files has each 32-bit word holding its own offset, so a shift shows up
-  as a number of bytes.
+  as a number of bytes. On the first Rev P2 board in a 55SX, about 1 GB of
+  copies produced no shifted or damaged data (see "Bring-up"). So either the
+  bug was specific to Rev P1 or the 50Z (finding 1's floating reset, say), or
+  it's rare enough to need longer runs or other workloads to show up.
 
 ## Mechanical
 
@@ -676,8 +679,8 @@ LED D2 flicker.
 Load [difbench/difbench.ino](../difbench/difbench.ino) on the Teensy and open
 the Serial Monitor. It checks that the FPGA answers, all 16 data and 4
 address lines (naming the Teensy and FPGA pins of any that fail), which FPGA
-build is loaded, the Teensy-owned flags, the FPGA's clock and the interrupt
-line, then runs 200,000 random writes and reads at `difnift.ino`'s timing
+build and version are loaded, the Teensy-owned flags, the FPGA's clock and
+the interrupt line, then runs 200,000 random writes and reads at `difnift.ino`'s timing
 with a small table of timing margins. It can't test the PS/2 side, which is
 unpowered on the bench. Bench only: not with the board in a PS/2.
 
@@ -709,17 +712,56 @@ seek, soft reset, and DMA sector reads and writes. DOS 6.22 partitioned and
 formatted the disk. A cold boot with USB connected hung, which led to
 finding 15.
 
+With the finding 15 fix:
+
+- **Booting:** DOS 6.22 boots from the DifNif from cold and warm, with USB
+  connected or not.
+- **Copy test:** the test in [tools/copytest](../tools/copytest/) ran 10
+  rounds, then overnight (about 9 hours) as `FOREVER.BAT`:
+  - 196 rounds, about 1 GB written and 3 GB read, with SMARTDRV off.
+  - All 1179 `FC /B` comparisons identical.
+  - Every file the DifNif wrote has the right SHA-256 when read straight
+    from `disk0.img` on a Mac.
+  - CHKDSK clean on both drives.
+- **Speed:** DiskMeter measures about 665 KB/s with Eric's firmware and about
+  705 KB/s with the faster register port and read-ahead in this fork's
+  `difnift.ino` (see [CHANGELOG.md](../CHANGELOG.md)). For comparison, an MCA
+  IDE adapter (McIDE) in the same machine measures about 1.9 MB/s.
+- **Earlier problems:**
+  - During the DOS install, one update to `AUTOEXEC.BAT`'s directory entry
+    was lost; CHKDSK recovered it as `FILE0001.CHK`. It hasn't recurred.
+  - One warm-boot hang after FDISK, before the finding 15 fix, also hasn't
+    recurred.
+
 Only then the Model 70, after checking the orientation as above.
 
 ## Suggested next steps
 
-1. ~~Add DMA transfers to `difnif72_t.v`.~~ Done.
-2. ~~Timing check of the FPGA's internal delays.~~ Done: see "Timing check".
-3. ~~Rev P2 schematic changes and layout.~~ Done: see "Rev P2 schematic
-   changes". Boards ordered (PCBWay, assembled).
-4. Print Eric's `mech/difnif_PS2_drive_sled.STL` and test-fit it in a 55SX and
-   a Model 70.
-5. Bring-up: follow the checklist in "Bring-up".
+Done: DMA in the testbench, the timing check, Rev P2 schematic and layout,
+assembled boards from PCBWay, Eric's printed sled, and bring-up in a 55SX,
+including the overnight copy test.
+
+1. **Model 70:** check the orientation against the original drive first (see
+   "The one dangerous mistake"), then repeat Step 5 and the copy test.
+2. **Speed:** the 55SX moves about 705 KB/s against about 1.9 MB/s for an IDE
+   adapter. Most of the time seems to go on the host's DMA arbitration for
+   every 16-bit word (about 2.5-2.8 us each). Options, in order:
+   - Measure it: put the scope on the Teensy's RD and WR pins and the
+     ARB/-GNT line during a long read.
+   - Burst DMA: keep the bus for several transfers per arbitration, ending
+     the burst when another device asserts `-PREEMPT`. The board already
+     wires `-BURST` to the FPGA (`burst_o_l`, pin 90); `mcabus.v` holds it
+     off.
+   - A sector buffer in the FPGA's block RAM, so the Teensy isn't in the loop
+     for every word.
+3. **The one-byte shift:** keep the copy test running on other machines and
+   with other workloads (Windows 3.1, large compiles); run DIFDIAG's Int13
+   test.
+4. **Other adapters:** a 3Com EtherLink/MC wasn't recognised after
+   reconfiguring the 55SX with the DifNif fitted. Probably the adapter's ADF
+   or its configuration rather than the DifNif, but not yet checked.
+5. **ThinkPad 700C:** the FPGA changes also apply to the ThinkPad build and
+   haven't been tried there.
 
 ## Toolchain status
 

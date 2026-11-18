@@ -11,7 +11,8 @@ listed in [docs/formfactor-review.md](docs/formfactor-review.md).
 And before you ask: the name 'DifNif' comes from DF9F, 
 the Micro Channel adapter ID that IBM's DBA-ESDI drives report.
 
-**Status: alpha.** See "Status" below before building anything.
+**Status:** the Rev P2 PS/2 board works in a PS/2 55SX; see "Status" below
+before building anything. Releases are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Background
 
@@ -65,15 +66,22 @@ There are also debugging aids:
   reliably in a 50Z.
 - **PS/2 desktop board, Rev P2** (this fork): fixes the problems found in a
   review of Rev P1, including a floating reset input that is the likely cause
-  of the 50Z problem. The fixes have been checked in simulation against IBM's
-  bus timing, but **Rev P2 has not yet been built or tested on real hardware.**
+  of the 50Z problem. The fixes were checked in simulation against IBM's bus
+  timing before building. On hardware so far (one board, firmware and FPGA
+  v2026.11.18-1):
+  - It works in a PS/2 55SX: configured with the Reference Diskette, it boots
+    DOS 6.22, from cold and warm.
+  - An overnight copy test, about 1 GB of writes, had no errors.
+  - DiskMeter measures about 705 KB/s.
+  - **Not yet tested in a Model 70 or a 50Z.**
 - Both boards' original design powers the 74LVC4245A level shifters the wrong
   way round, putting 5V on a supply pin rated for 4.6V at most. Rev P2 uses
   the TI SN74LVC8T245 instead, which accepts 5V on either side and fits the
   same footprint. The same swap should work on the ThinkPad board but hasn't
   been tried.
-- Known bugs: writes occasionally produce a sector shifted by one byte; the
-  cause hasn't been found.
+- Known bugs: Eric saw writes occasionally produce a sector shifted by one
+  byte. The cause hasn't been found, and it hasn't appeared on the Rev P2
+  board, including in the overnight copy test.
 
 [docs/formfactor-review.md](docs/formfactor-review.md) has the full list of
 findings and changes, and [docs/verify-findings.md](docs/verify-findings.md)
@@ -105,6 +113,10 @@ The Teensy 4.1 plugs into two 24-pin female header strips (2.54 mm pitch, rows
 
 Load [difnift/difnift.ino](difnift/difnift.ino) with the Arduino IDE and
 PJRC's Teensy board support, selecting Teensy 4.1.
+
+At startup and after each hard reset (each time the PS/2 is switched on),
+the firmware prints its own version and the FPGA's on the serial port; the
+`v` command prints them again.
 
 For register loopback testing with DIFDIAG, comment out the two lines at the
 start of `loop()` that call `esdiReset()` and `mainLoop()`. The serial monitor
@@ -151,8 +163,22 @@ The source files are:
 - `teensy.v`: the register interface that lets the Teensy, in its own clock
   domain, reach the ESDI mailbox registers and flags.
 
+- `version.vh`: the FPGA version, which the Teensy can read.
+
 The self-checking bus simulation for the PS/2 board is `difnif72_t.v`, run with
 `./run_sim72.sh` (needs Icarus Verilog).
+
+### Testing a board
+
+The bring-up checklist in [docs/formfactor-review.md](docs/formfactor-review.md)
+takes a new board from first power to a PS/2, one step at a time. Two tools
+go with it:
+
+- [difbench/difbench.ino](difbench/difbench.ino): a bench test of the
+  Teensy-to-FPGA link, run with the board out of the PS/2.
+- [tools/copytest](tools/copytest/): DOS batch files that copy test files
+  back and forth, and a script that checks the results by reading
+  `disk0.img` on another computer.
 
 ## Drive images
 
