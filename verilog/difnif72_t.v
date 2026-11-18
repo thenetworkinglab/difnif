@@ -35,6 +35,7 @@
 //
 
 `default_nettype none
+`include "version.vh"
 
 // One level-shifter or buffer channel: a plain delay.
 module lvl #(parameter integer D10 = 10) (input wire a, output wire y);
@@ -557,6 +558,31 @@ module difnif72_t;
         end
     endtask
 
+    task automatic test_version;
+        reg [15:0] d;
+        reg [15:0] want [0:5];
+        integer i;
+        begin
+            want[0] = `FPGA_VERSION_YEAR;
+            want[1] = `FPGA_VERSION_DATE;
+            want[2] = `FPGA_VERSION_COUNT;
+`ifdef MCA_USE_POS
+            want[3] = 16'h0001;
+`else
+            want[3] = 16'h0000;
+`endif
+            want[4] = 16'h0000;
+            want[5] = 16'h0000;
+            begin_test("Teensy reads version registers 10-13, and 0 at 14-15");
+            for (i = 0; i < 6; i = i + 1) begin
+                tn_read(10 + i, d);
+                if (d !== want[i])
+                    fail($sformatf("register %0d = %h, expected %h", 10 + i, d, want[i]));
+            end
+            end_test;
+        end
+    endtask
+
     task automatic test_pos;
         reg [7:0] lo, hi, p2;
         begin
@@ -1058,6 +1084,7 @@ module difnif72_t;
 
         test_pos;
         test_reset_state;
+        test_version;
         test_not_selected(16'h0080, "no response at 0080 (unrelated port)");
         test_not_selected(16'h3518, "no response at 3518 (alternate ESDI address)");
 `ifdef MCA_USE_POS

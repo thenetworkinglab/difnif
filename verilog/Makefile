@@ -7,6 +7,7 @@
 PROJ = difnif
 IMAGES = difnif_top
 SOURCES = difnif_top.v mcabus.v teensy.v
+INCLUDES = version.vh
 PIN_DEF =  difnif.pcf
 DEVICE = hx8k
 # Which board to build for:
@@ -27,7 +28,7 @@ DEPS = $(addprefix $(ODIR)/,$(addsuffix .d,$(IMAGES)))
 all: $(addprefix $(ODIR)/,$(addsuffix .rpt,$(IMAGES))) $(ODIR)/$(PROJ).binm
 
 # removed %.v
-$(ODIR)/%.json: $(SOURCES) | $(ODIR)
+$(ODIR)/%.json: $(SOURCES) $(INCLUDES) | $(ODIR)
 	yosys $(DEFINES) -p 'synth_ice40 -top $(basename $(notdir $@)) -json $@ -blif test.blif' $(SOURCES) -E $(basename $(notdir $@)).d
 	echo $@
 

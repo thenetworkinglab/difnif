@@ -5,6 +5,8 @@
 //
 
 `default_nettype none
+`include "version.vh"
+
 module teensy(
     // External connections to Teensy
     input tn_rd,
@@ -62,6 +64,16 @@ module teensy(
     localparam REG_POS01 = 4'd7;
     localparam REG_POS23 = 4'd8;
     localparam REG_POS4 = 4'd9;
+    // Read-only version registers (version.vh, BCD), and which build this is
+    localparam REG_VER_YEAR = 4'd10;
+    localparam REG_VER_DATE = 4'd11;
+    localparam REG_VER_COUNT = 4'd12;
+    localparam REG_VARIANT = 4'd13;
+`ifdef MCA_USE_POS
+    localparam [15:0] VARIANT = 16'h0001;   // make BOARD=ps2: POS registers on
+`else
+    localparam [15:0] VARIANT = 16'h0000;   // make (ThinkPad): POS bypassed
+`endif
 
     reg [15:0] tn_d_out;
 
@@ -116,6 +128,10 @@ module teensy(
             REG_POS01  : tn_d_out <= t_pos_regs[15:0];
             REG_POS23  : tn_d_out <= t_pos_regs[31:16];
             REG_POS4   : tn_d_out <= t_pos_regs[39:32];
+            REG_VER_YEAR  : tn_d_out <= `FPGA_VERSION_YEAR;
+            REG_VER_DATE  : tn_d_out <= `FPGA_VERSION_DATE;
+            REG_VER_COUNT : tn_d_out <= `FPGA_VERSION_COUNT;
+            REG_VARIANT   : tn_d_out <= VARIANT;
             default    : tn_d_out <= 16'H0;
         endcase
     end
