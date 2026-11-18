@@ -2,7 +2,7 @@
 
 // Firmware version: the release date plus a count of releases that day.
 // Change it for each release and note the change in CHANGELOG.md.
-#define FW_VERSION "v2026.11.18-1"
+#define FW_VERSION "v2026.11.18-2"
 
 
 // Pin definitions
@@ -405,6 +405,23 @@ int writeDiskRBA(uint32_t rba)
   Serial.print("wtime: ");
   Serial.println(since_sd_op);
   return 0;
+}
+
+// Finishes the SD card write (fork). In FIFO_SDIO mode the SD driver leaves
+// each write open as a multi-sector write until the card is next accessed
+// somewhere else, and the card may hold that last sector in its buffer. If
+// the power goes first it's lost: this lost the last directory update before
+// a PS/2 was switched off. syncDevice() ends the write and waits until the
+// card has programmed it. Called once per write command, before the host is
+// told the command is complete, so multi-sector writes still stream.
+void commitWrites()
+{
+  since_sd_op = 0;
+  if (!sd.card()->syncDevice()) {
+    Serial.println("SD card sync failed");
+  }
+  Serial.print("stime: ");
+  Serial.println(since_sd_op);
 }
 
 // Prints a 16-bit hex value to the USB console
@@ -882,6 +899,16 @@ void mainLoop() {
       reset_pending = false; // Just in case
       Serial.println("Hard reset.");
       printVersions();
+      // (fork) The Teensy stays powered from USB while the PS/2 is off, so
+      // if the card wasn't there when it started, try again at each power-on
+      if (!file.isOpen()) {
+        Serial.println("Disk image not open: trying the SD card again.");
+        if (sd.begin(SdioConfig(FIFO_SDIO))) {
+          diskSetup();
+        } else {
+          Serial.println("No SD card found.");
+        }
+      }
       expect_cb = false;
       esdiReset();
     }
@@ -980,6 +1007,7 @@ void mainLoop() {
             transfer_index = 0;
             setFlag(_BV(FLAG_TREQ_SET)); // Start the transfer
           } else {
+            commitWrites(); // On the card before the host hears it's done
             transfer_state = TS_IDLE;
             sb_cmd_status = 1;
             
