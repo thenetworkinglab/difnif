@@ -1,5 +1,9 @@
 #include <SD.h>
 
+// Firmware version: the release date plus a count of releases that day.
+// Change it for each release and note the change in CHANGELOG.md.
+#define FW_VERSION "v2026.11.18-1"
+
 
 // Pin definitions
 #define DEBUG_PIN 0
@@ -26,6 +30,10 @@
 #define REG_POS01 7
 #define REG_POS23 8
 #define REG_POS4 9
+#define REG_VER_YEAR 10   // FPGA version, BCD: 2026
+#define REG_VER_DATE 11   // 1118
+#define REG_VER_COUNT 12  // 0001
+#define REG_VARIANT 13    // 1 = make BOARD=ps2, 0 = ThinkPad build
 
 // Bit definitions for REG_FLAGS
 #define FLAG_ATN_FULL 0
@@ -221,6 +229,43 @@ void portWrite(uint8_t address, uint16_t data)
 }
 
 
+// Prints the firmware and FPGA versions. FPGA builds from before the
+// version registers read 0 there.
+void printVersions()
+{
+  uint16_t year = portRead(REG_VER_YEAR);
+  uint16_t date = portRead(REG_VER_DATE);
+  uint16_t count = portRead(REG_VER_COUNT);
+  uint16_t variant = portRead(REG_VARIANT);
+
+  Serial.print("DifNif firmware " FW_VERSION ", FPGA ");
+  if (year == 0) {
+    Serial.println("has no version (an FPGA build from before v2026.11.18-1)");
+    return;
+  }
+  // BCD prints as hex: 2026, 11, 18, 1
+  Serial.print("v");
+  print16hex(year);
+  Serial.print(".");
+  Serial.print(date >> 12, HEX);
+  Serial.print((date >> 8) & 0xF, HEX);
+  Serial.print(".");
+  Serial.print((date >> 4) & 0xF, HEX);
+  Serial.print(date & 0xF, HEX);
+  Serial.print("-");
+  Serial.print(count, HEX);
+  if (variant == 1) {
+    Serial.println(" (ps2)");
+  } else if (variant == 0) {
+    Serial.println(" (thinkpad)");
+  } else {
+    Serial.print(" (unknown build ");
+    print16hex(variant);
+    Serial.println(")");
+  }
+}
+
+
 // Configure the device and print the menu options
 void setup() {
   // put your setup code here, to run once:
@@ -236,6 +281,8 @@ void setup() {
   pinMode(ADDR3, OUTPUT);
   pinMode(DEBUG_PIN, OUTPUT);
   pinMode(DEBUG_PIN2, OUTPUT);
+
+  printVersions();
 
   if (!sd.begin(SdioConfig(FIFO_SDIO))) {
     Serial.println("No SD card found.");
@@ -257,6 +304,7 @@ void setup() {
   Serial.println("Press 's' to write Status Interface Reg.");
   Serial.println("Hit 'q' to run the SD card filesystem test.");
   Serial.println("Press 'G' to run the main loop.");
+  Serial.println("Press 'v' for the firmware and FPGA versions.");
 }
 
 
@@ -808,10 +856,20 @@ void mainLoop() {
   bool expect_cb = false;
   bool reset_pending = false;
   bool hard_reset = false;
+  uint16_t serial_poll = 0;
 
   diskSetup();
   
   while (1) {
+    // 'v' on the serial port prints the versions. Checked only between
+    // transfers, and only every 65536 passes (a few ms), to stay out of
+    // the way of the host.
+    if (transfer_state == TS_IDLE && ++serial_poll == 0 && Serial.available() > 0) {
+      if (Serial.read() == 'v') {
+        printVersions();
+      }
+    }
+
     flags = portRead(REG_FLAGS);
 
     // Hard reset bit has been set, we should check to see if we've exited it or
@@ -823,6 +881,7 @@ void mainLoop() {
       hard_reset = false;
       reset_pending = false; // Just in case
       Serial.println("Hard reset.");
+      printVersions();
       expect_cb = false;
       esdiReset();
     }
@@ -1281,6 +1340,9 @@ void loop() {
     if (cmd == 'q') {
       Serial.println("Starting SD card test.");
       sdTest();
+    }
+    if (cmd == 'v') {
+      printVersions();
     }
     if (cmd == 'G') {
       Serial.println("Starting main loop.");
