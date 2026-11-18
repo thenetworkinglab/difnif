@@ -340,6 +340,13 @@ To try on real hardware:
   lost or repeated, a byte shift needs some byte-wide event.
 - **Reproduce it with DIFDIAG's Int13 test** (writes, reads back and compares)
   while capturing the bus with a logic analyzer.
+- **Copy test:** [tools/copytest](../tools/copytest/) has DOS batch files that
+  copy test files D: -> C: -> D: 20 times, comparing every copy with `FC /B`,
+  and `copytest.py`, which checks the results by reading `disk0.img` directly
+  on another computer (read-only; nothing is mounted), so the files the
+  DifNif wrote are checked without relying on its own read path. One of the
+  test files has each 32-bit word holding its own offset, so a shift shows up
+  as a number of bytes.
 
 ## Mechanical
 
