@@ -11,10 +11,11 @@
 //   1. The FPGA drives the bus when read (it's configured and RD works)
 //   2. All 16 data lines, through the FPGA's scratch register (REG_TEST)
 //   3. All 4 address lines, against registers with known contents
-//   4. The Teensy-owned flag bits
-//   5. The FPGA's 50 MHz clock, through a flag set by clocked logic
-//   6. The interrupt line from the FPGA
-//   7. A long run of random writes and reads at difnift.ino's timing, plus
+//   4. The FPGA's version registers (and prints the version)
+//   5. The Teensy-owned flag bits
+//   6. The FPGA's 50 MHz clock, through a flag set by clocked logic
+//   7. The interrupt line from the FPGA
+//   8. A long run of random writes and reads at difnift.ino's timing, plus
 //      the same with more write setup time and shorter read strobes
 //
 // Pin assignments are the same as difnift.ino. Teensy pins and FPGA pins
@@ -45,7 +46,11 @@ const int datafpga[16] = {29, 28, 21, 23, 17, 18, 26, 25, 33, 34, 31, 32, 11, 16
 #define REG_POS01 7
 #define REG_POS23 8
 #define REG_POS4 9
-#define REG_UNUSED 15   // reads 0, writes do nothing
+#define REG_VER_YEAR 10   // FPGA version, BCD (verilog/version.vh)
+#define REG_VER_DATE 11
+#define REG_VER_COUNT 12
+#define REG_VARIANT 13    // 1 = make BOARD=ps2, 0 = ThinkPad build
+#define REG_UNUSED 15     // reads 0, writes do nothing
 
 // Flag register bits
 #define FLAG_ISR_FULL 1
@@ -254,6 +259,51 @@ void testData()
 }
 
 
+// Is v a BCD number from lo to hi?
+bool bcdInRange(uint16_t v, int digits, int lo, int hi)
+{
+  int n = 0;
+  for (int i = digits - 1; i >= 0; i--) {
+    int d = (v >> (4 * i)) & 0xF;
+    if (d > 9) return false;
+    n = n * 10 + d;
+  }
+  return (v >> (4 * digits)) == 0 && n >= lo && n <= hi;
+}
+
+
+// 4. The FPGA's version registers
+void testVersion()
+{
+  uint16_t r[4];
+  for (int i = 0; i < 4; i++) {
+    precharge(0);
+    r[i] = portRead(REG_VER_YEAR + i);
+  }
+  if (r[0] == 0 && r[1] == 0 && r[2] == 0 && r[3] == 0) {
+    warn("FPGA has no version registers: an FPGA build from before v2026.11.18-1");
+    return;
+  }
+  bool ok = bcdInRange(r[0], 4, 2026, 2099) &&
+            bcdInRange(r[1] >> 8, 2, 1, 12) && bcdInRange(r[1] & 0xFF, 2, 1, 31) &&
+            bcdInRange(r[2], 4, 1, 9999) && r[3] <= 1;
+  if (!ok) {
+    fail("FPGA version registers");
+    Serial.print("      read ");
+    for (int i = 0; i < 4; i++) {
+      print16hex(r[i]);
+      Serial.print(i < 3 ? " " : "");
+    }
+    Serial.println(" at 10-13; expected a BCD year, month and day, count, then 0 or 1");
+    return;
+  }
+  char s[64];
+  sprintf(s, "FPGA version v%04X.%02X.%02X-%X (%s)", r[0], r[1] >> 8, r[1] & 0xFF, r[2],
+          r[3] ? "ps2" : "thinkpad");
+  pass(s);
+}
+
+
 // 3. Address lines, against registers with known contents
 void testAddress()
 {
@@ -276,9 +326,10 @@ void testAddress()
   known[REG_ISR] = 0x00A5; have[REG_ISR] = true;
   known[REG_SIFR] = 0x5A3C; have[REG_SIFR] = true;
   known[REG_POS01] = 0xDF9F; have[REG_POS01] = true;   // adapter ID, fixed in the FPGA
-  for (int a = 10; a < 16; a++) { known[a] = 0x0000; have[a] = true; }
+  // 10-13 hold the FPGA version, checked by testVersion()
+  for (int a = 14; a < 16; a++) { known[a] = 0x0000; have[a] = true; }
 
-  const uint8_t addrs[] = {0, 1, 3, 5, 7, 10, 11, 12, 13, 14, 15};
+  const uint8_t addrs[] = {0, 1, 3, 5, 7, 14, 15};
   for (unsigned i = 0; i < sizeof(addrs); i++) {
     uint8_t a = addrs[i];
     uint16_t v;
@@ -346,7 +397,7 @@ void testAddress()
 }
 
 
-// 4. Teensy-owned flag bits
+// 5. Teensy-owned flag bits
 void testFlags()
 {
   uint16_t on, off;
@@ -369,7 +420,7 @@ void testFlags()
 }
 
 
-// 5. The FPGA's clock: the ISR "full" flag is set by logic clocked at 50 MHz
+// 6. The FPGA's clock: the ISR "full" flag is set by logic clocked at 50 MHz
 void testClock()
 {
   uint16_t f0, f1, f2;
@@ -406,7 +457,7 @@ void testClock()
 }
 
 
-// 6. Interrupt line: the FPGA drives it low unless the host has written ATN.
+// 7. Interrupt line: the FPGA drives it low unless the host has written ATN.
 // With the Teensy's pull-up on, an open line reads high. The PS/2-side
 // inputs float on the bench and could fake a host write, so try 3 times.
 void testInt()
@@ -427,7 +478,7 @@ void testInt()
 }
 
 
-// 7. Many random words; returns the number of mismatches
+// 8. Many random words; returns the number of mismatches
 uint32_t rng = 0x12345678;
 uint16_t nextRandom()
 {
@@ -508,6 +559,7 @@ void runAll()
   }
   testData();
   testAddress();
+  testVersion();
   testFlags();
   testClock();
   testInt();
