@@ -12,7 +12,7 @@
 //   2. All 16 data lines, through the FPGA's scratch register (REG_TEST)
 //   3. All 4 address lines, against registers with known contents
 //   4. The FPGA's version registers (and prints the version)
-//   5. The Teensy-owned flag bits
+//   5. The Teensy-owned flag bits, and the sector buffer's (if the FPGA has it)
 //   6. The FPGA's 50 MHz clock, through a flag set by clocked logic
 //   7. The interrupt line from the FPGA
 //   8. A long run of random writes and reads at difnift.ino's timing, plus
@@ -59,6 +59,8 @@ const int datafpga[16] = {29, 28, 21, 23, 17, 18, 26, 25, 33, 34, 31, 32, 11, 16
 #define FLAG_CMD_PROG 6
 #define FLAG_BUSY_N 7     // reads 1; writing 0 clears busy
 #define FLAG_CLEAR_ALL 10
+#define FLAG_BUF_MODE 11    // sector buffer (FPGA v2026.11.18-3 and later)
+#define FLAG_BUF_DIR 12
 #define FLAGS_IDLE (1 << FLAG_BUSY_N)   // safe value to write: no actions
 
 // Bus timing. difnift.ino uses a 200 ns read strobe and no extra setup time
@@ -420,6 +422,43 @@ void testFlags()
 }
 
 
+// 5b. The sector buffer's flag bits. Moving data through it needs a host,
+// so on the bench this only checks the mode, direction and status bits.
+void testBufferFlags()
+{
+  uint16_t on_rd, on_wr, off;
+  clearAll();
+  portWrite(REG_FLAGS, FLAGS_IDLE | (1 << FLAG_BUF_MODE));
+  delayMicroseconds(1);
+  on_rd = portRead(REG_FLAGS);
+  if (!(on_rd & (1 << FLAG_BUF_MODE))) {
+    Serial.println("      no sector buffer in this FPGA build (older than v2026.11.18-3)");
+    portWrite(REG_FLAGS, FLAGS_IDLE);
+    return;
+  }
+  portWrite(REG_FLAGS, FLAGS_IDLE | (1 << FLAG_BUF_MODE) | (1 << FLAG_BUF_DIR));
+  delayMicroseconds(1);
+  on_wr = portRead(REG_FLAGS);
+  portWrite(REG_FLAGS, FLAGS_IDLE);
+  delayMicroseconds(1);
+  off = portRead(REG_FLAGS);
+  // Bits 15-11: idle, can arm / -, ready, dir, mode
+  if ((on_rd >> 11) == 0x15 && (on_wr >> 11) == 0x1B && (off >> 11) == 0 &&
+      portRead(14) == 0) {
+    pass("sector buffer flags (disk read and write modes, and off)");
+  } else {
+    fail("sector buffer flags");
+    Serial.print("      flags ");
+    print16hex(on_rd);
+    Serial.print(" for disk read (bits 15-11 should be 10101), ");
+    print16hex(on_wr);
+    Serial.print(" for disk write (11011), ");
+    print16hex(off);
+    Serial.println(" off (00000)");
+  }
+}
+
+
 // 6. The FPGA's clock: the ISR "full" flag is set by logic clocked at 50 MHz
 void testClock()
 {
@@ -561,6 +600,7 @@ void runAll()
   testAddress();
   testVersion();
   testFlags();
+  testBufferFlags();
   testClock();
   testInt();
   testSoak();
