@@ -70,10 +70,13 @@ There are also debugging aids:
   timing before building. On hardware so far (one board):
   - It works in a PS/2 55SX: configured with the Reference Diskette, it boots
     DOS 6.22, from cold and warm. An overnight copy test, about 1 GB of
-    writes, had no errors. DiskMeter measures about 705 KB/s.
+    writes, had no errors.
   - It works in a PS/2 Model 70 with FPGA v2026.11.18-2 or later (finding
     16): configured with the Reference Diskette, it boots DOS, and passed a
-    20-round copy test. DiskMeter measures about 990 KB/s.
+    20-round copy test.
+  - With firmware and FPGA v2026.11.18-3 (the FPGA's sector buffer),
+    DiskMeter measures about 1.1 MB/s in both machines, up from about
+    690 KB/s (55SX) and 990 KB/s (Model 70).
   - Use firmware v2026.11.18-2 or later: earlier firmware, including Eric's,
     can lose the last sector written before the PS/2 is switched off
     (finding 17).

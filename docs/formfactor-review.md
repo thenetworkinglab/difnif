@@ -844,6 +844,59 @@ First board, Model 70 (November 2026), with the other adapters removed:
   in the 55SX, so most of the time per word is the host's DMA, not the
   Teensy.
 
+## Speed: the sector buffer
+
+The original data path moves one 16-bit word per handshake: the Teensy
+writes DREG and sets "transfer request", the card asks for DMA, the planar
+arbitrates and transfers the word, and only then does the Teensy see the
+request clear and start on the next word. That came to about 2.8 us per word
+in the 55SX and 2.0 us in the Model 70 (about 705 and 990 KB/s).
+
+[verilog/sectorbuf.v](../verilog/sectorbuf.v) adds two one-sector halves
+(256 words each) in the FPGA's block RAM, on the 50 MHz clock:
+
+- **Disk read:** the Teensy writes a whole sector into a free half through
+  port register 14 (about 40 us), then hands it to the host side with a
+  flag strobe. The host's DMA empties it while the Teensy loads the next
+  sector into the other half.
+- **Disk write:** the Teensy arms up to two halves; DMA fills them, and each
+  full half is flagged to the Teensy, which reads it out and frees it.
+- **Bidding:** while the buffer holds the next word (or room for it), the
+  card keeps its DMA request up through each transfer instead of dropping it
+  until the Teensy catches up. The buffer moves on within about 100 ns,
+  well before the next transfer can reach the card. After the last word it
+  stops, as finding 12 requires.
+- **Interface:** the flag register's spare bits 11-15 hold the mode and
+  direction (stored), the strobes, and the status bits. They read 0 with the
+  buffer off, and with it off the old DREG/TREQ path is unchanged, so older
+  firmware works with the new FPGA. The firmware detects the buffer by
+  writing the mode bit and reading it back, and its `b` serial command
+  switches it off for comparison.
+
+**Simulation:** new tests move three sectors each way, with a fast Teensy
+and with one slow enough that the host has to wait, with and without a
+competing DMA device, checking every word and that the card stops bidding
+after the last one. Two deliberate bugs (bidding after the last word, a
+stale prefetched word) were both caught. The full matrix passes; it now
+takes about 9 minutes. Simulated time per word at the 55SX's cycle went from
+1.83 to about 1.1 us.
+
+**Hardware** (DiskMeter random / sequential / buffered, KB/s):
+
+| Machine | Before | With the buffer | Copy test |
+|---|---|---|---|
+| 55SX | 686 / 671 / 690 | 1107 / 1100 / 1151 | 120 of 120 identical |
+| Model 70 | 960 / 990 / 998 | 1110 / 1062 / 1108 | 120 of 120 identical |
+
+The 55SX gained about 60%, the 70 about 10%, and both now land near
+1.1 MB/s although the 70's bus is faster. So the limit is no longer the
+per-word bus transfer, and is probably something both machines share:
+per-command overhead (the ATN, command block, status block and interrupt
+exchange for each command) or the SD card's latency at the start of each
+command. The firmware's debug pins now mark each command (Teensy pin 0,
+high from the ATN command to the host's EOI) and each wait on the SD card
+(pin 1), for measuring that with a scope.
+
 ## Suggested next steps
 
 Done: DMA in the testbench, the timing check, Rev P2 schematic and layout,
@@ -853,20 +906,18 @@ assembled boards from PCBWay, Eric's printed sled, bring-up in a 55SX
 1. **Rev P3 board change:** a separate direction line for U7 (finding 16).
    Also worth considering: a way for the firmware to see the PS/2's 5 V
    going away, so it can finish writing before it loses power.
-2. **Speed:** the 55SX moves about 705 KB/s and the Model 70 about 990 KB/s,
-   against about 1.9 MB/s for an IDE adapter in the 55SX. The same firmware
-   is faster on the faster machine, so most of the time goes on the host's
-   side of the DMA for every 16-bit word (arbitration and the DMA
-   controller): about 2.8 us per word in the 55SX and 2.0 us in the 70.
-   Options, in order:
-   - Measure it: put the scope on the Teensy's RD and WR pins and the
-     ARB/-GNT line during a long read.
-   - Burst DMA: keep the bus for several transfers per arbitration, ending
-     the burst when another device asserts `-PREEMPT`. The board already
-     wires `-BURST` to the FPGA (`burst_o_l`, pin 90); `mcabus.v` holds it
-     off.
-   - A sector buffer in the FPGA's block RAM, so the Teensy isn't in the loop
-     for every word.
+2. **Speed:** with the sector buffer (see "Speed: the sector buffer") both
+   machines do about 1.1 MB/s, against about 1.9 MB/s for an IDE adapter in
+   the 55SX. Next:
+   - Measure where the time goes now, with the command and SD markers on
+     Teensy pins 0 and 1 and `-PREEMPT`/`ARB/-GNT` from J4.
+   - If it's per-command overhead or the SD card: trim the firmware's
+     command handling, start the SD read for the next command earlier, or
+     try a faster card.
+   - If it's still the DMA: burst transfers, keeping the bus for several
+     words per arbitration and ending the burst when another device
+     asserts `-PREEMPT`. The board already wires `-BURST` to the FPGA
+     (`burst_o_l`, pin 90); `mcabus.v` holds it off.
 3. **The one-byte shift:** keep the copy test running on other machines and
    with other workloads (Windows 3.1, large compiles); run DIFDIAG's Int13
    test.

@@ -18,6 +18,22 @@ it, or from this fork before v2026.11.18-1, is reported as "has no version".
 
 ## Firmware
 
+### v2026.11.18-3
+
+- **Sector buffer:** with FPGA v2026.11.18-3 or later, sector reads and
+  writes go through the FPGA's sector buffer, a whole sector at a time,
+  instead of one word per handshake. Found at startup (the banner says
+  "sector buffer on"); the `b` serial command switches it off and on, from
+  the next command. Other commands, and older FPGAs, use the old path.
+- **Timing markers** for a scope: Teensy pin 0 is high from each ATN command
+  until the host's EOI, pin 1 while the Teensy waits on the SD card. These
+  replace Eric's debug toggles on the same pins.
+
+Tested with FPGA v2026.11.18-3 (before the timing markers were added):
+DiskMeter about 1.1 MB/s in both the 55SX (from about 690 KB/s) and the
+Model 70 (from about 990 KB/s), and the 20-round copy test, 120 of 120
+comparisons identical, in both.
+
 ### v2026.11.18-2
 
 - **Writes are on the card before they're reported complete (finding 17).**
@@ -78,6 +94,23 @@ below (built just before the version registers were added):
     identical, with every file's SHA-256 correct.
 
 ## FPGA
+
+### v2026.11.18-3
+
+- **Sector buffer** ([verilog/sectorbuf.v](verilog/sectorbuf.v)): two
+  one-sector halves in block RAM between the Teensy and the host's DMA.
+  The Teensy loads or unloads a whole sector through port register 14 while
+  the host works through the other half, and the card keeps bidding for the
+  bus while the buffer holds the next word. Controlled through the flag
+  register's bits 11-15, which read 0 with it off; with it off the old path
+  is unchanged.
+- Register 14 reads 0 while the buffer is off.
+- **Simulation:** sector-buffer tests in both directions, with fast and slow
+  Teensy timing and a competing DMA device. The full matrix passes.
+- **Timing budget** passes; the smallest margin is 8.5 ns, on T22. Uses 725
+  of 7680 logic cells and 2 of 32 block RAMs.
+
+Tested with firmware v2026.11.18-3: see the firmware entry.
 
 ### v2026.11.18-2
 
