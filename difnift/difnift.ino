@@ -2,10 +2,13 @@
 
 // Firmware version: the release date plus a count of releases that day.
 // Change it for each release and note the change in CHANGELOG.md.
-#define FW_VERSION "v2026.11.18-2"
+#define FW_VERSION "v2026.11.18-3"
 
 
 // Pin definitions
+// Timing markers for a scope (fork): DEBUG_PIN (Teensy pin 0) is high from
+// an ATN command until the host's EOI for it; DEBUG_PIN2 (pin 1) is high
+// while the Teensy waits on the SD card.
 #define DEBUG_PIN 0
 #define DEBUG_PIN2 1
 #define PIN_CLK 35
@@ -34,6 +37,7 @@
 #define REG_VER_DATE 11   // 1118
 #define REG_VER_COUNT 12  // 0001
 #define REG_VARIANT 13    // 1 = make BOARD=ps2, 0 = ThinkPad build
+#define REG_BUF 14        // sector buffer data (fork)
 
 // Bit definitions for REG_FLAGS
 #define FLAG_ATN_FULL 0
@@ -47,6 +51,14 @@
 #define FLAG_TREQ_STATE 8
 #define FLAG_TRANSFER_16 9
 #define FLAG_CLEAR_ALL 10
+// Sector buffer (fork, FPGA v2026.11.18-3 and later; bits read 0 without it)
+#define FLAG_BUF_MODE 11    // stored: buffer on
+#define FLAG_BUF_DIR 12     // stored: 0 disk read, 1 disk write
+#define FLAG_BUF_GO 13      // write 1: read, the sector is loaded; write, arm a half
+#define FLAG_BUF_DONE 14    // write 1: write, the sector has been read out
+#define FLAG_BUF_READY 13   // read: read, a half is free to fill; write, a full half is waiting
+#define FLAG_BUF_CAN_ARM 14 // read: write, a half is free to arm
+#define FLAG_BUF_IDLE 15    // read: nothing left for the host side
 
 // Some ESDI-DBA values
 #define DEV_CONTROLLER (0xE0)
@@ -107,6 +119,7 @@ uint8_t transfer_buffer[512];
 // keeps the same distance after those accesses.
 #define PORT_STROBE_NS 80
 #define PORT_SETTLE_NS 120
+#define BUF_GAP_NS 50       // WR low between sector buffer writes
 
 // Read-ahead (fork): a multi-sector read fetches up to READ_AHEAD sectors from
 // the SD card in one go instead of one 512-byte read and seek per sector.
@@ -229,6 +242,83 @@ void portWrite(uint8_t address, uint16_t data)
 }
 
 
+// Sector buffer (fork). With an FPGA that has it, sector reads and writes
+// go through two one-sector halves in the FPGA, so the host's DMA doesn't
+// wait for the Teensy on every word: the Teensy moves a whole sector at a
+// time while the host works through the other half.
+uint16_t flags_stored = 0;  // copy of the stored flag bits (see setFlag)
+bool fpga_has_buf = false;  // found at startup
+bool buf_enabled = true;    // 'b' on the serial port switches it off and on
+bool use_buf = false;       // the current transfer uses it
+bool buf_sector_pending = false;  // read: transfer_buffer holds a sector to load
+uint32_t buf_to_arm = 0;    // write: sectors not yet armed
+
+// Does the FPGA have the buffer? Older builds read 0 in the mode bit.
+bool detectBuffer()
+{
+  bool found;
+  portWrite(REG_FLAGS, flags_stored | _BV(FLAG_BUSY) | _BV(FLAG_BUF_MODE));
+  found = (portRead(REG_FLAGS) & _BV(FLAG_BUF_MODE)) != 0;
+  portWrite(REG_FLAGS, flags_stored | _BV(FLAG_BUSY));
+  return found;
+}
+
+// Empties the buffer and turns it on for a disk read (dir 0) or write (1)
+void bufBegin(uint8_t dir)
+{
+  clearFlag(_BV(FLAG_BUF_MODE) | _BV(FLAG_BUF_DIR));
+  setFlag(_BV(FLAG_BUF_MODE) | (dir ? _BV(FLAG_BUF_DIR) : 0));
+  use_buf = true;
+}
+
+void bufEnd()
+{
+  clearFlag(_BV(FLAG_BUF_MODE) | _BV(FLAG_BUF_DIR));
+  use_buf = false;
+}
+
+// Loads transfer_buffer into the buffer's free half. The FPGA takes each
+// word while WR is high (it samples WR on its 50 MHz clock), and needs WR
+// low for 40 ns or more between words.
+void bufWriteSector()
+{
+  uint16_t i, d;
+  digitalWriteFast(ADDR0, REG_BUF & 1);
+  digitalWriteFast(ADDR1, (REG_BUF >> 1) & 1);
+  digitalWriteFast(ADDR2, (REG_BUF >> 2) & 1);
+  digitalWriteFast(ADDR3, (REG_BUF >> 3) & 1);
+  setPortMode(OUTPUT);
+  for (i = 0; i < 512; i += 2) {
+    d = transfer_buffer[i] | (transfer_buffer[i + 1] << 8);
+    GPIO6_DR = (GPIO6_DR & 0xFFFF) | ((uint32_t)d << 16);
+    digitalWriteFast(PIN_WR, 1);
+    delayNanoseconds(PORT_STROBE_NS);
+    digitalWriteFast(PIN_WR, 0);
+    delayNanoseconds(BUF_GAP_NS);
+  }
+  setPortMode(INPUT);
+}
+
+// Reads a full half into transfer_buffer. The FPGA moves on to the next word
+// when RD falls and has it ready about 100 ns later.
+void bufReadSector()
+{
+  uint16_t i, d;
+  digitalWriteFast(ADDR0, REG_BUF & 1);
+  digitalWriteFast(ADDR1, (REG_BUF >> 1) & 1);
+  digitalWriteFast(ADDR2, (REG_BUF >> 2) & 1);
+  digitalWriteFast(ADDR3, (REG_BUF >> 3) & 1);
+  for (i = 0; i < 512; i += 2) {
+    digitalWriteFast(PIN_RD, 1);
+    delayNanoseconds(PORT_STROBE_NS);
+    d = GPIO6_PSR >> 16;
+    digitalWriteFast(PIN_RD, 0);
+    delayNanoseconds(PORT_SETTLE_NS);
+    transfer_buffer[i] = d & 0xFF;
+    transfer_buffer[i + 1] = d >> 8;
+  }
+}
+
 // Prints the firmware and FPGA versions. FPGA builds from before the
 // version registers read 0 there.
 void printVersions()
@@ -255,14 +345,18 @@ void printVersions()
   Serial.print("-");
   Serial.print(count, HEX);
   if (variant == 1) {
-    Serial.println(" (ps2)");
+    Serial.print(" (ps2)");
   } else if (variant == 0) {
-    Serial.println(" (thinkpad)");
+    Serial.print(" (thinkpad)");
   } else {
     Serial.print(" (unknown build ");
     print16hex(variant);
-    Serial.println(")");
+    Serial.print(")");
   }
+  if (fpga_has_buf) {
+    Serial.print(buf_enabled ? ", sector buffer on" : ", sector buffer off");
+  }
+  Serial.println();
 }
 
 
@@ -282,6 +376,7 @@ void setup() {
   pinMode(DEBUG_PIN, OUTPUT);
   pinMode(DEBUG_PIN2, OUTPUT);
 
+  fpga_has_buf = detectBuffer();
   printVersions();
 
   if (!sd.begin(SdioConfig(FIFO_SDIO))) {
@@ -305,6 +400,7 @@ void setup() {
   Serial.println("Hit 'q' to run the SD card filesystem test.");
   Serial.println("Press 'G' to run the main loop.");
   Serial.println("Press 'v' for the firmware and FPGA versions.");
+  Serial.println("Press 'b' to switch the FPGA's sector buffer off or on.");
 }
 
 
@@ -350,6 +446,15 @@ int diskSetup() {
 
 int readDiskRBA(uint32_t rba)
 {
+  int ret;
+  digitalWriteFast(DEBUG_PIN2, 1);
+  ret = readDiskRBA2(rba);
+  digitalWriteFast(DEBUG_PIN2, 0);
+  return ret;
+}
+
+int readDiskRBA2(uint32_t rba)
+{
   since_sd_op = 0;
   // ES testing, load all zeros for IML sectors!
   #if 0
@@ -393,6 +498,15 @@ int readDiskRBA(uint32_t rba)
 
 int writeDiskRBA(uint32_t rba)
 {
+  int ret;
+  digitalWriteFast(DEBUG_PIN2, 1);
+  ret = writeDiskRBA2(rba);
+  digitalWriteFast(DEBUG_PIN2, 0);
+  return ret;
+}
+
+int writeDiskRBA2(uint32_t rba)
+{
   since_sd_op = 0;
   ra_count = 0; // The read-ahead copy may hold this sector
   // TODO: check against file size limit
@@ -417,9 +531,11 @@ int writeDiskRBA(uint32_t rba)
 void commitWrites()
 {
   since_sd_op = 0;
+  digitalWriteFast(DEBUG_PIN2, 1);
   if (!sd.card()->syncDevice()) {
     Serial.println("SD card sync failed");
   }
+  digitalWriteFast(DEBUG_PIN2, 0);
   Serial.print("stime: ");
   Serial.println(since_sd_op);
 }
@@ -543,14 +659,14 @@ void prepDefaultSB()
 // and writing 0 to bit 7 clears busy, as one-off actions; the other bits are
 // status and ignore writes. Keeping a copy of the stored bits makes a flag
 // change one write instead of a read and a write (fork).
-#define FLAGS_STORED (_BV(FLAG_CMD_PROG) | _BV(FLAG_CLEAR_ALL))
-uint16_t flags_stored = 0;
+#define FLAGS_STORED (_BV(FLAG_CMD_PROG) | _BV(FLAG_CLEAR_ALL) | _BV(FLAG_BUF_MODE) | _BV(FLAG_BUF_DIR))
+#define FLAGS_STROBES (_BV(FLAG_TREQ_SET) | _BV(FLAG_BUF_GO) | _BV(FLAG_BUF_DONE))
 
 // Sets a bit in the FPGA flag register
 void setFlag(uint16_t flag)
 {
   flags_stored |= flag & FLAGS_STORED;
-  portWrite(REG_FLAGS, flags_stored | _BV(FLAG_BUSY) | (flag & _BV(FLAG_TREQ_SET)));
+  portWrite(REG_FLAGS, flags_stored | _BV(FLAG_BUSY) | (flag & FLAGS_STROBES));
 }
 
 
@@ -576,7 +692,9 @@ void esdiReset()
   // Do initialization tasks here
   //
 
-  // Make sure all handshaking flags are cleared
+  // Make sure all handshaking flags are cleared, and the buffer is off
+  flags_stored &= ~(_BV(FLAG_BUF_MODE) | _BV(FLAG_BUF_DIR));
+  use_buf = false;
   setFlag(_BV(FLAG_CLEAR_ALL));
   delayMicroseconds(10);
   Serial.print("in clear. flags: ");
@@ -622,6 +740,10 @@ void processCmdBlock()
       //}
       readDiskRBA(current_rba);
       since_dma_start = 0; // Benchmarking
+      if (fpga_has_buf && buf_enabled) {
+        bufBegin(0);
+        buf_sector_pending = true;
+      }
       doISR(DEV_DRIVE | ISR_DATA_XFER_RDY);
       transfer_state = TS_READ;
       transfer_count = 512; // Our buffer is just one sector to make things easy
@@ -641,8 +763,19 @@ void processCmdBlock()
       Serial.println(current_rba, DEC);
       status_max = 0; // No status data
       // TODO: Validate RBA?
+      if (fpga_has_buf && buf_enabled) {
+        // Arm one half per sector, two at most to start with
+        bufBegin(1);
+        buf_to_arm = rba_transfer_count;
+        for (i = 0; i < 2 && buf_to_arm > 0; i++) {
+          setFlag(_BV(FLAG_BUF_GO));
+          buf_to_arm--;
+        }
+      }
       doISR(DEV_DRIVE | ISR_DATA_XFER_RDY);
-      setFlag(_BV(FLAG_TREQ_SET));
+      if (!use_buf) {
+        setFlag(_BV(FLAG_TREQ_SET));
+      }
       transfer_state = TS_WRITE;
       transfer_count = 512; // Our buffer is just one sector to make things easy
       transfer_index = 0;
@@ -882,8 +1015,12 @@ void mainLoop() {
     // transfers, and only every 65536 passes (a few ms), to stay out of
     // the way of the host.
     if (transfer_state == TS_IDLE && ++serial_poll == 0 && Serial.available() > 0) {
-      if (Serial.read() == 'v') {
+      int c = Serial.read();
+      if (c == 'v') {
         printVersions();
+      } else if (c == 'b' && fpga_has_buf) {
+        buf_enabled = !buf_enabled;
+        Serial.println(buf_enabled ? "Sector buffer on." : "Sector buffer off.");
       }
     }
 
@@ -927,7 +1064,35 @@ void mainLoop() {
       loadStatusBlock();
     }
 
-    if (transfer_state == TS_READ) {
+    if (transfer_state == TS_READ && use_buf) {
+      if (buf_sector_pending) {
+        if (flags & _BV(FLAG_BUF_READY)) { // A half is free: load the sector
+          bufWriteSector();
+          setFlag(_BV(FLAG_BUF_GO));
+          buf_sector_pending = false;
+          rba_transfer_count--;
+          if (rba_transfer_count > 0) {
+            current_rba++;
+            readDiskRBA(current_rba);
+            buf_sector_pending = true;
+          }
+        }
+      } else if (flags & _BV(FLAG_BUF_IDLE)) { // The host has taken it all
+        bufEnd();
+        transfer_state = TS_IDLE;
+        Serial.print("tdma: ");
+        Serial.println(since_dma_start);
+        sb_cmd_status = 1;
+        prepDefaultSB();
+        status_block[3] = 0x0000; // Words left to be processed
+        status_block[4] = current_rba & 0xffff; // last RBA processed (low)
+        status_block[5] = current_rba >> 16; // last RBA processed (high)
+        status_block[6] = 0x0000; // Number of blocks required to recover error
+        loadStatusBlock();
+        doISR((cmd_block[0] & ATN_DEV_MASK) | 0x1); // Command complete
+        pendInterrupt(PEND_INT);
+      }
+    } else if (transfer_state == TS_READ) {
       if (!(flags & _BV(FLAG_TREQ_STATE))) { // Nothing in data buffer
         if (transfer_index < transfer_count) {
           //Serial.print("bei: ");
@@ -971,7 +1136,36 @@ void mainLoop() {
       }
     }
 
-    if (transfer_state == TS_WRITE) {
+    if (transfer_state == TS_WRITE && use_buf) {
+      if (flags & _BV(FLAG_BUF_READY)) { // A full half: write it to the card
+        bufReadSector();
+        setFlag(_BV(FLAG_BUF_DONE));
+        if (buf_to_arm > 0) {
+          setFlag(_BV(FLAG_BUF_GO)); // The half just freed takes a later sector
+          buf_to_arm--;
+        }
+        if (!no_disk_op) {
+          writeDiskRBA(current_rba);
+        }
+        rba_transfer_count--;
+        if (rba_transfer_count > 0) {
+          current_rba++;
+        } else {
+          commitWrites(); // On the card before the host hears it's done
+          bufEnd();
+          transfer_state = TS_IDLE;
+          sb_cmd_status = 1;
+          prepDefaultSB();
+          status_block[3] = 0x0000; // Words left to be processed
+          status_block[4] = 0x0000; // TODO: last RBA processed (low)
+          status_block[5] = 0x0000; // last RBA processed (high)
+          status_block[6] = 0x0000; // Number of blocks required to recover error
+          loadStatusBlock();
+          doISR((cmd_block[0] & ATN_DEV_MASK) | 0x1); // Command complete
+          pendInterrupt(PEND_INT);
+        }
+      }
+    } else if (transfer_state == TS_WRITE) {
       if (!(flags & _BV(FLAG_TREQ_STATE))) { // Host sent us data
         d = portRead(REG_DREG);
         if (transfer_index == 0) {
@@ -1066,7 +1260,7 @@ void mainLoop() {
           // since technically we can have an interrupt pending
           // from both the controller and the drive at the same time.
           // Check if we have a pending interrupt
-          debugPulse2();
+          digitalWriteFast(DEBUG_PIN, 0); // End of the command marker (fork)
           if (int_pending == PEND_INT_RESET) {
             int_pending = 0;
             // Reset interrupt clears the busy flag (Page 23)
@@ -1080,8 +1274,8 @@ void mainLoop() {
             Serial.println("Cleared some other int.");
           } else {
             // FIXME: Sometimes we get an extra EOI. Mailbox problem?
-            // ES testing
-            #if 1
+            // ES testing (off: the pins are timing markers now)
+            #if 0
             debugPulse();
             #endif
             Serial.print("EOI but int_pending is ");
@@ -1103,6 +1297,7 @@ void mainLoop() {
           }
           break;
         case ATN_COMMAND:
+          digitalWriteFast(DEBUG_PIN, 1); // Command marker (fork)
           // Expect to receive command blocks
           Serial.println("Set busy");
           //This doesn't seem to work if the first command word comes in very quick after the ATN...
