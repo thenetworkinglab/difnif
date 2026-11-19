@@ -79,7 +79,15 @@ module mcabus(
     input t_busy_clear,
     input t_clear_all,        // Clears all flag bits
 
-    output [39:0] t_pos_regs
+    output [39:0] t_pos_regs,
+
+    // Sector buffer (sectorbuf.v)
+    input buf_mode,           // DREG transfers go through the buffer
+    input buf_h_ready,        // a word is ready (disk read) or there's room (disk write)
+    input buf_h_more,         // ...and still will be after the transfer in progress
+    input [15:0] buf_h_rdata, // the word for the host
+    output buf_h_ev,          // a DREG access has completed (one clock)
+    output clear_all_o
     );
 
     // Declared early: used before their definitions below
@@ -196,6 +204,8 @@ module mcabus(
     wire ev_isr  = s_isr[2] ^ s_isr[1];
     wire ev_sifr = s_sifr[2] ^ s_sifr[1];
     wire ev_treq = s_treq[2] ^ s_treq[1];
+    assign buf_h_ev = ev_treq;
+    assign clear_all_o = clear_all;
 
     // Teensy-side strobes
     reg [1:0] reg_t_atn_read;
@@ -303,8 +313,10 @@ module mcabus(
 
 
     // Basic Status Register
+    // Transfer request: from the Teensy's flag, or from the sector buffer
+    wire treq = buf_mode ? buf_h_ready : flag_treq;
     assign reg_bsr = {control_dma_enable, flag_isr, t_cmd_in_progress, flag_busy,
-                      flag_si_full, flag_ci_full, flag_treq, flag_isr};
+                      flag_si_full, flag_ci_full, treq, flag_isr};
 
     // Channel reset (CHRESET, active high) from the planar returns the card
     // to its power-on state, as it does every adapter. The registers written
@@ -372,7 +384,13 @@ module mcabus(
     // flag_treq clears 40-60 ns later: the next arbitration can start 30 ns
     // after the end of a transfer (T41), and bidding with a request that has
     // already been serviced would fetch a word the Teensy isn't ready for.
-    wire dma_requested = control_dma_enable & flag_treq & card_enable & ~treq_pending;
+    // With the sector buffer (fork) the card can keep bidding through the
+    // end of a transfer when the buffer holds the next word (or room for
+    // it): the buffer moves on within about 100 ns, long before the next
+    // transfer can reach the card. It stops after the last one.
+    wire treq_now = buf_mode ? (treq_pending ? buf_h_more : buf_h_ready)
+                             : (flag_treq & ~treq_pending);
+    wire dma_requested = control_dma_enable & treq_now & card_enable;
     //wire dma_requested = test3; // & cmd_l? FIXME: & card_enable
     reg dma_cycle = 1'b0; // latch is set when we are in a dma cycle
     wire arb_won;
@@ -512,6 +530,7 @@ module mcabus(
     // Data output: present data at the data output depending on the address
     // This is qualified by the data output gate
     reg [15:0] data_out;
+    wire [15:0] dreg_in = buf_mode ? buf_h_rdata : t_dreg_in;
     assign bus_d = data_dir ? data_out : 16'bZ;
     assign data_dir = la_data_read & ~cmd_l & (card_enable | ~la_cd_setup_l); // Read mode; only when CMD is low.
 
@@ -543,11 +562,11 @@ module mcabus(
                     REG_SIFR_H      : data_out <= la_sbhe_l ? 16'hFFFF : {t_sifr_out[15:8], 8'hFF};
                     REG_BSR         : data_out <= {2{reg_bsr}};
                     REG_ISR         : data_out <= {2{t_isr_out}};
-                    REG_DREG        : data_out <= la_sbhe_l ? {8'hFF, t_dreg_in[7:0]} : t_dreg_in;
+                    REG_DREG        : data_out <= la_sbhe_l ? {8'hFF, dreg_in[7:0]} : dreg_in;
                     default         : data_out <= 16'hFFFF;
                 endcase
             end else begin
-                data_out <= la_sbhe_l ? {8'hFF, t_dreg_in[7:0]} : t_dreg_in;
+                data_out <= la_sbhe_l ? {8'hFF, dreg_in[7:0]} : dreg_in;
             end
         end
     end

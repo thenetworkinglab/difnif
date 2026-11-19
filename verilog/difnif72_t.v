@@ -94,6 +94,12 @@ module difnif72_t;
     localparam [3:0] TN_FLAGS = 1, TN_ATN = 2, TN_ISR = 3, TN_CIFR = 4, TN_SIFR = 5, TN_DREG = 6;
     localparam FL_ATN = 0, FL_ISR = 1, FL_CIFR = 2, FL_SIFR = 3, FL_HARD_RESET = 4, FL_TREQ_SET = 5,
                FL_TREQ = 8;
+    // Sector buffer (sectorbuf.v): register 14, flag bits 11-15
+    localparam [3:0] TN_BUF = 14;
+    localparam FL_BUF_MODE = 11, FL_BUF_DIR = 12,
+               FL_BUF_GO = 13, FL_BUF_DONE = 14,                        // written as 1
+               FL_BUF_READY = 13, FL_BUF_CAN_ARM = 14, FL_BUF_IDLE = 15; // read
+    localparam integer N_SECT = 3;      // sectors per buffer test
 
     localparam integer MAX_POLL = 400;
 
@@ -533,12 +539,40 @@ module difnif72_t;
         end
     endtask
 
+    // The Teensy's sector buffer accesses, at difnift.ino's timing: 80 ns
+    // strobes, and a wait after each read for the next word
+    task automatic tn_buf_write(input [15:0] d);
+        begin
+            tn_addr = TN_BUF;
+            tn_dout = d;
+            tn_drive = 1'b1;
+            #5 tn_wr = 1'b1;
+            #80 tn_wr = 1'b0;
+            #5 tn_drive = 1'b0;
+            #60;
+        end
+    endtask
+
+    task automatic tn_buf_read(output [15:0] d);
+        begin
+            tn_addr = TN_BUF;
+            #5 tn_rd = 1'b1;
+            #80 d = tn_d;
+            tn_rd = 1'b0;
+            #120;
+        end
+    endtask
+
     task automatic tn_wait_flag(input integer bit_n, input value, output ok);
+        tn_wait_flag_n(bit_n, value, MAX_POLL, ok);
+    endtask
+
+    task automatic tn_wait_flag_n(input integer bit_n, input value, input integer polls, output ok);
         reg [15:0] fl;
         integer i;
         begin
             ok = 1'b0;
-            for (i = 0; i < MAX_POLL && !aborted && !ok; i = i + 1) begin
+            for (i = 0; i < polls && !aborted && !ok; i = i + 1) begin
                 tn_read(TN_FLAGS, fl);
                 if (fl[bit_n] === value) ok = 1'b1;
             end
@@ -548,6 +582,14 @@ module difnif72_t;
             end
         end
     endtask
+
+    function [15:0] bpat(input integer i, input [15:0] salt);
+        reg [31:0] p;
+        begin
+            p = i * 32'h9E37 + 32'h1234;
+            bpat = p[15:0] ^ salt;
+        end
+    endfunction
 
     function [15:0] pattern(input integer i, input [15:0] salt);
         pattern = {i[7:0] ^ 8'hA5, i[7:0] ^ 8'h3C} ^ salt;
@@ -871,8 +913,9 @@ module difnif72_t;
     // Central arbiter and DMA controller
     // ------------------------------------------------------------------
     integer dma_done;               // transfers completed for the card
+    realtime t_dma_start;
     integer dma_extra;              // transfers the card won with nothing to send
-    reg [15:0] dma_buf [0:255];     // "system memory"
+    reg [15:0] dma_buf [0:1023];    // "system memory"
 
     // The card must never request burst mode
     always @(h_burst_l)
@@ -937,6 +980,7 @@ module difnif72_t;
         begin
             dma_done = 0;
             dma_extra = 0;
+            t_dma_start = $realtime;
             for (loops = 0; dma_done < n && loops < 40 * n && !aborted; loops = loops + 1) begin
                 // CPU cycles to an unrelated port while nobody is asking
                 watch_en = 1'b1;
@@ -988,6 +1032,9 @@ module difnif72_t;
                 aborted = 1'b1;
             end
             comp_want = 1'b0;
+            if ($test$plusargs("rate"))
+                $display("      %0d transfers in %0.1f us: %0.2f us per word", dma_done,
+                         ($realtime - t_dma_start) / 1000.0, ($realtime - t_dma_start) / 1000.0 / dma_done);
         end
     endtask
 
@@ -1042,6 +1089,97 @@ module difnif72_t;
                     fail($sformatf("DMA word %0d: memory got %h, Teensy wrote %h", k, dma_buf[k],
                                    pattern(k, 16'h9696)));
             if (dma_extra) fail($sformatf("card re-entered arbitration with a stale request %0d times", dma_extra));
+            host_out(A_BSR, 0, 16'h0000);
+            end_test;
+        end
+    endtask
+
+    // Sector buffer, disk read: the Teensy loads sectors into the buffer,
+    // DMA moves them to memory. slow: the Teensy takes 400 us over each
+    // sector, so the host has to wait for it.
+    task automatic test_buf_from_card(input compete, input slow, input string name);
+        integer k, sct, w;
+        reg ok;
+        reg [15:0] fl;
+        reg [15:0] base;
+        begin
+            begin_test(name);
+            for (k = 0; k < N_SECT * 256; k = k + 1) dma_buf[k] = 16'hxxxx;
+            base = 16'h0080 | (16'h1 << FL_BUF_MODE);   // busy bit left alone
+            tn_write(TN_FLAGS, base);
+            tn_read(TN_FLAGS, fl);
+            if (fl[15:11] !== 5'b10101)
+                fail($sformatf("buffer on for a disk read: flags %h, expected idle, ready, mode", fl));
+            host_out(A_BSR, 0, 16'h0002);
+            fork
+                dma_run(0, N_SECT * 256, compete);
+                begin
+                    for (sct = 0; sct < N_SECT && !aborted; sct = sct + 1) begin
+                        if (slow) #400000;
+                        tn_wait_flag_n(FL_BUF_READY, 1'b1, 4000, ok);
+                        for (w = 0; w < 256 && ok; w = w + 1)
+                            tn_buf_write(bpat(sct * 256 + w, 16'hB00F));
+                        if (ok) tn_write(TN_FLAGS, base | (16'h1 << FL_BUF_GO));
+                    end
+                    tn_wait_flag_n(FL_BUF_IDLE, 1'b1, 8000, ok);
+                end
+            join
+            for (k = 0; k < N_SECT * 256 && !aborted; k = k + 1)
+                if (dma_buf[k] !== bpat(k, 16'hB00F))
+                    fail($sformatf("DMA word %0d (sector %0d): memory got %h, Teensy wrote %h", k, k / 256,
+                                   dma_buf[k], bpat(k, 16'hB00F)));
+            tn_write(TN_FLAGS, 16'h0080);
+            tn_read(TN_FLAGS, fl);
+            if (fl[15:11] !== 5'b00000) fail($sformatf("buffer off: flags %h, bits 11-15 should be 0", fl));
+            host_out(A_BSR, 0, 16'h0000);
+            end_test;
+        end
+    endtask
+
+    // Sector buffer, disk write: the Teensy arms halves, DMA fills them from
+    // memory, the Teensy reads each full one out. slow: 400 us before reading
+    // each sector, so the host has to wait for room.
+    task automatic test_buf_to_card(input compete, input slow, input string name);
+        integer k, sct, w, armed;
+        reg ok;
+        reg [15:0] fl, d;
+        reg [15:0] base;
+        begin
+            begin_test(name);
+            for (k = 0; k < N_SECT * 256; k = k + 1) dma_buf[k] = bpat(k, 16'h0DD5);
+            base = 16'h0080 | (16'h1 << FL_BUF_MODE) | (16'h1 << FL_BUF_DIR);
+            tn_write(TN_FLAGS, base);
+            tn_read(TN_FLAGS, fl);
+            if (fl[15:11] !== 5'b11011)
+                fail($sformatf("buffer on for a disk write: flags %h, expected idle, can arm, dir, mode", fl));
+            armed = 0;
+            for (k = 0; k < 2 && armed < N_SECT; k = k + 1) begin
+                tn_write(TN_FLAGS, base | (16'h1 << FL_BUF_GO));
+                armed = armed + 1;
+            end
+            host_out(A_BSR, 0, 16'h0002);
+            fork
+                dma_run(1, N_SECT * 256, compete);
+                for (sct = 0; sct < N_SECT && !aborted; sct = sct + 1) begin
+                    tn_wait_flag_n(FL_BUF_READY, 1'b1, 4000, ok);
+                    if (slow) #400000;
+                    for (w = 0; w < 256 && ok; w = w + 1) begin
+                        tn_buf_read(d);
+                        if (d !== bpat(sct * 256 + w, 16'h0DD5))
+                            fail($sformatf("sector %0d word %0d: Teensy read %h, memory held %h", sct, w,
+                                           d, bpat(sct * 256 + w, 16'h0DD5)));
+                    end
+                    if (ok) tn_write(TN_FLAGS, base | (16'h1 << FL_BUF_DONE));
+                    if (ok && armed < N_SECT) begin
+                        tn_wait_flag(FL_BUF_CAN_ARM, 1'b1, ok);
+                        if (ok) tn_write(TN_FLAGS, base | (16'h1 << FL_BUF_GO));
+                        armed = armed + 1;
+                    end
+                end
+            join
+            tn_read(TN_FLAGS, fl);
+            if (!aborted && fl[FL_BUF_IDLE] !== 1'b1) fail($sformatf("buffer not idle after the transfer: flags %h", fl));
+            tn_write(TN_FLAGS, 16'h0080);
             host_out(A_BSR, 0, 16'h0000);
             end_test;
         end
@@ -1120,6 +1258,12 @@ module difnif72_t;
         test_dma_to_card(1, "DMA sector write, lower-priority device competing");
         test_dma_from_card(1, "DMA sector read, lower-priority device competing");
 `endif
+        comp_level = 4'h2;
+        test_buf_from_card(0, 0, "buffer: DMA sector read, 3 sectors");
+        test_buf_to_card(0, 0, "buffer: DMA sector write, 3 sectors");
+        test_buf_from_card(1, 1, "buffer: DMA sector read, slow Teensy, device competing");
+        test_buf_to_card(1, 1, "buffer: DMA sector write, slow Teensy, device competing");
+        test_dma_from_card(0, "DMA sector read without the buffer, after it");
         test_channel_reset;
         test_not_selected(16'h0080, "no response at 0080 after DMA");
 
@@ -1136,7 +1280,7 @@ module difnif72_t;
 
     // Safety net
     initial begin
-        #20_000_000;
+        #80_000_000;
         $display("RESULT: TIMEOUT");
         $finish;
     end

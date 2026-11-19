@@ -15,7 +15,7 @@ set -u
 cd "$(dirname "$0")"
 
 CELLS=$(dirname "$(command -v yosys)")/../share/yosys/ice40/cells_sim.v
-SRC="difnif72_t.v difnif_top.v mcabus.v teensy.v $CELLS"
+SRC="difnif72_t.v difnif_top.v mcabus.v teensy.v sectorbuf.v $CELLS"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 

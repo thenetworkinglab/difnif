@@ -6,7 +6,7 @@
 
 PROJ = difnif
 IMAGES = difnif_top
-SOURCES = difnif_top.v mcabus.v teensy.v
+SOURCES = difnif_top.v mcabus.v teensy.v sectorbuf.v
 INCLUDES = version.vh
 PIN_DEF =  difnif.pcf
 DEVICE = hx8k

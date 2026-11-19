@@ -82,7 +82,7 @@ IBM = {
 
 
 def build(tmp, pos):
-    sources = [os.path.join(VERILOG, f) for f in ("difnif_top.v", "mcabus.v", "teensy.v")]
+    sources = [os.path.join(VERILOG, f) for f in ("difnif_top.v", "mcabus.v", "teensy.v", "sectorbuf.v")]
     define = "-DMCA_USE_POS " if pos else ""
     json_path = os.path.join(tmp, "difnif.json")
     run(["yosys", "-q", "-p",

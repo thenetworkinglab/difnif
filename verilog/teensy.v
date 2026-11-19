@@ -51,7 +51,20 @@ module teensy(
     input t_treq,
     input t_treq_16,
 
-    input [39:0] t_pos_regs
+    input [39:0] t_pos_regs,
+
+    // Sector buffer (sectorbuf.v), all on clk
+    output buf_mode,            // flag bit 11: buffer on
+    output buf_dir,             // flag bit 12: 0 disk read, 1 disk write
+    output reg t_buf_wr = 1'b0,     // one-clock pulses
+    output reg [15:0] t_buf_wdata = 16'h0000,
+    output reg t_buf_rd = 1'b0,
+    output reg t_buf_go = 1'b0,     // flag bit 13 written as 1
+    output reg t_buf_done = 1'b0,   // flag bit 14 written as 1
+    input [15:0] t_buf_rdata,
+    input t_buf_ready,
+    input t_buf_can_arm,
+    input t_buf_h_idle
     );
 
     localparam REG_TEST = 4'd0;
@@ -65,6 +78,7 @@ module teensy(
     localparam REG_POS23 = 4'd8;
     localparam REG_POS4 = 4'd9;
     // Read-only version registers (version.vh, BCD), and which build this is
+    localparam REG_BUF = 4'd14;     // sector buffer data (fork)
     localparam REG_VER_YEAR = 4'd10;
     localparam REG_VER_DATE = 4'd11;
     localparam REG_VER_COUNT = 4'd12;
@@ -95,8 +109,11 @@ module teensy(
 
     wire t_busy_bit;
 
-    // Flag register
-    assign flags_out = {5'h0, t_clear_all,
+    // Flag register. Bits 11-15 are the sector buffer's (fork), and read 0
+    // while it's off.
+    wire [4:0] buf_flags = buf_mode ? {t_buf_h_idle, t_buf_can_arm, t_buf_ready, buf_dir, 1'b1}
+                                    : 5'h00;
+    assign flags_out = {buf_flags, t_clear_all,
                         t_treq_16, t_treq,
                         1'b1, t_cmd_in_progress, // Clear busy is active low
                         1'b0, t_hard_reset,
@@ -132,6 +149,7 @@ module teensy(
             REG_VER_DATE  : tn_d_out <= `FPGA_VERSION_DATE;
             REG_VER_COUNT : tn_d_out <= `FPGA_VERSION_COUNT;
             REG_VARIANT   : tn_d_out <= VARIANT;
+            REG_BUF       : tn_d_out <= t_buf_rdata;
             default    : tn_d_out <= 16'H0;
         endcase
     end
@@ -146,6 +164,38 @@ module teensy(
             REG_DREG   : t_dreg <= tn_d;
         endcase
     end
+
+    // Sector buffer access (fork). RD and WR are sampled on the 50 MHz
+    // clock. A write is taken when WR is seen high, 20-60 ns after it rises,
+    // while the Teensy still holds the address and data (its strobe is 80 ns
+    // or more). A read moves the buffer on when RD falls; the next word is
+    // ready about 100 ns later. WR and RD must stay low for 40 ns or more
+    // between buffer accesses.
+    reg [2:0] wr_s = 3'b000;
+    reg [2:0] rd_s = 3'b000;
+    reg [3:0] rd_addr = 4'h0;
+    reg [1:0] mode_s = 2'b00;
+    reg [1:0] dir_s = 2'b00;
+    wire wr_rise = wr_s[1] & ~wr_s[2];
+    wire rd_rise = rd_s[1] & ~rd_s[2];
+    wire rd_fall = ~rd_s[1] & rd_s[2];
+
+    always @ (posedge clk) begin
+        wr_s <= {wr_s[1:0], tn_wr};
+        rd_s <= {rd_s[1:0], tn_rd};
+        mode_s <= {mode_s[0], flags_in[11]};
+        dir_s <= {dir_s[0], flags_in[12]};
+
+        t_buf_wr <= wr_rise & (tn_addr == REG_BUF);
+        t_buf_go <= wr_rise & (tn_addr == REG_FLAGS) & tn_d[13];
+        t_buf_done <= wr_rise & (tn_addr == REG_FLAGS) & tn_d[14];
+        if (wr_rise) t_buf_wdata <= tn_d;
+        if (rd_rise) rd_addr <= tn_addr;
+        t_buf_rd <= rd_fall & (rd_addr == REG_BUF);
+    end
+
+    assign buf_mode = mode_s[1];
+    assign buf_dir = dir_s[1];
 
     // Used to set/clear handshaking flags
     assign t_atn_read = tn_rd & (tn_addr == REG_ATN);

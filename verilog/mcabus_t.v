@@ -128,6 +128,12 @@ module mcabus_t;
         .t_treq_16(t_treq_16),
         .t_clear_all(t_clear_all),
 
+        // Sector buffer (fork): off
+        .buf_mode(1'b0),
+        .buf_h_ready(1'b0),
+        .buf_h_more(1'b0),
+        .buf_h_rdata(16'h0000),
+
         .test3(test3)
     );
 

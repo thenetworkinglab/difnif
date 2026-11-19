@@ -93,6 +93,15 @@ module difnif_top(
 
     wire [39:0] t_pos_regs;
 
+    // Sector buffer (fork)
+    wire buf_mode, buf_dir;
+    wire t_buf_wr, t_buf_rd, t_buf_go, t_buf_done;
+    wire [15:0] t_buf_wdata, t_buf_rdata;
+    wire t_buf_ready, t_buf_can_arm, t_buf_h_idle;
+    wire buf_h_ev, buf_h_ready, buf_h_more;
+    wire [15:0] buf_h_rdata;
+    wire mca_clear_all;
+
     wire addr_sel_l;
     wire fulladdr2_l;
 
@@ -168,7 +177,14 @@ module difnif_top(
         .t_treq_16(t_treq_16),
         .t_clear_all(t_clear_all),
 
-        .t_pos_regs(t_pos_regs)
+        .t_pos_regs(t_pos_regs),
+
+        .buf_mode(buf_mode),
+        .buf_h_ready(buf_h_ready),
+        .buf_h_more(buf_h_more),
+        .buf_h_rdata(buf_h_rdata),
+        .buf_h_ev(buf_h_ev),
+        .clear_all_o(mca_clear_all)
     );
 
     teensy tn1 (
@@ -203,7 +219,39 @@ module difnif_top(
         .t_treq_16(t_treq_16),
         .t_clear_all(t_clear_all),
 
-        .t_pos_regs(t_pos_regs)
+        .t_pos_regs(t_pos_regs),
+
+        .buf_mode(buf_mode),
+        .buf_dir(buf_dir),
+        .t_buf_wr(t_buf_wr),
+        .t_buf_wdata(t_buf_wdata),
+        .t_buf_rd(t_buf_rd),
+        .t_buf_go(t_buf_go),
+        .t_buf_done(t_buf_done),
+        .t_buf_rdata(t_buf_rdata),
+        .t_buf_ready(t_buf_ready),
+        .t_buf_can_arm(t_buf_can_arm),
+        .t_buf_h_idle(t_buf_h_idle)
+    );
+
+    sectorbuf sb1 (
+        .clk(clk),
+        .clear(mca_clear_all | ~buf_mode),
+        .dir(buf_dir),
+        .t_wr(t_buf_wr),
+        .t_wdata(t_buf_wdata),
+        .t_rd(t_buf_rd),
+        .t_rdata(t_buf_rdata),
+        .t_go(t_buf_go),
+        .t_done(t_buf_done),
+        .t_ready(t_buf_ready),
+        .t_can_arm(t_buf_can_arm),
+        .h_idle(t_buf_h_idle),
+        .h_ev(buf_h_ev),
+        .h_wdata(t_dreg_out),
+        .h_rdata(buf_h_rdata),
+        .h_ready(buf_h_ready),
+        .h_more(buf_h_more)
     );
     // 50MHz
     `ifdef SYNTHESIS
