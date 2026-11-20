@@ -21,7 +21,14 @@ DEFINES = -DMCA_USE_POS
 else ifneq ($(BOARD),thinkpad)
 $(error BOARD must be thinkpad or ps2)
 endif
+# make PROBES=1 also copies bus signals onto the SD card pins for a scope
+# (see the end of mcabus.v), building into build/<board>-probes. Not for releases.
+ifeq ($(PROBES),1)
+DEFINES += -DDIFNIF_PROBES
+ODIR = build/$(BOARD)-probes
+else
 ODIR = build/$(BOARD)
+endif
 DEPS = $(addprefix $(ODIR)/,$(addsuffix .d,$(IMAGES)))
 
 # Want to build report and main bin file

@@ -294,9 +294,7 @@ module mcabus(
 //    assign test1 = flag_treq;
 //    assign test2 = t_treq_set;
 //    assign tbus = {treq_clear1, 1'b0, 1'b0};
-    assign tbus = 3'b0;
-    assign test1 = 1'b0;
-    assign test2 = 1'b0;
+    // (the test outputs are assigned at the end of the module)
     // "fixed" when i probe treq_clear.
     // Signal treq_clear1 never asserts.
 
@@ -570,5 +568,22 @@ module mcabus(
             end
         end
     end
+
+    // Test outputs, on the SD card pins (J4 pins 3, 19, 18, 17, 16, 15 on the
+    // 72-pin board). Normally driven low. "make PROBES=1" copies bus signals
+    // there instead, for a scope: J4 pins 4-14 are labelled with bus signals
+    // but not routed on Rev P2. Not for releases.
+`ifdef DIFNIF_PROBES
+    assign test1 = cmd_l;               // J4-3:  -CMD, every bus cycle
+    assign test2 = arb_gnt_l;           // J4-19: ARB/-GNT
+    assign tbus = {treq_now,            // J4-15: the card wants the bus (or another word)
+                   dma_selected,        // J4-16: a DMA cycle for this card
+                   ~preempt_o_l,        // J4-17: the card drives -PREEMPT (high = requesting)
+                   preempt_l};          // J4-18: -PREEMPT on the bus
+`else
+    assign test1 = 1'b0;
+    assign test2 = 1'b0;
+    assign tbus = 4'b0;
+`endif
 
 endmodule

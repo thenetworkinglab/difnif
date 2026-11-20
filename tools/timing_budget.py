@@ -19,6 +19,7 @@ cycle), 2-40/2-41 (DMA) and 2-46 (arbitration). A negative margin fails.
 Usage:
   tools/timing_budget.py              # default build (POS bypassed)
   tools/timing_budget.py --pos        # build with -DMCA_USE_POS
+  tools/timing_budget.py --pos --probes  # the scope build (make PROBES=1)
 
 Needs yosys and nextpnr-ice40 on PATH (oss-cad-suite). Exit status is 1 if
 any margin is negative.
@@ -81,9 +82,9 @@ IBM = {
 }
 
 
-def build(tmp, pos):
+def build(tmp, pos, probes=False):
     sources = [os.path.join(VERILOG, f) for f in ("difnif_top.v", "mcabus.v", "teensy.v", "sectorbuf.v")]
-    define = "-DMCA_USE_POS " if pos else ""
+    define = ("-DMCA_USE_POS " if pos else "") + ("-DDIFNIF_PROBES " if probes else "")
     json_path = os.path.join(tmp, "difnif.json")
     run(["yosys", "-q", "-p",
          "read_verilog %s%s; synth_ice40 -top difnif_top -json %s"
@@ -111,22 +112,35 @@ def path_classes(report):
     return worst
 
 
+# In the probe build (--probes) the bus clocks also drive the SD card pins,
+# and nextpnr names their global nets after those outputs.
+GBUF = {"cmd_l": "cmd_l", "arb_gnt_l": "arb_gnt_l"}
+PROBE_GBUF = {"cmd_l": "sd_clk", "arb_gnt_l": "sd_cmd"}
+
+
 def norm_event(e):
     # "negedge cmd_l$SB_IO_IN_$glb_clk" -> "negedge cmd_l"
     m = re.match(r"(posedge|negedge) (\w+)", e)
-    return "%s %s" % m.groups() if m else e
+    if not m:
+        return e
+    edge, name = m.groups()
+    for clock, net in GBUF.items():
+        if name == net:
+            name = clock
+    return "%s %s" % (edge, name)
 
 
 def clock_insertion(sdf, clock):
     """Pin-buffer output to flip-flop clock pin, worst case, in ns."""
     s = open(sdf).read()
     esc = re.escape(clock)
+    gesc = re.escape(GBUF[clock])
     to_gb = [int(m) for m in re.findall(
-        r"INTERCONNECT %s\\\$sb_io/D_IN_0 \\\$gbuf_%s\S*/USER_SIGNAL_TO_GLOBAL_BUFFER \((\d+):" % (esc, esc), s)]
+        r"INTERCONNECT %s\\\$sb_io/D_IN_0 \\\$gbuf_%s\S*/USER_SIGNAL_TO_GLOBAL_BUFFER \((\d+):" % (esc, gesc), s)]
     gb = [int(m) for m in re.findall(
-        r'\(INSTANCE \\\$gbuf_%s\S*\)\s*\(DELAY\s*\(ABSOLUTE\s*\(IOPATH \S+ \S+ \((\d+):' % esc, s)]
+        r'\(INSTANCE \\\$gbuf_%s\S*\)\s*\(DELAY\s*\(ABSOLUTE\s*\(IOPATH \S+ \S+ \((\d+):' % gesc, s)]
     to_ff = [int(m) for m in re.findall(
-        r"INTERCONNECT \\\$gbuf_%s\S*/GLOBAL_BUFFER_OUTPUT \S+/CLK \((\d+):" % esc, s)]
+        r"INTERCONNECT \\\$gbuf_%s\S*/GLOBAL_BUFFER_OUTPUT \S+/CLK \((\d+):" % gesc, s)]
     if not gb or not to_ff:
         sys.exit("couldn't find the %s clock network in the SDF" % clock)
     # A dedicated global input pin has no fabric hop to the buffer
@@ -136,10 +150,14 @@ def clock_insertion(sdf, clock):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--pos", action="store_true", help="build with -DMCA_USE_POS")
+    ap.add_argument("--probes", action="store_true",
+                    help="build with -DDIFNIF_PROBES (make PROBES=1, scope debug build)")
     args = ap.parse_args()
+    if args.probes:
+        GBUF.update(PROBE_GBUF)
 
     with tempfile.TemporaryDirectory() as tmp:
-        report, sdf = build(tmp, args.pos)
+        report, sdf = build(tmp, args.pos, args.probes)
         w = path_classes(report)
         ins_cmd = clock_insertion(sdf, "cmd_l")
         ins_gnt = clock_insertion(sdf, "arb_gnt_l")
