@@ -2,7 +2,7 @@
 
 // Firmware version: the release date plus a count of releases that day.
 // Change it for each release and note the change in CHANGELOG.md.
-#define FW_VERSION "v2026.11.18-3"
+#define FW_VERSION "v2026.11.19-1"
 
 
 // Pin definitions
@@ -38,6 +38,7 @@
 #define REG_VER_COUNT 12  // 0001
 #define REG_VARIANT 13    // 1 = make BOARD=ps2, 0 = ThinkPad build
 #define REG_BUF 14        // sector buffer data (fork)
+#define REG_CTRL 15       // bit 0: burst DMA allowed (fork, FPGA v2026.11.19-1 and later)
 
 // Bit definitions for REG_FLAGS
 #define FLAG_ATN_FULL 0
@@ -253,6 +254,28 @@ bool use_buf = false;       // the current transfer uses it
 bool buf_sector_pending = false;  // read: transfer_buffer holds a sector to load
 uint32_t buf_to_arm = 0;    // write: sectors not yet armed
 
+// Burst DMA (fork). With an FPGA that has it, the card holds the bus for
+// several words per arbitration while the sector buffer is in use, instead
+// of the planar arbitrating for every word. The FPGA does it all; the
+// firmware only allows it, through register 15.
+bool fpga_has_burst = false;  // found at startup
+bool burst_enabled = true;    // 'B' on the serial port switches it off and on
+
+// Does the FPGA have burst control? Older builds read 0 at register 15.
+bool detectBurst()
+{
+  bool found;
+  portWrite(REG_CTRL, 0x0001);
+  found = (portRead(REG_CTRL) & 1) != 0;
+  portWrite(REG_CTRL, 0x0000);
+  return found;
+}
+
+void applyBurst()
+{
+  portWrite(REG_CTRL, (fpga_has_burst && burst_enabled) ? 0x0001 : 0x0000);
+}
+
 // Does the FPGA have the buffer? Older builds read 0 in the mode bit.
 bool detectBuffer()
 {
@@ -356,6 +379,12 @@ void printVersions()
   if (fpga_has_buf) {
     Serial.print(buf_enabled ? ", sector buffer on" : ", sector buffer off");
   }
+  if (fpga_has_burst) {
+    Serial.print(burst_enabled ? ", burst DMA on" : ", burst DMA off");
+    if (burst_enabled && !(fpga_has_buf && buf_enabled)) {
+      Serial.print(" (needs the sector buffer)");
+    }
+  }
   Serial.println();
 }
 
@@ -377,6 +406,8 @@ void setup() {
   pinMode(DEBUG_PIN2, OUTPUT);
 
   fpga_has_buf = detectBuffer();
+  fpga_has_burst = detectBurst();
+  applyBurst();
   printVersions();
 
   if (!sd.begin(SdioConfig(FIFO_SDIO))) {
@@ -401,6 +432,7 @@ void setup() {
   Serial.println("Press 'G' to run the main loop.");
   Serial.println("Press 'v' for the firmware and FPGA versions.");
   Serial.println("Press 'b' to switch the FPGA's sector buffer off or on.");
+  Serial.println("Press 'B' to switch burst DMA off or on.");
 }
 
 
@@ -1011,9 +1043,10 @@ void mainLoop() {
   diskSetup();
   
   while (1) {
-    // 'v' on the serial port prints the versions. Checked only between
-    // transfers, and only every 65536 passes (a few ms), to stay out of
-    // the way of the host.
+    // Serial commands while running: 'v' prints the versions, 'b' switches
+    // the sector buffer and 'B' burst DMA off and on. Checked only between
+    // transfers, and only every 65536 passes (a few ms), to stay out of the
+    // way of the host.
     if (transfer_state == TS_IDLE && ++serial_poll == 0 && Serial.available() > 0) {
       int c = Serial.read();
       if (c == 'v') {
@@ -1021,6 +1054,10 @@ void mainLoop() {
       } else if (c == 'b' && fpga_has_buf) {
         buf_enabled = !buf_enabled;
         Serial.println(buf_enabled ? "Sector buffer on." : "Sector buffer off.");
+      } else if (c == 'B' && fpga_has_burst) {
+        burst_enabled = !burst_enabled;
+        applyBurst();
+        Serial.println(burst_enabled ? "Burst DMA on." : "Burst DMA off.");
       }
     }
 
@@ -1566,6 +1603,11 @@ void loop() {
     }
     if (cmd == 'v') {
       printVersions();
+    }
+    if (cmd == 'B' && fpga_has_burst) {
+      burst_enabled = !burst_enabled;
+      applyBurst();
+      Serial.println(burst_enabled ? "Burst DMA on." : "Burst DMA off.");
     }
     if (cmd == 'G') {
       Serial.println("Starting main loop.");
