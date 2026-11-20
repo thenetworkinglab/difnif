@@ -897,27 +897,86 @@ command. The firmware's debug pins now mark each command (Teensy pin 0,
 high from the ATN command to the host's EOI) and each wait on the SD card
 (pin 1), for measuring that with a scope.
 
+### Where the time goes (scope, Model 70)
+
+Measured on 19 November 2026 with a Rigol DS1074Z Plus while `READLOOP.BAT`
+copied `D:\T2.BIN` to `NUL` over and over, with firmware and FPGA
+v2026.11.18-3 and the sector buffer on. The guess above was wrong: the
+limit is still the DMA, not per-command overhead or the SD card.
+
+**Probe points.** J4 pins 4-14 carry bus-signal labels in the schematic but
+have no copper on Rev P2 (only pins 3, 11, 15-19 and 20 are routed), so they
+can't be probed. Instead, `make BOARD=ps2 PROBES=1` builds a debug image
+(into `build/ps2-probes/`) that copies bus signals onto the SD card pins,
+which are routed to J4. The SD socket J3 must be empty. Not for releases.
+
+| J4 pin | Normal build | `PROBES=1` |
+|---|---|---|
+| 3 | low | `-CMD` |
+| 19 | low | `ARB/-GNT` |
+| 18 | low | `-PREEMPT` on the bus |
+| 17 | low | the card is driving `-PREEMPT` (high = requesting) |
+| 16 | low | a DMA cycle to the card |
+| 15 | low | the card wants the bus or has the next word ready |
+
+Ground is J4-20 (the PS/2 chassis works too). `tools/timing_budget.py --pos
+--probes` checks that build; it passes, smallest margin 8.7 ns on T22.
+
+**One command, at 1 ms/div** (Teensy pin 0 and pin 1, normal build). DOS reads
+`T2.BIN` in commands longer than the 11 ms screen. At the start the Teensy
+reads 32 sectors from the SD card in one go, in 720 us (about 22 MB/s), and
+the host waits for that. After that the Teensy copies one sector from its
+own RAM into the buffer every 0.45 ms, which is the rate the host empties
+it: 512 bytes per 0.45 ms, about 1.1 MB/s, or 1.8 us per word. The SD card
+is about 5% of the time.
+
+**One word, at 500 ns/div** (`PROBES=1`):
+
+| Part | Time |
+|---|---|
+| Arbitration (`ARB/-GNT` high) | 450-950 ns; the longer ones have another 360 ns bus cycle (probably the CPU or refresh) inside them |
+| Grant, until the DMA controller's I/O read | about 370 ns |
+| I/O read from the card (`-CMD` low) | about 100 ns |
+| Memory write (`-CMD` low) | about 200 ns |
+| Until the next arbitration | about 180 ns |
+| **Per word** | **1.4-1.9 us** |
+
+- The card wins every arbitration. It never needs `-PREEMPT` (J4-17 stays
+  low), because the Model 70 re-arbitrates after every DMA transfer anyway
+  (finding 13).
+- The card always has the next word ready. Its request (J4-15) stays high
+  except for a dip of about 30 ns, about 70 ns after each I/O read: the
+  transfer's pending flag clears a clock or two before the buffer's next
+  word is latched. The dip falls in the middle of the grant, far from the
+  next arbitration, so it does no harm now. It needs fixing for burst mode,
+  where the request must stay up between words.
+- 256 words at about 1.6 us is about 410 us per sector, close to the 0.45 ms
+  measured per sector, so the sector boundaries cost little.
+
+So only about 300 ns of each word moves data. The rest is arbitration and
+the DMA controller's setup and dead time for each grant, and burst transfers
+would remove most of it.
+
 ## Suggested next steps
 
 Done: DMA in the testbench, the timing check, Rev P2 schematic and layout,
 assembled boards from PCBWay, Eric's printed sled, bring-up in a 55SX
 (including the overnight copy test), and the Model 70 (finding 16).
 
-1. **Rev P3 board change:** a separate direction line for U7 (finding 16).
+1. **Rev P3 board change:** a separate direction line for U7 (finding 16),
+   and route J4 pins 4-14 to their labelled signals (or drop the labels).
    Also worth considering: a way for the firmware to see the PS/2's 5 V
    going away, so it can finish writing before it loses power.
 2. **Speed:** with the sector buffer (see "Speed: the sector buffer") both
    machines do about 1.1 MB/s, against about 1.9 MB/s for an IDE adapter in
-   the 55SX. Next:
-   - Measure where the time goes now, with the command and SD markers on
-     Teensy pins 0 and 1 and `-PREEMPT`/`ARB/-GNT` from J4.
-   - If it's per-command overhead or the SD card: trim the firmware's
-     command handling, start the SD read for the next command earlier, or
-     try a faster card.
-   - If it's still the DMA: burst transfers, keeping the bus for several
-     words per arbitration and ending the burst when another device
-     asserts `-PREEMPT`. The board already wires `-BURST` to the FPGA
-     (`burst_o_l`, pin 90); `mcabus.v` holds it off.
+   the 55SX. The scope shows the DMA is still the limit (see "Where the time
+   goes"), so next is burst transfers: keep the bus for several words per
+   arbitration and end the burst when another device asserts `-PREEMPT`.
+   The board already wires `-BURST` to the FPGA (`burst_o_l`, pin 90);
+   `mcabus.v` holds it off. This needs IBM's burst timing rules, a
+   burst-capable planar in the testbench, and the request dip above fixed.
+   Smaller gains later: start the SD read for the first sectors of a
+   command sooner (the 720 us wait).
 3. **The one-byte shift:** keep the copy test running on other machines and
    with other workloads (Windows 3.1, large compiles); run DIFDIAG's Int13
    test.

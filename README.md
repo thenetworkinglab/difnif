@@ -76,7 +76,9 @@ There are also debugging aids:
     20-round copy test.
   - With firmware and FPGA v2026.11.18-3 (the FPGA's sector buffer),
     DiskMeter measures about 1.1 MB/s in both machines, up from about
-    690 KB/s (55SX) and 990 KB/s (Model 70).
+    690 KB/s (55SX) and 990 KB/s (Model 70). A scope shows the DMA, with an
+    arbitration for every word, is still the limit; burst transfers are next
+    (docs/formfactor-review.md, "Where the time goes").
   - Use firmware v2026.11.18-2 or later: earlier firmware, including Eric's,
     can lose the last sector written before the PS/2 is switched off
     (finding 17).
