@@ -18,6 +18,25 @@ it, or from this fork before v2026.11.18-1, is reported as "has no version".
 
 ## Firmware
 
+### v2026.11.19-1
+
+- **Burst DMA:** with FPGA v2026.11.19-1 or later, the firmware allows the
+  FPGA's burst DMA (register 15) while the sector buffer is in use. Found at
+  startup (the banner says "burst DMA on"). The `B` serial command switches it
+  off and on, between commands. Older FPGAs read 0 at register 15 and work as
+  before.
+- **difbench** checks the burst control bit. It no longer uses register 15 as
+  an always-zero register.
+
+Tested with FPGA v2026.11.19-1, on a Rev P2 board:
+
+| Machine | DiskMeter, KB/s (random / sequential / buffered) | 20-round copy test |
+|---|---|---|
+| 55SX | 2108 / 2266 / 2305 (was 1107 / 1100 / 1151) | 120 of 120 identical, every SHA-256 correct |
+| Model 70 | 1956 / 2067 / 2102 (was 1110 / 1062 / 1108) | 120 of 120 identical, every SHA-256 correct |
+
+`difbench` passes.
+
 ### v2026.11.18-3
 
 - **Sector buffer:** with FPGA v2026.11.18-3 or later, sector reads and
@@ -94,6 +113,38 @@ below (built just before the version registers were added):
     identical, with every file's SHA-256 correct.
 
 ## FPGA
+
+### v2026.11.19-1
+
+- **Burst DMA** ([verilog/mcabus.v](verilog/mcabus.v)): with the sector
+  buffer in use and bursts allowed by the Teensy (register 15, bit 0), the
+  card holds `-BURST` from the grant, so the DMA controller moves word after
+  word without arbitrating again.
+  - It stops after the next transfer when that one uses the last word or
+    space in the buffer, when another device asserts `-PREEMPT`, after 64
+    words, or at `-TC`.
+  - It follows IBM's burst timing (T40, T43, T54 and T56; see
+    docs/formfactor-review.md, "Speed: burst DMA").
+  - It doesn't burst without the sector buffer.
+- **Request steadiness:** the sector buffer's "word ready" signal comes from
+  the half's state rather than the prefetch, so the card's request no longer
+  dips for 30 ns after each word.
+- **Register 15** is the burst control. Bit 0 reads back; the other bits
+  read 0.
+- **Debug build:** `make BOARD=ps2 PROBES=1` copies bus signals onto J4's SD
+  pins for a scope. It builds into `build/ps2-probes/` and isn't for
+  releases.
+- **Simulation:**
+  - The testbench's DMA controller does burst transfers, and memory refresh
+    preempts them.
+  - New tests cover burst reads and writes, `-TC` in the middle of a burst,
+    and the old path with bursts allowed.
+  - The full matrix passes with POS enabled.
+- **Timing budget** passes, including the burst rules. The smallest margins
+  are T54 at 1.2 ns (worst case stacked) and T22 at 8.2 ns. Uses 757 of 7680
+  logic cells.
+
+Tested with firmware v2026.11.19-1: see the firmware entry.
 
 ### v2026.11.18-3
 

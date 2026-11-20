@@ -74,11 +74,12 @@ There are also debugging aids:
   - It works in a PS/2 Model 70 with FPGA v2026.11.18-2 or later (finding
     16): configured with the Reference Diskette, it boots DOS, and passed a
     20-round copy test.
-  - With firmware and FPGA v2026.11.18-3 (the FPGA's sector buffer),
-    DiskMeter measures about 1.1 MB/s in both machines, up from about
-    690 KB/s (55SX) and 990 KB/s (Model 70). A scope shows the DMA, with an
-    arbitration for every word, is still the limit; burst transfers are next
-    (docs/formfactor-review.md, "Where the time goes").
+  - With firmware and FPGA v2026.11.19-1 (the FPGA's sector buffer and
+    burst DMA), DiskMeter measures 2.1-2.3 MB/s in the 55SX and 2.0-2.1 MB/s
+    in the Model 70. That's up from about 690 and 990 KB/s with Eric's design,
+    and faster than an IDE adapter (McIDE) in the 55SX (docs/formfactor-review.md,
+    "Speed: burst DMA"). Both machines passed the 20-round copy test with it.
+  - **Not yet tried with OS/2.**
   - Use firmware v2026.11.18-2 or later: earlier firmware, including Eric's,
     can lose the last sector written before the PS/2 is switched off
     (finding 17).

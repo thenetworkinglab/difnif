@@ -957,26 +957,137 @@ So only about 300 ns of each word moves data. The rest is arbitration and
 the DMA controller's setup and dead time for each grant, and burst transfers
 would remove most of it.
 
+## Speed: burst DMA
+
+IBM's own DBA-ESDI drives transfer by burst DMA: 64-word bursts with
+optional pacing gaps, at about 500 ns per word (IBM DASD Storage Interface
+Specification, Micro Channel, Rev 2.2, section 3.4, at
+[ardent-tool.com](https://ardent-tool.com/docs/pdf/j_mcspec.pdf)). In a burst
+the card holds `-BURST` and the DMA controller moves word after word without
+arbitrating again.
+
+**IBM's rules** (PS/2 Model 50/60 Technical Reference, section 2, Figures
+2-28, 2-29, 2-42, 2-43 and 2-46):
+
+| | Rule | Limit |
+|---|---|---|
+| T43 | the winner pulls `-BURST` low after `ARB/-GNT` goes low | 50 ns max |
+| | the DMA controller checks `-BURST` at the end of each I/O cycle and stops when it's high | |
+| T55/T56 | the card releases `-BURST` by its last I/O cycle, high before that cycle's `-CMD` ends | 40 ns max from its status; 35 ns min before `-CMD` rises |
+| T54 | released after `-TC` | 30 ns max |
+| T40 | bus given up after another device asserts `-PREEMPT` | 7.8 us max, or an NMI and channel time-out |
+
+**The design** ([verilog/mcabus.v](../verilog/mcabus.v), FPGA v2026.11.19-1):
+
+- The card pulls `-BURST` low at the grant when the sector buffer holds two
+  or more words (or two or more spaces, for a disk write), nobody else is
+  waiting, and the Teensy allows it (register 15, bit 0). The decision is
+  latched on the grant edge, and `-BURST` comes from it through logic only.
+- It lets go only just after a transfer has gone through the buffer, about
+  100 ns after that I/O cycle's `-CMD` rose and two bus cycles before the
+  next I/O cycle can end, so the DMA controller does exactly one more
+  transfer. It lets go when that one will use the last word (or space)
+  ready, when another device asserts `-PREEMPT`, after 64 words (as IBM's
+  drives do), or once `-TC` has been seen. `-TC` also gates `-BURST`
+  directly, for T54.
+- It doesn't burst without the sector buffer, so older firmware gets the old
+  behaviour.
+- The buffer's "word ready" signal now comes from the half's state instead of
+  the prefetch, which removes the 30 ns dip in the card's request seen on the
+  scope.
+
+**Simulation:**
+
+- The testbench's DMA controller now bursts while the card holds `-BURST`,
+  checking it at the end of each I/O cycle.
+- In the burst tests memory refresh runs every 15 us. It runs during
+  arbitration and asserts `-PREEMPT`, so bursts get preempted as they would
+  in a PS/2.
+- Every rule above is checked as a failure, and so is `-BURST` low when
+  arbitration starts, or asserted where bursts aren't allowed.
+- The new tests:
+  - burst reads and writes, fast and slow Teensy, with a competing device;
+  - `-TC` in the middle of a burst;
+  - the old path with bursts allowed, which must not burst.
+- Four deliberately broken versions of the logic are each caught:
+  over-bursting, ignoring `-TC`, ignoring `-PREEMPT`, and releasing at any
+  moment.
+- The full matrix passes with POS enabled on the bridged and Rev P2 boards.
+  It now takes about 21 minutes.
+- Simulated reads at the Model 70's cycle went from 1.04 to 0.57 us per word.
+
+**Timing budget** (`tools/timing_budget.py --pos`):
+
+| Rule | Margin |
+|---|---|
+| T43 | 21 ns |
+| T54 | 1.2 ns |
+| T56 | 215 ns |
+
+The T54 figure stacks the slowest logic path in the design with doubled
+buffer delays. In use, `-TC` arrives after the card has already let go,
+because the DMA count matches the command's sectors.
+
+**Hardware** (Rev P2, firmware and FPGA v2026.11.19-1; DiskMeter 1.3,
+random / sequential / buffered, KB/s):
+
+| Machine | Sector buffer only | Burst DMA | Copy test |
+|---|---|---|---|
+| 55SX | 1107 / 1100 / 1151 | 2108 / 2266 / 2305 | 120 of 120 identical |
+| Model 70 | 1110 / 1062 / 1108 | 1956 / 2067 / 2102 | 120 of 120 identical |
+
+Other adapters in the same machines, measured by Tim with DiskMeter 1.3:
+
+| Adapter | 55SX | Model 70 |
+|---|---|---|
+| McIDE | 1867 / 1876 / 2005 | 2477 / 2477 / 2477 |
+| IBM SCSI ("Tribble") | | 2041 / 2171 / 2089 |
+| IBM SCSI with cache ("Spock") | | 1814 / 1709 / 1954 |
+| MCS-350 | | 398 / 432 / 426 |
+
+The DifNif is now faster than the McIDE in the 55SX and level with IBM's
+SCSI adapters in the Model 70. In the 70 the McIDE is still about 20%
+ahead: it's the same on all three tests and gains a lot from the 70's
+faster processor, which fits programmed I/O. The DifNif gets nothing from
+the faster processor, and is a little slower in the 70 than in the 55SX.
+
+**Other timings** with [tools/copytest/TIMING.BAT](../tools/copytest/TIMING.BAT)
+(five of each, on the 1 MB `T2.BIN`):
+
+| | 55SX | Model 70 |
+|---|---|---|
+| `COPY` to `D:` (read + write) | 6.9 s | 6.0 s |
+| `FC /B` compare | 133 s | 74 s |
+
+- `FC /B` is CPU-bound. It's most of each round of the copy test, which is
+  why rounds take about 2.5 minutes in the 55SX and 1.3 in the 70.
+- Copies take about the same time in both machines, about 1.2-1.4 s per MB,
+  so writes are probably near 1 MB/s. DiskMeter only measures reads. Writes
+  are the likely next target.
+- (`COPY` to `NUL`, also in the batch file, finishes faster than the bus
+  could deliver the data, so it doesn't seem to read the whole file. It
+  isn't a useful measurement.)
+
 ## Suggested next steps
 
 Done: DMA in the testbench, the timing check, Rev P2 schematic and layout,
 assembled boards from PCBWay, Eric's printed sled, bring-up in a 55SX
-(including the overnight copy test), and the Model 70 (finding 16).
+(including the overnight copy test), the Model 70 (finding 16), the sector
+buffer and burst DMA.
 
 1. **Rev P3 board change:** a separate direction line for U7 (finding 16),
    and route J4 pins 4-14 to their labelled signals (or drop the labels).
    Also worth considering: a way for the firmware to see the PS/2's 5 V
    going away, so it can finish writing before it loses power.
-2. **Speed:** with the sector buffer (see "Speed: the sector buffer") both
-   machines do about 1.1 MB/s, against about 1.9 MB/s for an IDE adapter in
-   the 55SX. The scope shows the DMA is still the limit (see "Where the time
-   goes"), so next is burst transfers: keep the bus for several words per
-   arbitration and end the burst when another device asserts `-PREEMPT`.
-   The board already wires `-BURST` to the FPGA (`burst_o_l`, pin 90);
-   `mcabus.v` holds it off. This needs IBM's burst timing rules, a
-   burst-capable planar in the testbench, and the request dip above fixed.
-   Smaller gains later: start the SD read for the first sectors of a
-   command sooner (the 720 us wait).
+2. **Speed:** with burst DMA (see "Speed: burst DMA") reads run at about
+   2.0-2.3 MB/s in both machines. The simulated bus does better than that,
+   so the limit has moved again. Next:
+   - **Writes:** measure them properly. The copy timings suggest about
+     1 MB/s.
+   - **Reads:** take a scope capture during bursts, with the `PROBES` build,
+     to see the gaps between bursts and whether the buffer runs dry.
+   - **Smaller gains:** start the SD read for the first sectors of a command
+     sooner (the 720 us wait).
 3. **The one-byte shift:** keep the copy test running on other machines and
    with other workloads (Windows 3.1, large compiles); run DIFDIAG's Int13
    test.
@@ -1025,7 +1136,9 @@ around the unmodified FPGA design. It models:
   `-TC` on the last one, and a new arbitration cycle 30 ns (limit) or 100 ns
   (typical) after every transfer. A second DMA device at a higher or lower
   priority competes for the bus, and the CPU does unrelated I/O in between; the
-  card must never answer those cycles.
+  card must never answer those cycles. Since FPGA v2026.11.19-1 the DMA
+  controller also does burst transfers while the card holds `-BURST`, and
+  memory refresh preempts them (see "Speed: burst DMA").
 
 Run `verilog/run_sim72.sh` (about 50 seconds for 162 simulations;
 `run_sim72.sh quick` runs one delay set). Results **before** the Verilog fixes:
