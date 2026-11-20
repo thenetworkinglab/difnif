@@ -78,6 +78,9 @@ IBM = {
     "T41":  30,     # ARB/-GNT high from end of transfer (min, Figure 2-46)
     "T42":  50,     # -PREEMPT inactive from ARB/-GNT low (max, Figure 2-46)
     "T45":  50,     # arbitration driver turn-on from ARB/-GNT high (max)
+    "T43":  50,     # -BURST active from ARB/-GNT low, bursting DMA slave (max, Figure 2-46)
+    "T54":  30,     # -BURST released from -TC active (max, Figure 2-42)
+    "T56":  35,     # -BURST high before the last I/O cycle's -CMD rises (min, Figure 2-43)
     "T47":  50,     # driver turn-on/off from another ARB line (T45A/T47, max)
 }
 
@@ -226,6 +229,22 @@ def main():
     req_drop = clk_cmd_max + d("posedge cmd_l", "posedge arb_gnt_l")
     row("T41", "DMA request dropped before next ARB/-GNT", 0,
         IBM["T41"] + clk_gnt_min - req_drop, kind="min")
+
+    # Burst DMA (stage 2). -BURST goes low at the grant through the flip-flop
+    # clocked by ARB/-GNT falling and through logic from the pin.
+    row("T43", "-BURST active after ARB/-GNT low", IBM["T43"],
+        max(clk_gnt_max + d("negedge arb_gnt_l", "<async>"), xin_max + PAD_IN + comb)
+        + PAD_OUT + BOARD["lcx07"])
+    row("T54", "-BURST released after -TC active", IBM["T54"],
+        xin_max + PAD_IN + comb + PAD_OUT + BOARD["lcx07"])
+    # The card lets go of -BURST from the 50 MHz domain after a transfer has
+    # gone through the buffer: at most six clocks after that I/O cycle's
+    # -CMD rose (synchronizer, buffer update, decision). The next I/O cycle
+    # can't end until two bus cycles later (memory then I/O, 200 ns each at
+    # the fastest).
+    release = clk_cmd_max + 6 * 20.0 + d("posedge clk", "<async>") + PAD_OUT + BOARD["lcx07"]
+    row("T56", "-BURST high before the next I/O -CMD rises", IBM["T56"],
+        2 * 200 - release, kind="min")
 
     print("FPGA path classes used (nextpnr, worst path of each class):")
     for (f, t), v in sorted(w.items()):

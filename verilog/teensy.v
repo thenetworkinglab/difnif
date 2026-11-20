@@ -56,6 +56,7 @@ module teensy(
     // Sector buffer (sectorbuf.v), all on clk
     output buf_mode,            // flag bit 11: buffer on
     output buf_dir,             // flag bit 12: 0 disk read, 1 disk write
+    output burst_en,            // register 15 bit 0: burst DMA allowed (fork)
     output reg t_buf_wr = 1'b0,     // one-clock pulses
     output reg [15:0] t_buf_wdata = 16'h0000,
     output reg t_buf_rd = 1'b0,
@@ -79,6 +80,7 @@ module teensy(
     localparam REG_POS4 = 4'd9;
     // Read-only version registers (version.vh, BCD), and which build this is
     localparam REG_BUF = 4'd14;     // sector buffer data (fork)
+    localparam REG_CTRL = 4'd15;    // bit 0: burst DMA allowed (fork, stage 2)
     localparam REG_VER_YEAR = 4'd10;
     localparam REG_VER_DATE = 4'd11;
     localparam REG_VER_COUNT = 4'd12;
@@ -95,6 +97,7 @@ module teensy(
     reg [15:0] flags_in = 16'H0000;
 
     reg [15:0] testreg = 16'HABCD;
+    reg ctrl_in = 1'b0;             // register 15 (fork)
 
     reg [7:0] t_isr;
     reg [15:0] t_sifr;
@@ -150,6 +153,7 @@ module teensy(
             REG_VER_COUNT : tn_d_out <= `FPGA_VERSION_COUNT;
             REG_VARIANT   : tn_d_out <= VARIANT;
             REG_BUF       : tn_d_out <= t_buf_rdata;
+            REG_CTRL      : tn_d_out <= {15'h0000, ctrl_in};
             default    : tn_d_out <= 16'H0;
         endcase
     end
@@ -162,8 +166,14 @@ module teensy(
             REG_ISR    : t_isr <= tn_d;
             REG_SIFR   : t_sifr <= tn_d;
             REG_DREG   : t_dreg <= tn_d;
+            REG_CTRL   : ctrl_in <= tn_d[0];
         endcase
     end
+
+    // Control register (fork): bit 0 allows burst DMA
+    reg [1:0] burst_s = 2'b00;
+    always @ (posedge clk) burst_s <= {burst_s[0], ctrl_in};
+    assign burst_en = burst_s[1];
 
     // Sector buffer access (fork). RD and WR are sampled on the 50 MHz
     // clock. A write is taken when WR is seen high, 20-60 ns after it rises,

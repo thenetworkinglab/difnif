@@ -95,6 +95,7 @@ module difnif_top(
 
     // Sector buffer (fork)
     wire buf_mode, buf_dir;
+    wire burst_en;
     wire t_buf_wr, t_buf_rd, t_buf_go, t_buf_done;
     wire [15:0] t_buf_wdata, t_buf_rdata;
     wire t_buf_ready, t_buf_can_arm, t_buf_h_idle;
@@ -184,7 +185,8 @@ module difnif_top(
         .buf_h_more(buf_h_more),
         .buf_h_rdata(buf_h_rdata),
         .buf_h_ev(buf_h_ev),
-        .clear_all_o(mca_clear_all)
+        .clear_all_o(mca_clear_all),
+        .burst_en(burst_en)
     );
 
     teensy tn1 (
@@ -223,6 +225,7 @@ module difnif_top(
 
         .buf_mode(buf_mode),
         .buf_dir(buf_dir),
+        .burst_en(burst_en),
         .t_buf_wr(t_buf_wr),
         .t_buf_wdata(t_buf_wdata),
         .t_buf_rd(t_buf_rd),

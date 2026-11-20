@@ -94,7 +94,10 @@ module sectorbuf(
     wire t_free = dir & t_done & (st_tp == TEENSY);      // dir 1: half read out
     wire h_last = (hp_idx == 8'hFF);
 
-    assign h_ready = dir ? (st_hp == HOST) : h_valid;
+    // Ready from the half's state rather than the prefetch, so the card's
+    // request doesn't dip for the 40 ns the next word takes to fetch; the
+    // host's next access to it is hundreds of ns away.
+    assign h_ready = (st_hp == HOST);
     assign t_ready = dir ? ((st_tp == TEENSY) & t_valid) : (st_tp == FREE);
     assign t_can_arm = dir & (st_ap == FREE);
     assign h_idle = (st0 != HOST) & (st1 != HOST);

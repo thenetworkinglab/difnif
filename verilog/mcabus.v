@@ -87,7 +87,10 @@ module mcabus(
     input buf_h_more,         // ...and still will be after the transfer in progress
     input [15:0] buf_h_rdata, // the word for the host
     output buf_h_ev,          // a DREG access has completed (one clock)
-    output clear_all_o
+    output clear_all_o,
+
+    // Burst DMA (fork, stage 2)
+    input burst_en            // Teensy register 15 bit 0, synchronized
     );
 
     // Declared early: used before their definitions below
@@ -121,7 +124,6 @@ module mcabus(
 
     // Unused signals (for now)
     assign cd_chrdy_l = 1'b1;
-    assign burst_o_l = 1'b1;
 
     // Registers
     reg [15:0] reg_cifr = 16'h0000;
@@ -431,6 +433,71 @@ module mcabus(
 
     // Deassert preempt as soon as we win arbitration
     assign preempt_o_l = ~(dma_requested & ~la_arb_won);
+
+    // Burst DMA (fork, stage 2). With the sector buffer on and bursts
+    // allowed (Teensy register 15), the card holds -BURST from the grant, so
+    // the DMA controller moves word after word without arbitrating again
+    // (IBM PS/2 Model 50/60 Technical Reference, Figures 2-28 and 2-43).
+    //   T43  -BURST low within 50 ns of ARB/-GNT going low: decided at the
+    //        grant edge, through logic only.
+    //   T56  -BURST high at least 35 ns before the last I/O cycle's -CMD
+    //        rises. The card only lets go just after a transfer has gone
+    //        through the buffer, about 100 ns after its -CMD rose and two
+    //        bus cycles before the next I/O cycle can end, so the DMA
+    //        controller does exactly one more transfer. It lets go when that
+    //        one will use the last word ready (or the last space), when
+    //        another device asserts -PREEMPT, after BURST_MAX words, or once
+    //        -TC has been seen.
+    //   T54  -BURST released within 30 ns of -TC: -TC gates it directly.
+    //   T40  bus given up within 7.8 us of another device's -PREEMPT: within
+    //        one transfer.
+    // A burst only starts with two or more words (or spaces) ready and
+    // nobody else waiting, and doesn't restart within the same grant.
+    // BURST_MAX follows IBM's own DBA-ESDI drives, which burst 64 words at a
+    // time (DASD Storage Interface Specification, 3.4.2).
+    localparam [6:0] BURST_MAX = 7'd64;
+
+    reg [1:0] s_gnt = 2'b00;        // synchronized: ARB/-GNT high (arbitrating)
+    reg [1:0] s_pre = 2'b00;        // -PREEMPT active
+    reg [1:0] s_tc = 2'b00;         // -TC active
+    reg [3:0] own_pre = 4'h0;       // the card itself drove -PREEMPT lately
+    reg pend_q = 1'b0;
+    always @ (posedge clk) begin
+        s_gnt <= {s_gnt[0], arb_gnt_l};
+        s_pre <= {s_pre[0], ~preempt_l};
+        s_tc <= {s_tc[0], ~tc_l};
+        own_pre <= {own_pre[2:0], ~preempt_o_l};
+        pend_q <= treq_pending;
+    end
+    wire other_pre = s_pre[1] & ~|own_pre;
+    wire absorbed = pend_q & ~treq_pending;     // a transfer just went through the buffer
+
+    reg burst_ok = 1'b0;            // a burst could start now
+    reg burst_stop = 1'b0;          // let go of -BURST for the rest of this grant
+    reg [6:0] burst_n = 7'd0;       // transfers so far in this grant
+    always @ (posedge clk) begin
+        burst_ok <= burst_en & buf_mode & control_dma_enable & card_enable &
+                    buf_h_more & ~treq_pending & ~other_pre;
+        if (s_gnt[1]) begin
+            burst_stop <= 1'b0;
+            burst_n <= 7'd0;
+        end else begin
+            if (absorbed) burst_n <= burst_n + 7'd1;
+            if (s_tc[1] | (absorbed & (~buf_h_more | other_pre | ~buf_mode |
+                                       (burst_n == BURST_MAX - 7'd2))))
+                burst_stop <= 1'b1;
+        end
+    end
+
+    // Decided at the grant, like la_arb_won
+    reg burst_cycle = 1'b0;
+    always @ (negedge arb_gnt_l or posedge chreset) begin
+        if (chreset)
+            burst_cycle <= 1'b0;
+        else
+            burst_cycle <= arb_won & burst_ok;
+    end
+    assign burst_o_l = ~(burst_cycle & arb_won & ~arb_gnt_l & ~burst_stop & tc_l);
 
     // dma_selected acts like another address select. This should enable access
     // by the bus to the DREG.

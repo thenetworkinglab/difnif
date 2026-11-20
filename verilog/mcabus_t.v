@@ -133,6 +133,7 @@ module mcabus_t;
         .buf_h_ready(1'b0),
         .buf_h_more(1'b0),
         .buf_h_rdata(16'h0000),
+        .burst_en(1'b0),
 
         .test3(test3)
     );

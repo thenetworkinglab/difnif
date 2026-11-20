@@ -16,7 +16,12 @@
 //   * the Teensy: register accesses timed like difnift.ino's portRead and
 //     portWrite, running the same mailbox handshakes as DIFDIAG
 //   * the planar's central arbiter and DMA controller (Figures 2-40, 2-41,
-//     2-46), optionally with a second DMA device competing for the bus
+//     2-46), optionally with a second DMA device competing for the bus.
+//     The DMA controller keeps the bus while the card holds -BURST (Figures
+//     2-28, 2-29, 2-42, 2-43), and in the burst tests memory refresh takes
+//     place in arbitration every 15 us, so bursts get preempted. The burst
+//     rules checked are T40, T43, T54 and T56; IBM PS/2 Model 50/60
+//     Technical Reference, section 2.
 //
 // Parameters (override with iverilog -P difnif72_t.NAME=value):
 //   CYCLE        default I/O cycle in ns: 300 = 50Z, 250 = 55SX, 200 = Model 70
@@ -80,6 +85,11 @@ module difnif72_t;
     localparam real T_ARB     = 300;                // T44 ARB/-GNT high (arbitration) time
     localparam real T_GNT_CMD = 115;                // T43B -CMD after ARB/-GNT low
     localparam real T_PRE_OFF = 50;                 // T42 winner releases -PREEMPT
+    localparam real T_BURST_ON  = 50;               // T43 -BURST active from ARB/-GNT low
+    localparam real T_BURST_TC  = 30;               // T54 -BURST released from -TC active
+    localparam real T_BURST_SU  = 35;               // T56 -BURST high before the last I/O -CMD rises
+    localparam real T_BURST_MAX = 7800;             // T40 bus released after -PREEMPT
+    localparam real T_REFRESH   = 15000;            // memory refresh interval (burst tests)
 
     // ESDI registers (primary address)
     localparam [15:0] A_CIFR = 16'h3510;  // write: command interface, read: status
@@ -96,6 +106,7 @@ module difnif72_t;
                FL_TREQ = 8;
     // Sector buffer (sectorbuf.v): register 14, flag bits 11-15
     localparam [3:0] TN_BUF = 14;
+    localparam [3:0] TN_CTRL = 15;      // bit 0: burst DMA allowed (stage 2)
     localparam FL_BUF_MODE = 11, FL_BUF_DIR = 12,
                FL_BUF_GO = 13, FL_BUF_DONE = 14,                        // written as 1
                FL_BUF_READY = 13, FL_BUF_CAN_ARM = 14, FL_BUF_IDLE = 15; // read
@@ -321,18 +332,30 @@ module difnif72_t;
     event end_cycle;
     realtime end_rise;
     realtime t_last_rise;
-    reg end_rd, end_tc;
+    reg end_rd, end_tc, end_mem;
     integer end_id;
+
+    // -BURST as the DMA controller sees it at the end of each I/O cycle, and
+    // how long it had been steady (T56)
+    realtime t_burst_chg = 0;
+    reg io_burst_l = 1'b1;
+    realtime io_burst_age = 0;
+    always @(h_burst_l) t_burst_chg = $realtime;
 
     always @(end_cycle) begin : cycle_end
         realtime rise;
-        reg rd, tc;
+        reg rd, tc, mem;
         integer id;
         rise = end_rise;
         rd = end_rd;
         tc = end_tc;
+        mem = end_mem;
         id = end_id;
         wait_until(rise);
+        if (!mem) begin
+            io_burst_l = h_burst_l;
+            io_burst_age = rise - t_burst_chg;
+        end
         h_cmd_l = 1'b1;
         if (tc) begin
             wait_until(rise + 10);  // T53
@@ -431,6 +454,7 @@ module difnif72_t;
             end_rise = t_rise;
             end_rd = rd;
             end_tc = tc;
+            end_mem = mem;
             end_id = my_id;
             -> end_cycle;
 
@@ -913,24 +937,87 @@ module difnif72_t;
     // Central arbiter and DMA controller
     // ------------------------------------------------------------------
     integer dma_done;               // transfers completed for the card
+    reg dma_hold_at_n = 1'b0;       // stop after n transfers without arbitrating again
     realtime t_dma_start;
     integer dma_extra;              // transfers the card won with nothing to send
     reg [15:0] dma_buf [0:1023];    // "system memory"
 
-    // The card must never request burst mode
-    always @(h_burst_l)
-        if (h_burst_l === 1'b0) fail("card asserted -BURST");
+    // Burst mode. The card may only burst in the burst tests, and only
+    // while it holds the grant: -BURST goes low within T43 of ARB/-GNT going
+    // low, is released within T54 of -TC, and is high by the next
+    // arbitration.
+    reg burst_allowed = 1'b0;       // this test lets the card burst
+    reg card_granted = 1'b0;        // the card won the current grant
+    reg burst_seen = 1'b0;          // ...and asserted -BURST in it
+    realtime t_grant = 0;
+    integer n_bursts, burst_words, burst_max;   // statistics for the burst tests
+
+    always @(negedge h_burst_l) if (h_burst_l === 1'b0) begin
+        if (!burst_allowed)
+            fail("card asserted -BURST (burst DMA not allowed in this test)");
+        else if (!card_granted || h_arb_gnt_l !== 1'b0)
+            fail("card asserted -BURST without holding the grant");
+        else begin
+            burst_seen = 1'b1;
+            if ($realtime - t_grant > T_BURST_ON)
+                fail($sformatf("-BURST asserted %0.1f ns after ARB/-GNT went low (T43, max %0.0f)",
+                               $realtime - t_grant, T_BURST_ON));
+        end
+    end
+    always @(posedge h_arb_gnt_l)
+        if (h_burst_l === 1'b0) fail("-BURST still low when arbitration started");
+    reg tc_in_burst = 1'b0;         // -TC came while the card held -BURST
+    always @(negedge h_tc_l) begin : tc_burst
+        if (h_burst_l === 1'b0) tc_in_burst = 1'b1;
+        #(T_BURST_TC);
+        if (h_burst_l === 1'b0)
+            fail($sformatf("-BURST still low %0.0f ns after -TC (T54)", T_BURST_TC));
+    end
+
+    // Memory refresh: the planar asks for the channel every T_REFRESH and
+    // refreshes while ARB/-GNT is in the arbitrate state (level -2, page 2-55)
+    // When another requester (not the card) last raised -PREEMPT. Set in
+    // the same step as the request, so the T40 check never sees a new
+    // request with an old time.
+    realtime t_pre_other = 0;
+
+    reg refresh_on = 1'b0, refresh_want = 1'b0;
+    initial forever begin
+        #(T_REFRESH);
+        if (refresh_on && !refresh_want) begin
+            t_pre_other = $realtime;
+            refresh_want = 1'b1;
+        end
+    end
+    assign h_preempt_l = refresh_want ? 1'b0 : 1'bz;
+
+    task automatic comp_ask;
+        if (!comp_want) begin
+            t_pre_other = $realtime;
+            comp_want = 1'b1;
+        end
+    endtask
 
     // One arbitration cycle, starting T41 after the last transfer ended
     task automatic arbitrate(output [3:0] winner);
+        reg [15:0] d;
         begin
             wait_until(t_last_rise + T_EOT_ARB);
             h_arb_gnt_l = 1'b1;
+            card_granted = 1'b0;
+            burst_seen = 1'b0;
             comp_in = comp_want;
+            if (refresh_want) begin
+                // A refresh cycle: the card must ignore it
+                mca_cycle(1, 1, 0, 0, 16'h0000, 1, 0, 0, 16'h0, d);
+                refresh_want = 1'b0;
+            end
             #(T_ARB);
             winner = h_arb;
             if (^winner === 1'bx) fail($sformatf("arbitration bus unresolved: %b", winner));
             h_arb_gnt_l = 1'b0;
+            t_grant = $realtime;
+            card_granted = (winner == card_level);
             t_next_cmd = $realtime + T_GNT_CMD;
             if (winner != comp_level) comp_in = 1'b0;
             if (winner == card_level) begin
@@ -943,6 +1030,7 @@ module difnif72_t;
 
     // The planar's DMA controller moving one word. Its I/O cycles carry an
     // address the card must ignore: alternate between DREG and garbage.
+    // Returns once the I/O cycle has ended, with io_burst_l set.
     task automatic dma_transfer(input to_card, input integer k, input last);
         reg [15:0] d, io_addr;
         begin
@@ -951,6 +1039,7 @@ module difnif72_t;
                 // DMA read: memory read, then I/O write to the card
                 mca_cycle(1, 1, 0, 0, 16'h2000 + 2 * k, 1, 0, 0, 16'h0, d);
                 mca_cycle(0, 0, 0, last, io_addr, 1, 1, 1, dma_buf[k], d);
+                wait_until(t_last_rise + 0.1);
             end else begin
                 // DMA write: I/O read from the card, then memory write
                 mca_cycle(1, 0, 0, last, io_addr, 1, 1, 1, 16'h0, d);
@@ -975,11 +1064,15 @@ module difnif72_t;
     task automatic dma_run(input to_card, input integer n, input compete);
         reg [3:0] winner;
         reg [15:0] d;
-        reg after_card;
-        integer loops;
+        reg after_card, more;
+        integer loops, blen;
+        realtime t_ref;
         begin
             dma_done = 0;
             dma_extra = 0;
+            n_bursts = 0;
+            burst_words = 0;
+            burst_max = 0;
             t_dma_start = $realtime;
             for (loops = 0; dma_done < n && loops < 40 * n && !aborted; loops = loops + 1) begin
                 // CPU cycles to an unrelated port while nobody is asking
@@ -991,7 +1084,7 @@ module difnif72_t;
                     fail("card drove the data bus during a CPU cycle to 0080");
                     drove = 1'b0;
                 end
-                if (compete && (loops % 3 == 1)) comp_want = 1'b1;
+                if (compete && (loops % 3 == 1)) comp_ask;
 
                 // Arbitrate when anyone wants the bus. Every transfer is
                 // followed by another arbitration cycle (T41); the bus goes
@@ -1007,12 +1100,41 @@ module difnif72_t;
                             // straight after the card's own transfer means it
                             // bid with a request that was already serviced.
                             if (after_card) dma_extra = dma_extra + 1;
-                            if (dma_done >= n) begin
-                                fail("card won arbitration after its last transfer");
-                                aborted = 1'b1;
-                            end else begin
-                                dma_transfer(to_card, dma_done, dma_done == n - 1);
-                                dma_done = dma_done + 1;
+                            // Transfers until -BURST is high at the end of an
+                            // I/O cycle (one transfer when the card doesn't
+                            // burst), -TC, or a channel time-out (T40)
+                            blen = 0;
+                            more = 1'b1;
+                            while (more && !aborted) begin
+                                if (dma_done >= n) begin
+                                    fail("card won arbitration after its last transfer");
+                                    aborted = 1'b1;
+                                end else begin
+                                    dma_transfer(to_card, dma_done, dma_done == n - 1);
+                                    dma_done = dma_done + 1;
+                                    blen = blen + 1;
+                                end
+                                if (io_burst_l === 1'bx) fail("-BURST unknown at the end of an I/O cycle");
+                                if (burst_seen && io_burst_age < T_BURST_SU)
+                                    fail($sformatf("-BURST changed %0.1f ns before -CMD rose (T56, min %0.0f)",
+                                                   io_burst_age, T_BURST_SU));
+                                more = io_burst_l === 1'b0 && dma_done < n;
+                                // Another requester waiting: the card must let go within T40
+                                if (more && (comp_want || refresh_want)) begin
+                                    t_ref = t_pre_other > t_grant ? t_pre_other : t_grant;
+                                    if ($realtime - t_ref > T_BURST_MAX) begin
+                                        fail($sformatf("card kept the bus %0.1f us after -PREEMPT (T40, max 7.8)",
+                                                       ($realtime - t_ref) / 1000.0));
+                                        more = 1'b0;
+                                    end
+                                end
+                                // The competitor asks for the bus in the middle of a burst
+                                if (more && compete && dma_done % 97 == 50) comp_ask;
+                            end
+                            if (blen > 1) begin
+                                n_bursts = n_bursts + 1;
+                                burst_words = burst_words + blen;
+                                if (blen > burst_max) burst_max = blen;
                             end
                             after_card = 1'b1;
                         end else if (winner == comp_level) begin
@@ -1023,7 +1145,10 @@ module difnif72_t;
                             fail($sformatf("arbitration won by unknown level %h", winner));
                             aborted = 1'b1;
                         end
-                        if (!aborted) arbitrate(winner);
+                        if (!aborted && dma_hold_at_n && dma_done >= n)
+                            winner = 4'hF;      // leave the bus as it is
+                        else if (!aborted)
+                            arbitrate(winner);
                     end
                 end
             end
@@ -1094,16 +1219,93 @@ module difnif72_t;
         end
     endtask
 
+    // Burst tests: allow burst DMA in the FPGA, and turn on memory refresh so
+    // that bursts get preempted
+    task automatic burst_begin(input burst);
+        begin
+            if (burst) begin
+                tn_write(TN_CTRL, 16'h0001);
+                burst_allowed = 1'b1;
+                refresh_on = 1'b1;
+            end
+        end
+    endtask
+
+    task automatic burst_end(input burst);
+        begin
+            if (burst) begin
+                if (!aborted && n_bursts == 0) fail("the card never burst");
+                $display("      %0d bursts, %0.1f words on average, longest %0d; %0.2f us per word",
+                         n_bursts, n_bursts ? 1.0 * burst_words / n_bursts : 0.0, burst_max,
+                         ($realtime - t_dma_start) / 1000.0 / (dma_done ? dma_done : 1));
+                tn_write(TN_CTRL, 16'h0000);
+                refresh_on = 1'b0;
+                refresh_want = 1'b0;
+                burst_allowed = 1'b0;
+            end
+        end
+    endtask
+
+    // Burst ended by the DMA controller: its count runs out (-TC) in the
+    // middle of a burst, with more words still in the buffer. The card must
+    // let go of -BURST within T54, and the words up to the count must arrive.
+    task automatic test_burst_tc;
+        integer k, w, n;
+        reg ok;
+        reg [3:0] winner;
+        reg [15:0] base;
+        begin
+            begin_test("burst: -TC in the middle of a burst");
+            burst_begin(1);
+            refresh_on = 1'b0;          // so the burst is still going at -TC
+            n = 256 + 37;
+            tc_in_burst = 1'b0;
+            for (k = 0; k < 512; k = k + 1) dma_buf[k] = 16'hxxxx;
+            base = 16'h0080 | (16'h1 << FL_BUF_MODE);
+            tn_write(TN_FLAGS, base);
+            for (k = 0; k < 2; k = k + 1) begin
+                tn_wait_flag_n(FL_BUF_READY, 1'b1, 4000, ok);
+                for (w = 0; w < 256 && ok; w = w + 1)
+                    tn_buf_write(bpat(k * 256 + w, 16'h7C7C));
+                if (ok) tn_write(TN_FLAGS, base | (16'h1 << FL_BUF_GO));
+            end
+            host_out(A_BSR, 0, 16'h0002);
+            // The card still has words after the count runs out and would bid
+            // for the bus again, so stop there, turn the buffer off, and only
+            // then let the bus go back to the CPU.
+            dma_hold_at_n = 1'b1;
+            dma_run(0, n, 0);
+            dma_hold_at_n = 1'b0;
+            if (!aborted && !tc_in_burst) fail("-TC didn't come during a burst (test needs another count)");
+            #2000;
+            if (h_burst_l !== 1'b1) fail("-BURST low after the DMA count ran out");
+            tn_write(TN_FLAGS, 16'h0080);   // buffer off: the rest is thrown away
+            #1000;
+            if (!aborted) begin
+                arbitrate(winner);
+                if (winner != 4'hF) fail($sformatf("level %h won arbitration with the buffer off", winner));
+            end
+            for (k = 0; k < n && !aborted; k = k + 1)
+                if (dma_buf[k] !== bpat(k, 16'h7C7C))
+                    fail($sformatf("DMA word %0d: memory got %h, Teensy wrote %h", k, dma_buf[k],
+                                   bpat(k, 16'h7C7C)));
+            host_out(A_BSR, 0, 16'h0000);
+            burst_end(1);
+            end_test;
+        end
+    endtask
+
     // Sector buffer, disk read: the Teensy loads sectors into the buffer,
     // DMA moves them to memory. slow: the Teensy takes 400 us over each
     // sector, so the host has to wait for it.
-    task automatic test_buf_from_card(input compete, input slow, input string name);
+    task automatic test_buf_from_card(input compete, input slow, input burst, input string name);
         integer k, sct, w;
         reg ok;
         reg [15:0] fl;
         reg [15:0] base;
         begin
             begin_test(name);
+            burst_begin(burst);
             for (k = 0; k < N_SECT * 256; k = k + 1) dma_buf[k] = 16'hxxxx;
             base = 16'h0080 | (16'h1 << FL_BUF_MODE);   // busy bit left alone
             tn_write(TN_FLAGS, base);
@@ -1132,6 +1334,7 @@ module difnif72_t;
             tn_read(TN_FLAGS, fl);
             if (fl[15:11] !== 5'b00000) fail($sformatf("buffer off: flags %h, bits 11-15 should be 0", fl));
             host_out(A_BSR, 0, 16'h0000);
+            burst_end(burst);
             end_test;
         end
     endtask
@@ -1139,13 +1342,14 @@ module difnif72_t;
     // Sector buffer, disk write: the Teensy arms halves, DMA fills them from
     // memory, the Teensy reads each full one out. slow: 400 us before reading
     // each sector, so the host has to wait for room.
-    task automatic test_buf_to_card(input compete, input slow, input string name);
+    task automatic test_buf_to_card(input compete, input slow, input burst, input string name);
         integer k, sct, w, armed;
         reg ok;
         reg [15:0] fl, d;
         reg [15:0] base;
         begin
             begin_test(name);
+            burst_begin(burst);
             for (k = 0; k < N_SECT * 256; k = k + 1) dma_buf[k] = bpat(k, 16'h0DD5);
             base = 16'h0080 | (16'h1 << FL_BUF_MODE) | (16'h1 << FL_BUF_DIR);
             tn_write(TN_FLAGS, base);
@@ -1181,6 +1385,7 @@ module difnif72_t;
             if (!aborted && fl[FL_BUF_IDLE] !== 1'b1) fail($sformatf("buffer not idle after the transfer: flags %h", fl));
             tn_write(TN_FLAGS, 16'h0080);
             host_out(A_BSR, 0, 16'h0000);
+            burst_end(burst);
             end_test;
         end
     endtask
@@ -1259,11 +1464,20 @@ module difnif72_t;
         test_dma_from_card(1, "DMA sector read, lower-priority device competing");
 `endif
         comp_level = 4'h2;
-        test_buf_from_card(0, 0, "buffer: DMA sector read, 3 sectors");
-        test_buf_to_card(0, 0, "buffer: DMA sector write, 3 sectors");
-        test_buf_from_card(1, 1, "buffer: DMA sector read, slow Teensy, device competing");
-        test_buf_to_card(1, 1, "buffer: DMA sector write, slow Teensy, device competing");
+        test_buf_from_card(0, 0, 0, "buffer: DMA sector read, 3 sectors");
+        test_buf_to_card(0, 0, 0, "buffer: DMA sector write, 3 sectors");
+        test_buf_from_card(1, 1, 0, "buffer: DMA sector read, slow Teensy, device competing");
+        test_buf_to_card(1, 1, 0, "buffer: DMA sector write, slow Teensy, device competing");
+        test_buf_from_card(0, 0, 1, "burst: DMA sector read, 3 sectors");
+        test_buf_to_card(0, 0, 1, "burst: DMA sector write, 3 sectors");
+        test_buf_from_card(1, 1, 1, "burst: DMA sector read, slow Teensy, device competing");
+        test_buf_to_card(1, 1, 1, "burst: DMA sector write, slow Teensy, device competing");
+        test_burst_tc;
         test_dma_from_card(0, "DMA sector read without the buffer, after it");
+        // Burst allowed but the buffer off: the old path must not burst
+        tn_write(TN_CTRL, 16'h0001);
+        test_dma_from_card(0, "DMA sector read without the buffer, burst allowed");
+        tn_write(TN_CTRL, 16'h0000);
         test_channel_reset;
         test_not_selected(16'h0080, "no response at 0080 after DMA");
 
