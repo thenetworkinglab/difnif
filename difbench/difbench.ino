@@ -50,7 +50,8 @@ const int datafpga[16] = {29, 28, 21, 23, 17, 18, 26, 25, 33, 34, 31, 32, 11, 16
 #define REG_VER_DATE 11
 #define REG_VER_COUNT 12
 #define REG_VARIANT 13    // 1 = make BOARD=ps2, 0 = ThinkPad build
-#define REG_UNUSED 15     // reads 0, writes do nothing
+#define REG_CTRL 15       // bit 0: burst DMA allowed (v2026.11.19-1 and later);
+                          // bits 15-1 read 0, and older builds read 0 throughout
 
 // Flag register bits
 #define FLAG_ISR_FULL 1
@@ -113,7 +114,7 @@ void portWrite(uint8_t a, uint16_t d)
 // FPGA isn't driving reads wrong instead of keeping the value just written
 void precharge(uint16_t expected)
 {
-  portWrite(REG_UNUSED, ~expected);
+  portWrite(REG_CTRL, ~expected);
 }
 
 
@@ -186,21 +187,22 @@ bool testAlive()
     Serial.println(" (keeps its value until the FPGA is reconfigured, fine on a re-run)");
   }
 
-  // An unused address must read 0 whatever was left on the bus
+  // Register 15 must read 0 in bits 15-1 whatever was left on the bus (bit 0
+  // reads back what was written, on builds that have it)
   precharge(0x0000);
-  a = portRead(REG_UNUSED);
-  portWrite(REG_UNUSED, 0x0000);
-  b = portRead(REG_UNUSED);
-  if (a == 0x0000 && b == 0x0000) {
+  a = portRead(REG_CTRL);
+  portWrite(REG_CTRL, 0x0000);
+  b = portRead(REG_CTRL);
+  if ((a & 0xFFFE) == 0x0000 && b == 0x0000) {
     pass("FPGA drives the bus on reads");
     return true;
   }
   fail("FPGA drives the bus on reads");
-  Serial.print("      unused address read ");
+  Serial.print("      register 15 read ");
   print16hex(a);
-  Serial.print(" (bus left at FFFF), then ");
+  Serial.print(" (bus left at FFFF; should be 0000 or 0001), then ");
   print16hex(b);
-  Serial.println(" (bus left at 0000); both should be 0000");
+  Serial.println(" (bus left at 0000; should be 0000)");
   Serial.println("      If these just echo what was left on the bus, the FPGA isn't driving it:");
   Serial.println("      check CDONE (J2 pin 2) is high (3.3 V), and the RD line (Teensy pin 36, FPGA pin 143).");
   return false;
@@ -343,6 +345,9 @@ void testAddress()
     if (a == REG_FLAGS) {
       // Bit 7 always reads 1, bit 5 and bits 11-15 always read 0
       ok = (v & 0xF8A0) == 0x0080 && v != 0x1234;
+    } else if (a == REG_CTRL) {
+      // Bit 0 holds what precharge() just wrote there (burst control)
+      ok = (v & 0xFFFE) == 0x0000;
     } else {
       ok = (v == known[a]);
     }
@@ -455,6 +460,30 @@ void testBufferFlags()
     Serial.print(" for disk write (11011), ");
     print16hex(off);
     Serial.println(" off (00000)");
+  }
+}
+
+
+// 5c. Burst DMA control (register 15 bit 0). Bursts need a host, so on the
+// bench this only checks the bit can be set and cleared.
+void testBurstCtrl()
+{
+  uint16_t on, off;
+  portWrite(REG_CTRL, 0x0001);
+  on = portRead(REG_CTRL);
+  portWrite(REG_CTRL, 0x0000);
+  off = portRead(REG_CTRL);
+  if (on == 0x0000 && off == 0x0000) {
+    Serial.println("      no burst DMA control in this FPGA build (older than v2026.11.19-1)");
+  } else if (on == 0x0001 && off == 0x0000) {
+    pass("burst DMA control bit (register 15)");
+  } else {
+    fail("burst DMA control bit (register 15)");
+    Serial.print("      read ");
+    print16hex(on);
+    Serial.print(" after writing 0001, ");
+    print16hex(off);
+    Serial.println(" after writing 0000");
   }
 }
 
@@ -601,12 +630,15 @@ void runAll()
   testVersion();
   testFlags();
   testBufferFlags();
+  testBurstCtrl();
   testClock();
   testInt();
   testSoak();
 
-  // Leave the FPGA idle
+  // Leave the FPGA idle, with burst DMA not allowed (the tests above leave
+  // test values in register 15)
   clearAll();
+  portWrite(REG_CTRL, 0x0000);
 
   Serial.println();
   Serial.print("Done: ");
