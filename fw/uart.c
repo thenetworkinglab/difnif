@@ -4,12 +4,33 @@
 
 #include "fw.h"
 
+// A ring buffer, sent a byte at a time by uart_poll() from the main loop, so
+// a log line doesn't hold up the host (a byte takes 10 us at 1 Mbaud). When
+// it's full, putch waits.
+static char ring[512];
+static unsigned head, tail;
+
+void uart_poll(void)
+{
+    if (head != tail && (UART & UART_TXRDY)) {
+        UART = (uint8_t)ring[tail];
+        tail = (tail + 1) % sizeof ring;
+    }
+}
+
+void uart_flush(void)
+{
+    while (head != tail) uart_poll();
+}
+
 void putch(char c)
 {
+    unsigned next;
     if (c == '\n') putch('\r');
-    while (!(UART & UART_TXRDY)) {
-    }
-    UART = (uint8_t)c;
+    next = (head + 1) % sizeof ring;
+    while (next == tail) uart_poll();
+    ring[head] = c;
+    head = next;
 }
 
 void puts_(const char *s)

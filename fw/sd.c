@@ -20,6 +20,7 @@ int sd_cmd(uint32_t idx, uint32_t arg, uint32_t flags)
     SD(SD_ARG) = arg;
     SD(SD_CMD) = flags | idx;
     do {
+        uart_poll();                   // the log keeps going meanwhile
         sd_status = SD(SD_STATUS);
     } while (sd_status & SDS_CMD_BUSY);
     return sd_status & SDS_CMD_ERRS;
@@ -28,6 +29,7 @@ int sd_cmd(uint32_t idx, uint32_t arg, uint32_t flags)
 static int wait_data(void)
 {
     do {
+        uart_poll();
         sd_status = SD(SD_STATUS);
     } while (sd_status & (SDS_CMD_BUSY | SDS_DATA_BUSY));
     return sd_status & (SDS_CMD_ERRS | SDS_DATA_ERRS);
@@ -70,6 +72,35 @@ int sd_read_cpu(uint32_t lba)
     e = sd_cmd(17, sd_high_capacity ? lba : lba * 512, R_SHORT | D_READ);
     if (!e) e = wait_data();
     return e;
+}
+
+// Disk transfers through the bridge to the sector buffer: n blocks from
+// card block lba. They run on their own; sd_data_busy() says when the
+// blocks have all gone, and the bridge counts them (BR_STATUS).
+int sd_start_read(uint32_t lba, uint32_t n)
+{
+    SD(SD_BLKCNT) = n;
+    return sd_cmd(n > 1 ? 18 : 17, sd_high_capacity ? lba : lba * 512, R_SHORT | D_READ);
+}
+
+int sd_start_write(uint32_t lba, uint32_t n)
+{
+    SD(SD_BLKCNT) = n;
+    return sd_cmd(n > 1 ? 25 : 24, sd_high_capacity ? lba : lba * 512, R_SHORT | D_WRITE);
+}
+
+int sd_data_busy(void)
+{
+    sd_status = SD(SD_STATUS);
+    return (sd_status & SDS_DATA_BUSY) != 0;
+}
+
+// Stops sdhost's data engine, and the card's multiple-block transfer if
+// one was running (CMD12 waits for a write to finish programming)
+int sd_stop(int multi)
+{
+    SD(SD_CTRL) = ctrl_fast | SDC_ABORT;
+    return multi ? sd_cmd(12, 0, R_SHORT | R_BUSY) : 0;
 }
 
 uint8_t cbuf_byte(int i)

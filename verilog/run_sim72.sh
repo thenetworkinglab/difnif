@@ -31,6 +31,32 @@ machine() {
     case $1 in 300) echo "50Z";; 250) echo "55SX";; 200) echo "Model 70";; esac
 }
 
+# ./run_sim72.sh cpu: the processor build (make CPU=1) on the Rev P2 board
+# with POS on: the firmware (../fw) against the SD card model, at typical
+# and limit timing for each machine. Needs the RISC-V compiler.
+if [ "${1:-}" = "cpu" ]; then
+    make -s -C ../fw || exit 1
+    DEFS=$(python3 mksdimg.py "$TMP/sdimg.hex")
+    cp fw.hex "$TMP/"
+    printf "%-9s %-9s %5s  %s\n" "timing" "machine" "seed" "result"
+    for cycle in 300 250 200; do
+      for run in "0 1" "1 4" "1 7"; do
+        set -- $run
+        iverilog -g2012 -DMCA_USE_POS -DDIFNIF_CPU $DEFS -DSDIMG="\"$TMP/sdimg.hex\"" \
+            -o "$TMP/sim" -s difnif72_t \
+            -Pdifnif72_t.CYCLE=$cycle -Pdifnif72_t.WORST=$1 -Pdifnif72_t.BOARD=2 -Pdifnif72_t.SEED=$2 \
+            $SRC soc.v picorv32.v sdhost.v sdbridge.v sdcard_model.v 2>/dev/null || {
+              echo "compile failed"; exit 1; }
+        (cd "$TMP" && vvp -n sim) > "$TMP/log" 2>&1
+        r=$(grep '^RESULT' "$TMP/log")
+        fails=$(grep '^FAIL ' "$TMP/log" | sed 's/^FAIL //' | paste -sd ';' -)
+        case $r in *failed=0*) res="all pass";; *TIMEOUT*) res="TIMEOUT";; *) res="$fails";; esac
+        printf "%-9s %-9s %5s  %s\n" "$([ $1 = 1 ] && echo limit || echo typical)" "$(machine $cycle)" "$2" "$res"
+      done
+    done
+    exit 0
+fi
+
 printf "%-9s %-8s %-8s %-9s %5s  %s\n" "board" "POS" "timing" "machine" "runs" "failing tests (runs failed)"
 for board in 0 1 2; do
   for pos in 0 1; do

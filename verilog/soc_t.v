@@ -1,8 +1,8 @@
 // Testbench: the FPGA-only SoC (soc.v) running its firmware (fw.hex, from
 // ../fw) against an SD card model holding a FAT32 card built by mksdimg.py.
-// Prints the firmware's serial log, and checks that bring-up finishes, that
-// it found disk0.img where mksdimg.py put it, and that the block it read is
-// the image's first.
+// Prints the firmware's serial log, and checks that start-up gets as far as
+// running the drive, without the processor trapping. (The drive itself is
+// tested by difnif72_t.v's processor mode, run_sim72.sh cpu.)
 //
 // Run by run_socsim.sh, which supplies IMG_LBA, IMG_BLOCKS, MEM_BLOCKS,
 // CARD_BLOCKS and SDIMG.
@@ -86,7 +86,8 @@ module soc_t;
             #1000;
             if (c == 8'h0A) begin
                 $display("%t  log: %0s", $realtime, line);
-                if (line[8*13-1:0] == "bring-up done") done = 1;
+                // "drive blocks " and 8 hex digits: the drive is running
+                if (line[8*21-1:8*9] == "drive blocks") done = 1;
                 if (line[8*6-1:0] == "failed" || line[8*6-1:0] == "usable") failed = 1;
                 line = 0;
                 nlines = nlines + 1;
@@ -108,15 +109,9 @@ module soc_t;
             errors = errors + 1;
         end
         if (!done) begin
-            $display("FAIL: bring-up didn't finish");
+            $display("FAIL: start-up didn't finish");
             errors = errors + 1;
         end
-        // The processor's buffer holds the image's first block
-        for (k = 0; k < 256; k = k + 1)
-            if (soc.cbuf[k] !== {card.mem[`IMG_LBA * 512 + 2 * k + 1], card.mem[`IMG_LBA * 512 + 2 * k]}) begin
-                if (errors < 5) $display("FAIL: buffer word %0d", k);
-                errors = errors + 1;
-            end
         if (card.errors) begin
             $display("FAIL: the card model reported %0d errors", card.errors);
             errors = errors + card.errors;

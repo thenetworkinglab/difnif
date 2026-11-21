@@ -191,11 +191,60 @@ For hardware, `fw/teensy_log/teensy_log.ino` makes a Teensy the log's USB
 serial port: it copies Serial4 to USB and back, and leaves every other pin
 an input. Only with the processor build.
 
+## The drive (ESDI) firmware
+
+`fw/esdi.c` is a port of `difnift.ino`'s command handling (up to
+v2026.11.21-5): the same commands, status blocks, interrupts, resets and
+EOI handling, through the same mailbox registers. Disk reads and writes
+go straight between the card and the sector buffer: the firmware starts a
+CMD17/18 or CMD24/25 at the image's offset, sends "data transfer ready",
+and watches the bridge. Differences from the Teensy firmware:
+
+- A block the card reports bad is retried from that block, up to 3 times,
+  then the command fails (device error 05h for a read, 0Dh for a write).
+- A transfer past the end of the image fails with device error 07h (RBA
+  out of range). The Teensy firmware answered with whatever was in its
+  buffer.
+- A write is on the card before the host hears it's done (CMD12's busy,
+  or a single block's), as with v2026.11.21-5's `w` setting off. Moving
+  CMD12 after the interrupt, as v2026.11.21-5 does with its sync, is a
+  later speed-up.
+- At EOI it empties the command interface before clearing busy, not
+  after. In simulation at the Model 70's limit timing the host started its
+  next command as soon as busy cleared, and the Teensy order threw away
+  that command's first word. The Teensy firmware may have the same race;
+  it hasn't been seen on hardware.
+- The log goes through a buffer, so it doesn't hold up the host.
+
+The firmware is 5.8 KB of code and 1.2 KB of data, in 8 KB of RAM.
+
+### Simulation with the bus
+
+`./run_sim72.sh cpu` runs `difnif72_t.v` with the processor build on the
+Rev P2 board, POS on: the real firmware, the SD card model holding a
+600 MB FAT32 card (4 KB clusters) with a 1 MB disk0.img, and the PS/2
+side sending ESDI commands as the BIOS does, with burst DMA and memory
+refresh. 16 tests: POS ID and setup, the reset interrupt after power-on,
+get configuration (the image's size), reads and writes of 1 and 8
+sectors by DMA, each checked against the card, reads of what was
+written, a read past the end, a command to device 1, the attachment
+buffer through DREG, a soft reset, and a read of the image's last
+sectors. All pass for the 50Z, 55SX and Model 70, at typical timing and
+at the limits (two seeds each), with the card model reporting no
+protocol errors. A run takes about 30 s.
+
+DMA runs at 0.54 us per word for 8 sectors at the Model 70's cycle, as
+with the Teensy build's burst DMA (0.57): the bus is still the limit.
+
+The normal build's matrix (`./run_sim72.sh quick`) is unchanged, and
+`tools/timing_budget.py --pos --cpu` passes (T54 0.3 ns on stacked worst
+cases).
+
 ## Next
 
-- Run the bring-up on a P2 board, on the bench.
-- Port the ESDI command handling from `difnift.ino`, and run the full bus
-  testbench (`difnif72_t.v`) with the processor build.
+- On a P2 board, on the bench: the start-up log (`fw/teensy_log`).
+- Then in a PS/2: DOS, the copy test, DiskMeter.
+- Moving CMD12 after the write's interrupt, like v2026.11.21-5's sync.
 - The pacing bits in POS register 3 (see below).
 
 ## POS 3 pacing

@@ -16,6 +16,8 @@ void puts_(const char *s);
 void puthex(uint32_t v, int digits);
 void putdec(uint32_t v);
 void logline(const char *s, uint32_t v);   // "s" and v in hex, then a newline
+void uart_poll(void);              // sends a byte of the log if it can
+void uart_flush(void);
 
 // sd.c
 extern uint32_t sd_status;         // sdhost status after the last command
@@ -23,6 +25,10 @@ extern int sd_high_capacity;       // block addresses (1) or byte addresses (0)
 int sd_init(void);                 // 0 on success, else a step number
 int sd_cmd(uint32_t idx, uint32_t arg, uint32_t flags);   // 0 or the error bits
 int sd_read_cpu(uint32_t lba);     // one block into the processor's buffer
+int sd_start_read(uint32_t lba, uint32_t n);    // n blocks to the sector buffer
+int sd_start_write(uint32_t lba, uint32_t n);   // n blocks from it
+int sd_data_busy(void);
+int sd_stop(int multi);            // end a transfer (CMD12 if multi)
 uint8_t cbuf_byte(int i);          // byte i of that block
 uint16_t cbuf_u16(int i);
 uint32_t cbuf_u32(int i);
@@ -31,5 +37,8 @@ uint32_t cbuf_u32(int i);
 extern uint32_t img_lba;           // first card block of disk0.img
 extern uint32_t img_blocks;        // its length in blocks
 int find_image(void);              // 0 if found and contiguous, else a reason
+
+// esdi.c: the drive
+void esdi_run(uint32_t blocks);    // never returns; blocks 0: no disk image
 
 #endif

@@ -267,6 +267,41 @@ module difnif72_t;
         .tn30(1'b0)
     );
 
+`ifdef DIFNIF_CPU
+    // ------------------------------------------------------------------
+    // Processor build (make CPU=1): the SD card in J3, with its pull-ups,
+    // and the firmware's log on Teensy data line 7 (1 Mbaud)
+    // ------------------------------------------------------------------
+    pullup (sd_cmd);
+    pullup (sd_d[0]);
+    pullup (sd_d[1]);
+    pullup (sd_d[2]);
+    pullup (sd_d[3]);
+    sdcard_model #(.MEM_BLOCKS(`MEM_BLOCKS), .CARD_BLOCKS(`CARD_BLOCKS), .IMAGE(`SDIMG))
+        card (.sd_clk(sd_clk), .cmd(sd_cmd), .dat(sd_d));
+
+    reg [8*120-1:0] log_line = 0;
+    initial begin : fw_log
+        integer i;
+        reg [7:0] c;
+        forever begin
+            @(negedge tn_d[7]);
+            #500;
+            for (i = 0; i < 8; i = i + 1) begin
+                #1000;
+                c[i] = tn_d[7];
+            end
+            #1000;
+            if (c == 8'h0A) begin
+                if ($test$plusargs("fwlog")) $display("%t   fw: %0s", $realtime, log_line);
+                log_line = 0;
+            end else if (c != 8'h0D) begin
+                log_line = {log_line[8*119-1:0], c};
+            end
+        end
+    end
+`endif
+
     // 50 MHz, with a seed-dependent phase against the bus
     initial begin
         clk = 1'b0;
@@ -1008,7 +1043,7 @@ module difnif72_t;
     reg dma_hold_at_n = 1'b0;       // stop after n transfers without arbitrating again
     realtime t_dma_start;
     integer dma_extra;              // transfers the card won with nothing to send
-    reg [15:0] dma_buf [0:1023];    // "system memory"
+    reg [15:0] dma_buf [0:4095];    // "system memory"
 
     // Burst mode. The card may only burst in the burst tests, and only
     // while it holds the grant: -BURST goes low within T43 of ARB/-GNT going
@@ -1551,6 +1586,216 @@ module difnif72_t;
         end
     endtask
 
+`ifdef DIFNIF_CPU
+    // ------------------------------------------------------------------
+    // Processor build: the PS/2's side of ESDI commands (DASD spec section
+    // 3), against the firmware in ../fw and the SD card model
+    // ------------------------------------------------------------------
+
+    // Polls a BSR bit for up to t_us microseconds
+    task automatic esdi_wait(input integer bit_n, input value, input integer t_us, output ok);
+        reg [15:0] bsr;
+        realtime t_end;
+        begin
+            ok = 1'b0;
+            bsr = 16'hxxxx;
+            t_end = $realtime + t_us * 1000.0;
+            while (!ok && $realtime < t_end && !aborted) begin
+                host_in(A_BSR, 0, bsr);
+                if (bsr[bit_n] === value) ok = 1'b1;
+                else #1000;
+            end
+            if (!ok && !aborted) begin
+                fail($sformatf("host: BSR bit %0d not %b after %0d us (BSR %h)", bit_n, value, t_us, bsr[7:0]));
+                aborted = 1'b1;
+            end
+        end
+    endtask
+
+    // Waits for an interrupt and reads the interrupt status
+    task automatic esdi_intr(input integer t_us, output [7:0] isr);
+        reg ok;
+        reg [15:0] d;
+        begin
+            isr = 8'hxx;
+            esdi_wait(BSR_INTR, 1'b1, t_us, ok);
+            if (ok) begin
+                host_in(A_ATN, 0, d);
+                isr = d[7:0];
+            end
+        end
+    endtask
+
+    task automatic esdi_expect_intr(input integer t_us, input [7:0] want, input string what);
+        reg [7:0] isr;
+        begin
+            esdi_intr(t_us, isr);
+            if (!aborted && isr !== want) begin
+                fail($sformatf("%0s: interrupt status %h, expected %h", what, isr, want));
+                aborted = 1'b1;
+            end
+        end
+    endtask
+
+    reg [15:0] sblk [0:7];      // status block
+    task automatic esdi_status(input integer n);
+        integer i;
+        reg ok;
+        reg [15:0] w;     // (an output straight into sblk[i] isn't written back)
+        begin
+            for (i = 0; i < 8; i = i + 1) sblk[i] = 16'hxxxx;
+            for (i = 0; i < n && !aborted; i = i + 1) begin
+                esdi_wait(BSR_SI_FULL, 1'b1, 2000, ok);
+                if (ok) begin
+                    host_in(A_CIFR, 1, w);
+                    sblk[i] = w;
+                end
+            end
+        end
+    endtask
+
+    task automatic esdi_eoi(input [7:0] dev);
+        host_out(A_ATN, 0, {8'h00, dev | 8'h02});
+    endtask
+
+    reg [15:0] cblk [0:3];      // command block
+    task automatic esdi_command(input [7:0] dev, input integer n);
+        integer i;
+        reg ok;
+        begin
+            esdi_wait(BSR_BUSY, 1'b0, 2000, ok);
+            if (ok) host_out(A_ATN, 0, {8'h00, dev | 8'h01});
+            for (i = 0; i < n && !aborted; i = i + 1) begin
+                esdi_wait(BSR_CI_FULL, 1'b0, 2000, ok);
+                if (ok) host_out(A_CIFR, 1, cblk[i]);
+            end
+        end
+    endtask
+
+    // Interrupt, status block and EOI that end a command
+    task automatic esdi_complete(input [7:0] dev, input [7:0] isr, input integer n, input string what);
+        begin
+            esdi_expect_intr(50000, isr, what);
+            esdi_status(n);
+            if (!aborted && sblk[0][15:8] !== n[7:0])
+                fail($sformatf("%0s: status block length %h, expected %0d", what, sblk[0][15:8], n));
+            esdi_eoi(dev);
+        end
+    endtask
+
+    function [15:0] img_word(input integer rba, input integer w);
+        img_word = {card.mem[(`IMG_LBA + rba) * 512 + 2 * w + 1], card.mem[(`IMG_LBA + rba) * 512 + 2 * w]};
+    endfunction
+
+    task automatic test_cpu_reset(input string name, input is_soft);
+        begin
+            begin_test(name);
+            if (is_soft) host_out(A_ATN, 0, 16'h00E4);
+            esdi_complete(8'hE0, 8'hEA, 1, "reset");
+            if (!aborted && sblk[0] !== 16'h01E0) fail($sformatf("reset status block %h", sblk[0]));
+            end_test;
+        end
+    endtask
+
+    task automatic test_cpu_config;
+        begin
+            begin_test("get device configuration: the image's size");
+            cblk[0] = 16'h0609;
+            cblk[1] = 16'h0000;
+            esdi_command(8'h00, 2);
+            esdi_complete(8'h00, 8'h01, 6, "get configuration");
+            if (!aborted && {sblk[3], sblk[2]} !== `IMG_BLOCKS)
+                fail($sformatf("configuration: %0d blocks, expected %0d", {sblk[3], sblk[2]}, `IMG_BLOCKS));
+            end_test;
+        end
+    endtask
+
+    // Read or write n sectors from rba by burst DMA, and check the data
+    task automatic test_cpu_rw(input write, input integer rba, input integer n, input string name);
+        integer k, bad;
+        begin
+            begin_test(name);
+            if (write) for (k = 0; k < n * 256; k = k + 1) dma_buf[k] = pattern(k, 16'h5EC7) ^ (rba << 4);
+            cblk[0] = write ? 16'h4602 : 16'h4601;
+            cblk[1] = n;
+            cblk[2] = rba;
+            cblk[3] = 16'h0000;
+            esdi_command(8'h00, 4);
+            esdi_expect_intr(20000, 8'h0B, "data transfer ready");
+            host_out(A_BSR, 0, 16'h0002);       // BCR: DMA enable
+            if (!aborted) dma_run(write, n * 256, 0);
+            esdi_complete(8'h00, 8'h01, 7, write ? "write" : "read");
+            if (!aborted && {sblk[5], sblk[4]} !== rba + n - 1)
+                fail($sformatf("status block: last RBA %0d, expected %0d", {sblk[5], sblk[4]}, rba + n - 1));
+            bad = 0;
+            for (k = 0; k < n * 256 && !aborted; k = k + 1)
+                if (dma_buf[k] !== img_word(rba + k / 256, k % 256)) bad = bad + 1;
+            if (bad) fail($sformatf("%0d of %0d words differ between memory and the card", bad, n * 256));
+            host_out(A_BSR, 0, 16'h0000);
+            end_test;
+        end
+    endtask
+
+    task automatic test_cpu_range;
+        begin
+            begin_test("read past the end of the image: command failed, RBA out of range");
+            cblk[0] = 16'h4601;
+            cblk[1] = 2;
+            cblk[2] = `IMG_BLOCKS - 1;
+            cblk[3] = 16'h0000;
+            esdi_command(8'h00, 4);
+            esdi_complete(8'h00, 8'h0C, 7, "read past the end");
+            if (!aborted && sblk[2][7:0] !== 8'h07) fail($sformatf("device error %h, expected 07", sblk[2][7:0]));
+            end_test;
+        end
+    endtask
+
+    task automatic test_cpu_device1;
+        begin
+            begin_test("seek to device 1: command error 13h");
+            cblk[0] = 16'h4625;
+            cblk[1] = 0;
+            cblk[2] = 0;
+            cblk[3] = 0;
+            esdi_command(8'h20, 4);
+            esdi_complete(8'h20, 8'h2E, 7, "device 1");
+            if (!aborted && sblk[1][7:0] !== 8'h13) fail($sformatf("command error %h, expected 13", sblk[1][7:0]));
+            end_test;
+        end
+    endtask
+
+    // Write and read back the attachment buffer, a word at a time through DREG
+    task automatic test_cpu_attach;
+        integer k, bad;
+        reg ok;
+        reg [15:0] d;
+        begin
+            begin_test("attachment buffer write and read, through DREG");
+            cblk[0] = 16'h06F0;
+            cblk[1] = 1;
+            esdi_command(8'hE0, 2);
+            esdi_expect_intr(20000, 8'hEB, "write attachment buffer");
+            for (k = 0; k < 256 && !aborted; k = k + 1) begin
+                esdi_wait(BSR_TREQ, 1'b1, 1000, ok);
+                if (ok) host_out(A_DREG, 1, pattern(k, 16'hA77A));
+            end
+            esdi_complete(8'hE0, 8'hE1, 7, "write attachment buffer");
+            cblk[0] = 16'h06F1;
+            esdi_command(8'hE0, 2);
+            esdi_expect_intr(20000, 8'hEB, "read attachment buffer");
+            bad = 0;
+            for (k = 0; k < 256 && !aborted; k = k + 1) begin
+                esdi_wait(BSR_TREQ, 1'b1, 1000, ok);
+                if (ok) host_in(A_DREG, 1, d);
+                if (ok && d !== pattern(k, 16'hA77A)) bad = bad + 1;
+            end
+            esdi_complete(8'hE0, 8'hE1, 7, "read attachment buffer");
+            if (bad) fail($sformatf("%0d of 256 words read back wrong", bad));
+            end_test;
+        end
+    endtask
+`endif
+
     // ------------------------------------------------------------------
     // Main sequence
     // ------------------------------------------------------------------
@@ -1594,6 +1839,29 @@ module difnif72_t;
         #2000 h_chreset = 1'b0;
         #1000 t_next_cmd = $realtime;
 
+`ifdef DIFNIF_CPU
+        test_pos;
+        pos_out(2, 8'b0_1_0011_0_1);    // arbitration level 3
+        card_level = 4'h3;
+        burst_allowed = 1'b1;           // the firmware allows burst DMA
+        refresh_on = 1'b1;
+        test_cpu_reset("reset complete after power-on", 0);
+        test_cpu_config;
+        test_cpu_rw(0, 16, 8, "read 8 sectors");
+        test_cpu_rw(0, 0, 1, "read 1 sector");
+        test_cpu_rw(1, 40, 8, "write 8 sectors");
+        test_cpu_rw(0, 40, 8, "read back the 8 written");
+        test_cpu_rw(1, 100, 1, "write 1 sector");
+        test_cpu_rw(0, 100, 1, "read back the 1 written");
+        test_cpu_range;
+        test_cpu_device1;
+        test_cpu_attach;
+        test_cpu_reset("soft reset", 1);
+        test_cpu_rw(0, 2040, 8, "read the last 8 sectors after the reset");
+        begin_test("SD card model reports no errors");
+        if (card.errors) fail($sformatf("%0d errors from the card model", card.errors));
+        end_test;
+`else
         test_pos;
         test_reset_state;
         test_version;
@@ -1647,6 +1915,7 @@ module difnif72_t;
         test_isr_gate;
         test_channel_reset;
         test_not_selected(16'h0080, "no response at 0080 after DMA");
+`endif
 
         $display("RESULT: cycle=%0d worst=%0d board=%0d pos=%0d seed=%0d tests=%0d failed=%0d spec=%0d",
                  CYCLE, WORST, BOARD,
@@ -1661,7 +1930,11 @@ module difnif72_t;
 
     // Safety net
     initial begin
+`ifdef DIFNIF_CPU
+        #400_000_000;
+`else
         #80_000_000;
+`endif
         $display("RESULT: TIMEOUT");
         $finish;
     end

@@ -34,7 +34,7 @@ static int fat_entry(uint32_t c, uint32_t *next)
         if (sd_read_cpu(b)) return 1;
         cached_fat = b;
     }
-    *next = cbuf_u32((c & 127) * 4);
+    *next = (CBUF((c & 127) * 2) & 0xFFFF) | (CBUF((c & 127) * 2 + 1) << 16);
     if (!exfat) *next &= 0x0FFFFFFFu;
     return 0;
 }

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Builds a small SD card image for soc_t.v: a partition table, a FAT32
-filesystem, and disk0.img (1 MB of random data, contiguous) in its root
+Builds a small SD card image for soc_t.v: a 600 MB card with a
+partition table, a FAT32 filesystem with 4 KB clusters, and disk0.img (1 MB
+of random data, contiguous) in its root
 directory, as $readmemh bytes for sdcard_model.v. Only the blocks in use are
 written; the card model reports CARD_BLOCKS and reads the rest as 0.
 
@@ -13,9 +14,9 @@ This file is part of a fork of DifNif; CERN-OHL-S-2.0.
 """
 import os, random, struct, sys
 
-CARD_BLOCKS = 131072          # 64 MB
+CARD_BLOCKS = 1228800         # 600 MB
 PART = 2048
-IMG_CLUSTERS = 2048           # 1 MB with 512-byte clusters
+IMG_CLUSTERS = 256            # 1 MB with 4 KB clusters
 random.seed(1)
 
 blocks = {}                   # block number -> 512 bytes
@@ -30,8 +31,8 @@ mbr[446:462] = struct.pack('<BBBBBBBBII', 0, 0, 2, 0, 0x0C, 0, 0, 0, PART, total
 mbr[510:512] = b'\x55\xaa'
 put(0, bytes(mbr))
 
-# FAT32 with one block per cluster: enough clusters to be FAT32
-RSVD, NFATS, SPC = 32, 2, 1
+# FAT32 with 4 KB clusters: enough of them to be FAT32
+RSVD, NFATS, SPC = 32, 2, 8
 fatsz = 1
 while True:
     clusters = (total - RSVD - NFATS * fatsz) // SPC
@@ -91,7 +92,7 @@ root = (dirent(b'DIFNIF     ', 0x08, 0, 0) +
 put(clus_lba(2), root)
 
 img_lba = clus_lba(first)
-for b in range(IMG_CLUSTERS * SPC):
+for b in range(IMG_CLUSTERS * SPC):  # noqa
     put(img_lba + b, bytes(random.getrandbits(8) for _ in range(512)))
 
 with open(sys.argv[1], 'w') as f:

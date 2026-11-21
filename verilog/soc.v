@@ -175,9 +175,10 @@ module soc #(
     // Mailbox registers (teensy.v's, on the processor's bus)
     //
     // mcabus.v synchronises the Teensy's strobes and acts on an edge, so
-    // each is a two-clock pulse here, and a write or read that makes one
-    // completes only after two more clocks low, so the next can't merge
-    // with it.
+    // each is a two-clock pulse here. The access completes six clocks after
+    // the pulse ends, by when mcabus has acted on it: the next look at the
+    // flags sees the change (the Teensy firmware waits 120 ns for the same
+    // reason, PORT_SETTLE_NS), and the next strobe can't merge with it.
 
     reg [15:0] testreg = 16'hABCD;
     reg [15:0] flags_in = 16'h0000;
@@ -188,7 +189,7 @@ module soc #(
     reg        gate_in = 1'b0;
     reg [3:0]  strobe = 4'd0;      // which strobes: atn_read, cifr_read, isr, sifr
     reg        s_busy_clear = 1'b0, s_treq_set = 1'b0, s_sifr_clear = 1'b0;
-    reg [2:0]  scount = 3'd0;      // 4 clocks: two high, two low
+    reg [3:0]  scount = 4'd0;      // 8 clocks: two high, six low
 
     assign t_isr_out = t_isr;
     assign t_sifr_out = t_sifr;
@@ -196,7 +197,7 @@ module soc #(
     assign t_cmd_in_progress = flags_in[6];
     assign t_clear_all = flags_in[10];
     assign buf_mode = flags_in[11];
-    wire   s_high = scount != 3'd0 && scount > 3'd2;
+    wire   s_high = scount > 4'd6;
     assign t_atn_read   = s_high & strobe[0];
     assign t_cifr_read  = s_high & strobe[1];
     assign t_isr_write  = s_high & strobe[2];
@@ -239,18 +240,18 @@ module soc #(
         endcase
     end
 
-    wire mbox_go = mem_valid && !mem_ready && is_mbox && scount == 3'd0;
+    wire mbox_go = mem_valid && !mem_ready && is_mbox && scount == 4'd0;
     reg  mbox_done;
     always @(posedge clk) begin
         mbox_done <= 1'b0;
         if (rst) begin
-            scount <= 3'd0;
+            scount <= 4'd0;
             flags_in <= 16'h0000;
             ctrl_in <= 1'b0;
             gate_in <= 1'b0;
-        end else if (scount != 3'd0) begin
-            scount <= scount - 3'd1;
-            if (scount == 3'd1) mbox_done <= 1'b1;
+        end else if (scount != 4'd0) begin
+            scount <= scount - 4'd1;
+            if (scount == 4'd1) mbox_done <= 1'b1;
         end else if (mbox_go && !mbox_done) begin
             strobe <= 4'd0;
             s_busy_clear <= 1'b0;
@@ -278,7 +279,7 @@ module soc #(
                 if (rn == 4'd2) strobe[0] <= 1'b1;
                 if (rn == 4'd4) strobe[1] <= 1'b1;
             end
-            scount <= 3'd4;
+            scount <= 4'd8;
         end
     end
 
