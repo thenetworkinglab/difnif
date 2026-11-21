@@ -1,0 +1,34 @@
+# DifNif FPGA-only firmware for the SoC's PicoRV32 (verilog/soc.v)
+#
+#   make          builds ../verilog/fw.hex, which the FPGA build loads into RAM
+#
+# Needs a RISC-V cross compiler, riscv64-elf-gcc (Homebrew) or set CROSS.
+#
+# This file is part of a fork of DifNif; CERN-OHL-S-2.0.
+
+CROSS ?= riscv64-elf-
+CC = $(CROSS)gcc
+OBJCOPY = $(CROSS)objcopy
+SIZE = $(CROSS)size
+CFLAGS = -march=rv32ic -mabi=ilp32 -Os -ffreestanding -fno-builtin -nostdlib \
+         -ffunction-sections -fdata-sections -Wall -Wextra -std=c11
+LDFLAGS = -Wl,-T,link.ld -Wl,--gc-sections -nostartfiles -lgcc
+SRCS = start.S main.c uart.c sd.c fat.c
+RAM_WORDS = 2048
+
+all: ../verilog/fw.hex
+
+fw.elf: $(SRCS) hw.h fw.h link.ld
+	$(CC) $(CFLAGS) -o $@ $(SRCS) $(LDFLAGS)
+	$(SIZE) $@
+
+fw.bin: fw.elf
+	$(OBJCOPY) -O binary $< $@
+
+../verilog/fw.hex: fw.bin bin2hex.py
+	python3 bin2hex.py $< $@ $(RAM_WORDS)
+
+clean:
+	rm -f fw.elf fw.bin
+
+.PHONY: all clean

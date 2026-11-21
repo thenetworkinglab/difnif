@@ -42,10 +42,16 @@ module difnif_top(
     output burst_o_l,   // DMA burst request output
     output preempt_o_l, // DMA preempt request output
 
-    // SD card (temporarily used for testing)
+    // SD card (temporarily used for testing; the card itself in the
+    // processor build, DIFNIF_CPU)
     output sd_clk,
+`ifdef DIFNIF_CPU
+    inout sd_cmd,
+    inout [3:0]sd_d,
+`else
     output sd_cmd,
     output [3:0]sd_d,
+`endif
     input sd_switch,
 
     // LEDs
@@ -154,9 +160,15 @@ module difnif_top(
         .arb_o(arb_o),
         .burst_o_l(burst_o_l),
         .preempt_o_l(preempt_o_l),
+`ifdef DIFNIF_CPU
+        .test1(),
+        .test2(),
+        .tbus(),
+`else
         .test1(sd_clk), // FIXME testing
         .test2(sd_cmd),
         .tbus(sd_d), // more testing
+`endif
 
         // Teensy connections
         .t_atn(t_atn),
@@ -195,6 +207,52 @@ module difnif_top(
         .t_sifr_clear(t_sifr_clear)
     );
 
+`ifdef DIFNIF_CPU
+    // (fork) FPGA-only build: a processor in the Teensy's place (soc.v).
+    // Its log goes out on Teensy data line 7 (FPGA pin 25, Teensy pin 16,
+    // the Teensy's Serial4 input) and comes in on line 6 (pin 26, Teensy pin
+    // 17); the other Teensy lines are left alone.
+    wire buf_clear;
+    wire [1:0] soc_leds;
+    wire sd_clk_w, sd_cmd_out, sd_cmd_oe;
+    wire [3:0] sd_dat_out, sd_dat_oe;
+    wire uart_tx;
+    reg [3:0] por = 4'd0;
+    reg soc_rst = 1'b1;     // registered: it fans out across the processor
+    always @ (posedge clk) begin
+        if (por != 4'hF) por <= por + 4'd1;
+        soc_rst <= (por != 4'hF);
+    end
+
+    assign sd_clk = sd_clk_w;
+    assign sd_cmd = sd_cmd_oe ? sd_cmd_out : 1'bz;
+    genvar sdi;
+    generate
+        for (sdi = 0; sdi < 4; sdi = sdi + 1) begin : sd_lane
+            assign sd_d[sdi] = sd_dat_oe[sdi] ? sd_dat_out[sdi] : 1'bz;
+        end
+    endgenerate
+    assign tn_d = {8'bzzzzzzzz, uart_tx, 7'bzzzzzzz};
+    assign tn_int = 1'b0;
+
+    soc cpu1 (
+        .clk(clk),
+        .rst(soc_rst),
+        .uart_tx(uart_tx),
+        .uart_rx(tn_d[6]),
+        .leds(soc_leds),
+        .sd_clk(sd_clk_w),
+        .sd_cmd_in(sd_cmd),
+        .sd_cmd_out(sd_cmd_out),
+        .sd_cmd_oe(sd_cmd_oe),
+        .sd_dat_in(sd_d),
+        .sd_dat_out(sd_dat_out),
+        .sd_dat_oe(sd_dat_oe),
+        .sd_detect(sd_switch),
+        .buf_clear(buf_clear),
+`else
+    wire buf_clear = 1'b0;
+
     teensy tn1 (
         .tn_rd(tn_rd),
         .tn_wr(tn_wr),
@@ -203,6 +261,7 @@ module difnif_top(
         .tn_int(tn_int),
         .clk(clk),
         .tn30(tn30),
+`endif
 
         // Register interface
         .t_atn(t_atn),
@@ -248,7 +307,7 @@ module difnif_top(
 
     sectorbuf sb1 (
         .clk(clk),
-        .clear(mca_clear_all | ~buf_mode),
+        .clear(mca_clear_all | ~buf_mode | buf_clear),
         .dir(buf_dir),
         .t_wr(t_buf_wr),
         .t_wdata(t_buf_wdata),
@@ -288,8 +347,13 @@ module difnif_top(
     //assign tn_clk = clk; // Clock to Teensy in case I want to make a synchronous interface
 
 //    assign led0 = counter[22];
+`ifdef DIFNIF_CPU
+    assign led0 = soc_leds[0];
+    assign led1 = soc_leds[1];
+`else
     assign led0 = fulladdr2_l;
     assign led1 = counter[21];
+`endif
 
     always @ (posedge clk)
     begin

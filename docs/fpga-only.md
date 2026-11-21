@@ -145,9 +145,54 @@ Two other guards (ignoring the card after a failure, and not sending a
 half twice) can't be caught, because `sdhost` already prevents those
 cases; they stay as a second line of defence.
 
+## The processor (in progress)
+
+`verilog/soc.v` puts a PicoRV32 (RV32IC, from oss-cad-suite's examples;
+ISC licence) in the Teensy's place. Toward `mcabus.v` and the sector buffer
+it has the same ports as `teensy.v`, so the bus side is unchanged. Inside:
+8 KB of RAM loaded with the firmware at power-up, the Teensy's mailbox
+registers (numbered as before, with the strobes `mcabus.v` expects),
+`sdhost` and the bridge, a 512-byte buffer for blocks the processor reads
+itself, a 1 Mbaud serial port for its log, a microsecond timer and the
+LEDs. Its header has the memory map.
+
+`make BOARD=ps2 CPU=1` builds it into `build/ps2-cpu` (and the firmware
+first). The normal build is unchanged: `make BOARD=ps2` gives the same
+bitstream, bit for bit, as release v2026.11.21-1. With a placeholder
+firmware the processor build uses 4,495 of 7,680 logic cells and 23 of 32
+block RAMs, and runs at up to 55.9 MHz against the 50 MHz it needs.
+
+The log goes out on Teensy data line 7 (FPGA pin 25), which is the
+Teensy's pin 16, its Serial4 input; Teensy pin 17 (Serial4 output) comes
+back on line 6. A Teensy running a few lines that copy Serial4 to USB
+serves as the log's USB port. Without a Teensy, the LEDs show where
+bring-up stopped.
+
+The firmware is in `fw/` (`make` there builds `verilog/fw.hex`). So far it
+only brings the card up, read-only: start-up at 400 kHz, then 4-bit at
+25 MHz; finds disk0.img in the root directory of a FAT32 or exFAT
+filesystem (on the whole card or in its first partition); checks it's
+contiguous; and reads its first block. `verilog/run_socsim.sh` builds it
+and runs `soc_t.v` against the card model holding a 64 MB FAT32 card made
+by `mksdimg.py`. Not yet run: it needs the RISC-V compiler.
+
 ## Next
 
-- The processor and its firmware (needs a RISC-V C compiler): the card's
-  start-up, the ESDI commands, and driving `sdhost` and the bridge.
+- Run the bring-up in simulation, then on a P2 board.
+- Port the ESDI command handling from `difnift.ino`, and run the full bus
+  testbench (`difnif72_t.v`) with the processor build.
+- The pacing bits in POS register 3 (see below).
+
+## POS 3 pacing
+
+IBM's drives transfer in 64-word bursts with an optional pause between
+them, set in POS register 3 bits 5-4 (00: no bursts; 01, 10, 11: 16, 24
+or 30 us between bursts) and switched on by POS 4 bit 0 (DASD spec 3.4.3).
+The Reference Diskette calls it "DMA Burst Pacing Interval". The DifNif
+stores POS 3 but uses only bit 6 (finding 19), so the setting makes no
+difference to it: it bursts whenever the firmware allows bursts. Honouring
+"Burst disabled" at least would match IBM's drives, and the pauses would
+keep it from holding the bus against other bus masters (network or SCSI
+cards) on a busy machine.
 - On hardware: a test build that starts the card and reads a sector, with
   the result on the LEDs or through the Teensy's serial port.

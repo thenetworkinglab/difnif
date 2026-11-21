@@ -29,6 +29,18 @@ ODIR = build/$(BOARD)-probes
 else
 ODIR = build/$(BOARD)
 endif
+# make BOARD=ps2 CPU=1: the FPGA-only build, a processor in the Teensy's place
+# (soc.v, firmware from ../fw), into build/<board>-cpu. Work in progress.
+ifeq ($(CPU),1)
+DEFINES += -DDIFNIF_CPU
+SOURCES += soc.v picorv32.v sdhost.v sdbridge.v
+INCLUDES += fw.hex
+ODIR = build/$(BOARD)-cpu
+endif
+
+fw.hex: FORCE
+	$(MAKE) -C ../fw
+FORCE:
 DEPS = $(addprefix $(ODIR)/,$(addsuffix .d,$(IMAGES)))
 
 # Want to build report and main bin file

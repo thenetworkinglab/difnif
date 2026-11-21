@@ -30,7 +30,10 @@
 `timescale 1ns / 1ps
 
 module sdcard_model #(
-    parameter MEM_BLOCKS   = 1024,   // 512 KB, so C_SIZE is 0
+    parameter MEM_BLOCKS   = 1024,   // blocks stored: 512 KB
+    parameter CARD_BLOCKS  = MEM_BLOCKS,   // blocks the card reports (multiple of 1024);
+                                     // those past MEM_BLOCKS read as 0
+    parameter IMAGE        = "",     // $readmemh file for the stored blocks
     parameter real ODLY    = 14.0,   // outputs settled this long after the clock falls
     parameter real TOH     = 0.0,    // and unchanged until this long after
     parameter real TISU    = 5.0,
@@ -52,6 +55,12 @@ module sdcard_model #(
     integer writes_done = 0;
 
     reg [7:0] mem [0:MEM_BLOCKS*512-1];
+    initial if (IMAGE != "") $readmemh(IMAGE, mem);
+
+    function [7:0] mem_rd;
+        input integer a;
+        mem_rd = (a < MEM_BLOCKS * 512) ? mem[a] : 8'h00;
+    endfunction
 
     // ------------------------------------------------------------------
     // Pins
@@ -289,7 +298,7 @@ module sdcard_model #(
         csd[103:96]  = 8'h32;        // TRAN_SPEED: 25 MHz
         csd[95:84]   = 12'h5B5;      // CCC
         csd[83:80]   = 4'h9;         // READ_BL_LEN: 512
-        csd[69:48]   = MEM_BLOCKS / 1024 - 1;   // C_SIZE: (C_SIZE+1) x 512 KB
+        csd[69:48]   = CARD_BLOCKS / 1024 - 1;  // C_SIZE: (C_SIZE+1) x 512 KB
         csd[46]      = 1'b1;         // ERASE_BLK_EN
         csd[45:39]   = 7'h7F;        // SECTOR_SIZE
         csd[28:26]   = 3'b010;       // R2W_FACTOR
@@ -376,7 +385,7 @@ module sdcard_model #(
                     6'd13: if (state >= S_STBY && a[31:16] == rca) r1(idx);
                     6'd16: if (state == S_TRAN) r1(idx);
                     6'd17, 6'd18: if (state == S_TRAN) begin
-                        if (a + (idx == 6'd18 ? 1 : 0) > MEM_BLOCKS - 1) begin
+                        if (a + (idx == 6'd18 ? 1 : 0) > CARD_BLOCKS - 1) begin
                             errbits = errbits | 32'h8000_0000;
                             r1(idx);
                         end else begin
@@ -389,7 +398,7 @@ module sdcard_model #(
                         end
                     end
                     6'd24, 6'd25: if (state == S_TRAN) begin
-                        if (a > MEM_BLOCKS - 1) begin
+                        if (a > CARD_BLOCKS - 1) begin
                             errbits = errbits | 32'h8000_0000;
                             r1(idx);
                         end else begin
@@ -439,7 +448,7 @@ module sdcard_model #(
             end
             nb = 0;
             for (i = 0; i < 512 && !stop; i = i + 1) begin
-                by = mem[b * 512 + i];
+                by = mem_rd(b * 512 + i);
                 for (k = (bus4 ? 1 : 7); k >= 0 && !stop; k = k - 1) begin
                     @(negedge sd_clk);
                     if (rd_stop) stop = 1;
@@ -485,7 +494,7 @@ module sdcard_model #(
                 send_block(blk);
                 blk = blk + 1;
                 if (!rd_multi) rd_stop = 1;
-                else if (blk >= MEM_BLOCKS) begin
+                else if (blk >= CARD_BLOCKS) begin
                     rd_stop = 1;
                     errbits = errbits | 32'h8000_0000;
                 end else if (!rd_stop) repeat (NAC) @(posedge sd_clk);
@@ -561,7 +570,8 @@ module sdcard_model #(
                     @(negedge sd_clk); dat_o = 4'hF;   // end bit
                     if (!reject) begin
                         state = S_PRG;
-                        for (i = 0; i < 512; i = i + 1) mem[blk * 512 + i] = wbuf[i];
+                        if (blk < MEM_BLOCKS)
+                            for (i = 0; i < 512; i = i + 1) mem[blk * 512 + i] = wbuf[i];
                         @(negedge sd_clk); dat_o = 4'hE;   // busy
                         repeat (busy_clks) @(negedge sd_clk);
                         dat_o = 4'hF;
