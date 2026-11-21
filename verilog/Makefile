@@ -33,14 +33,13 @@ endif
 # (soc.v, firmware from ../fw), into build/<board>-cpu. Work in progress.
 ifeq ($(CPU),1)
 DEFINES += -DDIFNIF_CPU
+# Without this the processor's clock enables take the last global buffers,
+# and ARB/-GNT and -TC (clocks for mcabus.v) go on ordinary routing
+PNR_FLAGS += --no-promote-ce
 SOURCES += soc.v picorv32.v sdhost.v sdbridge.v
 INCLUDES += fw.hex
 ODIR = build/$(BOARD)-cpu
 endif
-
-fw.hex: FORCE
-	$(MAKE) -C ../fw
-FORCE:
 DEPS = $(addprefix $(ODIR)/,$(addsuffix .d,$(IMAGES)))
 
 # Want to build report and main bin file
@@ -53,7 +52,7 @@ $(ODIR)/%.json: $(SOURCES) $(INCLUDES) | $(ODIR)
 
 $(ODIR)/%.asc: $(ODIR)/%.json $(PIN_DEF)
 # add -q to quiet lots of messages
-	nextpnr-ice40 --$(DEVICE) --pcf $(PIN_DEF) --json $< --asc $@ --package tq144:4k
+	nextpnr-ice40 --$(DEVICE) --pcf $(PIN_DEF) --json $< --asc $@ --package tq144:4k $(PNR_FLAGS)
 #	@echo nextpnr $< $@
 
 $(ODIR)/%.bin: $(ODIR)/%.asc
@@ -100,3 +99,8 @@ $(ODIR):
 
 # Depsfile
 -include $(DEPS)
+
+# The processor build's firmware (CPU=1)
+fw.hex: FORCE
+	$(MAKE) -C ../fw
+FORCE:

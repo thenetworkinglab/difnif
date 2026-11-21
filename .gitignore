@@ -17,3 +17,8 @@ _autosave-*
 
 # Board-house assembly photos (local only)
 *_EQPic_*/
+
+# FPGA-only firmware build products (fw/Makefile)
+fw/fw.elf
+fw/fw.bin
+verilog/fw.hex

@@ -85,23 +85,28 @@ IBM = {
 }
 
 
-def build(tmp, pos, probes=False):
-    sources = [os.path.join(VERILOG, f) for f in ("difnif_top.v", "mcabus.v", "teensy.v", "sectorbuf.v")]
-    define = ("-DMCA_USE_POS " if pos else "") + ("-DDIFNIF_PROBES " if probes else "")
+def build(tmp, pos, probes=False, cpu=False):
+    files = ["difnif_top.v", "mcabus.v", "teensy.v", "sectorbuf.v"]
+    if cpu:
+        files += ["soc.v", "picorv32.v", "sdhost.v", "sdbridge.v"]
+    sources = [os.path.join(VERILOG, f) for f in files]
+    define = (("-DMCA_USE_POS " if pos else "") + ("-DDIFNIF_PROBES " if probes else "") +
+              ("-DDIFNIF_CPU " if cpu else ""))
     json_path = os.path.join(tmp, "difnif.json")
     run(["yosys", "-q", "-p",
          "read_verilog %s%s; synth_ice40 -top difnif_top -json %s"
-         % (define, " ".join(sources), json_path)])
+         % (define, " ".join(sources), json_path)], cwd=VERILOG)   # fw.hex for CPU
     report = os.path.join(tmp, "report.json")
     sdf = os.path.join(tmp, "difnif.sdf")
     run(["nextpnr-ice40", "--hx8k", "--package", "tq144:4k", "-q",
          "--pcf", os.path.join(VERILOG, "difnif.pcf"), "--json", json_path,
-         "--asc", os.path.join(tmp, "difnif.asc"), "--report", report, "--sdf", sdf])
+         "--asc", os.path.join(tmp, "difnif.asc"), "--report", report, "--sdf", sdf] +
+        (["--no-promote-ce"] if cpu else []))   # as the Makefile, CPU=1
     return report, sdf
 
 
-def run(cmd):
-    r = subprocess.run(cmd, capture_output=True, text=True)
+def run(cmd, cwd=None):
+    r = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
     if r.returncode:
         sys.exit("%s failed:\n%s%s" % (cmd[0], r.stdout[-2000:], r.stderr[-2000:]))
 
@@ -155,12 +160,14 @@ def main():
     ap.add_argument("--pos", action="store_true", help="build with -DMCA_USE_POS")
     ap.add_argument("--probes", action="store_true",
                     help="build with -DDIFNIF_PROBES (make PROBES=1, scope debug build)")
+    ap.add_argument("--cpu", action="store_true",
+                    help="build with -DDIFNIF_CPU (make CPU=1, the FPGA-only build; needs verilog/fw.hex)")
     args = ap.parse_args()
     if args.probes:
         GBUF.update(PROBE_GBUF)
 
     with tempfile.TemporaryDirectory() as tmp:
-        report, sdf = build(tmp, args.pos, args.probes)
+        report, sdf = build(tmp, args.pos, args.probes, args.cpu)
         w = path_classes(report)
         ins_cmd = clock_insertion(sdf, "cmd_l")
         ins_gnt = clock_insertion(sdf, "arb_gnt_l")

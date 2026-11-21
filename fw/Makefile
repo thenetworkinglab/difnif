@@ -12,7 +12,7 @@ OBJCOPY = $(CROSS)objcopy
 SIZE = $(CROSS)size
 CFLAGS = -march=rv32ic -mabi=ilp32 -Os -ffreestanding -fno-builtin -nostdlib \
          -ffunction-sections -fdata-sections -Wall -Wextra -std=c11
-LDFLAGS = -Wl,-T,link.ld -Wl,--gc-sections -nostartfiles -lgcc
+LDFLAGS = -Wl,-T,link.ld -Wl,--gc-sections -Wl,--no-warn-rwx-segments -nostartfiles -lgcc
 SRCS = start.S main.c uart.c sd.c fat.c
 RAM_WORDS = 2048
 

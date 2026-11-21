@@ -158,9 +158,16 @@ LEDs. Its header has the memory map.
 
 `make BOARD=ps2 CPU=1` builds it into `build/ps2-cpu` (and the firmware
 first). The normal build is unchanged: `make BOARD=ps2` gives the same
-bitstream, bit for bit, as release v2026.11.21-1. With a placeholder
-firmware the processor build uses 4,495 of 7,680 logic cells and 23 of 32
-block RAMs, and runs at up to 55.9 MHz against the 50 MHz it needs.
+bitstream, bit for bit, as release v2026.11.21-1. The processor build uses
+about 4,500 of 7,680 logic cells and 23 of 32 block RAMs, and runs at up to
+59 MHz against the 50 MHz it needs.
+
+It places with nextpnr's `--no-promote-ce`. Without it, the processor's
+clock enables took the last of the FPGA's 8 global buffers, and `ARB/-GNT`
+and `-TC`, which clock parts of `mcabus.v`, were left on ordinary routing.
+`tools/timing_budget.py --pos --cpu` checks the bus timing of this build:
+everything passes, the tightest being T54 at 0.2 ns on stacked worst cases
+(0.8 ns in the normal build).
 
 The log goes out on Teensy data line 7 (FPGA pin 25), which is the
 Teensy's pin 16, its Serial4 input; Teensy pin 17 (Serial4 output) comes
@@ -174,11 +181,19 @@ only brings the card up, read-only: start-up at 400 kHz, then 4-bit at
 filesystem (on the whole card or in its first partition); checks it's
 contiguous; and reads its first block. `verilog/run_socsim.sh` builds it
 and runs `soc_t.v` against the card model holding a 64 MB FAT32 card made
-by `mksdimg.py`. Not yet run: it needs the RISC-V compiler.
+by `mksdimg.py`. It passes: the card ready in 4.2 ms, disk0.img found at
+block 4097 and checked contiguous, and its first block read correctly. The
+firmware is 2.9 KB. (The contiguity check reads the FAT a byte at a time
+and takes 31 ms for 2,048 clusters; worth speeding up for large images with
+small clusters.)
+
+For hardware, `fw/teensy_log/teensy_log.ino` makes a Teensy the log's USB
+serial port: it copies Serial4 to USB and back, and leaves every other pin
+an input. Only with the processor build.
 
 ## Next
 
-- Run the bring-up in simulation, then on a P2 board.
+- Run the bring-up on a P2 board, on the bench.
 - Port the ESDI command handling from `difnift.ino`, and run the full bus
   testbench (`difnif72_t.v`) with the processor build.
 - The pacing bits in POS register 3 (see below).
