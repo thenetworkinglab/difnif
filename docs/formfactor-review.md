@@ -382,6 +382,10 @@ driver's `syncDevice()`, which ends the write and waits until the card has
 stored it (about 1.1 ms on this card). A multi-sector command still streams
 to the card as one write.
 
+Firmware v2026.11.21-5 moves the sync to just after the completion
+interrupt, so it overlaps the host handling it; the host still can't start
+another command until it has finished (see "Speed: writes").
+
 With the fix, `ECHO fixed >> D:\FCLOG.TXT` twice, the second time switching
 the PS/2 off within a second, left both lines in the file. A 20-round copy
 test in the 55SX then ended with "Done" in the log.
