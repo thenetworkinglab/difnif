@@ -146,7 +146,7 @@ command doesn't produce, since the card ends each burst before its last word.
 
 Each new test fails on the design before its fix. 36 tests pass, and the
 quick matrix passes with POS enabled. The timing budget passes (T54, the
-tightest, at 1.8 ns on stacked worst cases).
+tightest, at 0.8 ns on stacked worst cases).
 
 ## Tested on hardware
 
@@ -163,9 +163,23 @@ numbers):
 DiskMeter is in line with release v2026.11.19-1 (55SX 2108 / 2266 / 2305,
 Model 70 1956 / 2067 / 2102), so the new DMA handling costs nothing.
 
-## Still to do
+## Device 1
 
-- **Device 1:** OS/2 also sends a seek to a second drive (device 1). The
-  firmware rejects it as an unknown command, and OS/2 resets the card and
-  carries on. A real single-drive attachment probably answers differently;
-  worth checking against the spec.
+OS/2 also sends a seek to a second drive (device 1). The spec reserves
+device numbers 1-6 (Figures 2 and 21), and has a command error for this,
+13h, "invalid device number for the command" (Figure 52). Releases up to
+v2026.11.21-1 rejected the seek as an unknown command (error 03) instead.
+From firmware v2026.11.21-2 the card answers with a command block error,
+error 13h, and a device status that is neither ready nor selected.
+
+OS/2 does the same with either answer: it reads the status block, sends
+end-of-interrupt, soft-resets the card and carries on. Booting OS/2 from the
+disk, it resets twice and goes straight on to reads; in the earlier logs from
+installing it in the 55SX, it reset once and then read the drive's
+configuration. Either way the reset looks like how OS/2 handles a missing
+second drive, rather than a sign that the answer is wrong. Whether a real IBM drive
+answers this way hasn't been checked: DIFDIAG only addresses devices 0 and 7.
+
+Eric's firmware never cleared the command error code, so after the device 1
+rejection every later status block, including successful reads and writes,
+still reported error 03. Each command now starts with it cleared.

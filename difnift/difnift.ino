@@ -2,7 +2,7 @@
 
 // Firmware version: the release date plus a count of releases that day.
 // Change it for each release and note the change in CHANGELOG.md.
-#define FW_VERSION "v2026.11.21-1"
+#define FW_VERSION "v2026.11.21-2"
 
 
 // Pin definitions
@@ -888,6 +888,33 @@ void processCmdBlock()
     Serial.print(")");
   }
   Serial.println();
+
+  // (fork) Each command starts with no command error. Eric's firmware never
+  // cleared it, so after one rejected command every later status block,
+  // including successful reads and writes, still reported "command not
+  // supported".
+  sb_cmd_error = 0;
+
+  // (fork) Only device 0 (the drive) and 7 (the attachment) exist; 1-6 are
+  // reserved (spec Figures 2 and 21). OS/2 probes for a second drive with a
+  // seek to device 1. Answer as the spec defines: command block error, with
+  // command error 13h, "invalid device number for the command" (Figure 52),
+  // and a device status that is neither ready nor selected.
+  uint8_t dev = cmd_block[0] & ATN_DEV_MASK;
+  if (dev != DEV_DRIVE && dev != DEV_CONTROLLER) {
+    Serial.print("No device ");
+    Serial.println(dev >> 5);
+    doISR(dev | ISR_CMD_ERROR);
+    sb_cmd_error = CMD_ERR_INVDEV;
+    prepDefaultSB();
+    status_block[2] = 0x0000; // device status and error: not ready or selected
+    status_block[4] = 0x0000; // no RBA processed
+    status_block[5] = 0x0000;
+    loadStatusBlock();
+    clearFlag(_BV(FLAG_CMD_PROG));
+    pendInterrupt(PEND_INT);
+    return;
+  }
 
   // After command, fill in the status block
   // then trigger a command complete interrupt

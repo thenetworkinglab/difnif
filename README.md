@@ -11,7 +11,7 @@ listed in [docs/formfactor-review.md](docs/formfactor-review.md).
 And before you ask: the name 'DifNif' comes from DF9F, 
 the Micro Channel adapter ID that IBM's DBA-ESDI drives report.
 
-**Status:** the Rev P2 PS/2 board works in a PS/2 55SX; see "Status" below
+**Status:** the Rev P2 PS/2 board works in a PS/2 55SX and Model 70; see "Status" below
 before building anything. Releases are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Background

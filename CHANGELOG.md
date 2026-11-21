@@ -18,6 +18,17 @@ it, or from this fork before v2026.11.18-1, is reported as "has no version".
 
 ## Firmware
 
+### Unreleased
+
+- **Commands to devices 1-6** (OS/2 probes for a second drive with a seek to
+  device 1) get a command block error with command error 13h, "invalid
+  device number for the command", as the spec defines, instead of 03,
+  "command not supported". OS/2 resets the card after either answer and
+  carries on (docs/os2.md, "Device 1").
+- **The command error code is cleared at each command.** It was never
+  cleared, so after one rejected command every later status block, including
+  successful reads and writes, reported "command not supported".
+
 ### v2026.11.21-1
 
 OS/2 1.1 now installs and boots: see [docs/os2.md](docs/os2.md). Needs FPGA
