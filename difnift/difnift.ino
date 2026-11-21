@@ -2,7 +2,7 @@
 
 // Firmware version: the release date plus a count of releases that day.
 // Change it for each release and note the change in CHANGELOG.md.
-#define FW_VERSION "v2026.11.21-2"
+#define FW_VERSION "v2026.11.21-5"
 
 
 // Pin definitions
@@ -171,6 +171,20 @@ bool no_disk_op = false;
 
 // Benchmarking
 elapsedMicros since_sd_op;
+// (fork) Write timing, one line per write command: the time from the command
+// to the end of the last sector's SD write, split into the SD card's writes,
+// the end-of-command sync, reading sectors out of the FPGA, and the rest,
+// which is mostly waiting for the host's data.
+uint32_t w_sectors = 0;
+uint32_t w_sd_us = 0;
+uint32_t w_sync_us = 0;
+uint32_t w_fpga_us = 0;
+// (fork) Sync the SD card after telling the host a write is done, instead of
+// before: the sync (about 0.8 ms) then overlaps the host handling the
+// interrupt, and the host can't start another command until it's finished.
+// The cost is a window of about 1 ms in which the host has been told the
+// data is written but the card hasn't stored it. 'w' switches it.
+bool sync_after_irq = true;
 elapsedMicros since_dma_start;
 
 bool debugpinstate = false;
@@ -554,6 +568,7 @@ void setup() {
   Serial.println("Press 'B' to switch burst DMA off or on.");
   Serial.println("Press 'g' (while running) to switch DMA waiting for the interrupt off or on.");
   Serial.println("Press 'd' (while running) to change the data-ready delay.");
+  Serial.println("Press 'w' (while running) to move the SD sync before or after a write's interrupt.");
 }
 
 
@@ -652,9 +667,11 @@ int readDiskRBA2(uint32_t rba)
 int writeDiskRBA(uint32_t rba)
 {
   int ret;
+  uint32_t t = micros();
   digitalWriteFast(DEBUG_PIN2, 1);
   ret = writeDiskRBA2(rba);
   digitalWriteFast(DEBUG_PIN2, 0);
+  w_sd_us += micros() - t;
   return ret;
 }
 
@@ -669,8 +686,6 @@ int writeDiskRBA2(uint32_t rba)
   if (!file.write(transfer_buffer, 512)) {
     return 1;
   }
-  Serial.print("wtime: ");
-  Serial.println(since_sd_op);
   return 0;
 }
 
@@ -689,8 +704,29 @@ void commitWrites()
     Serial.println("SD card sync failed");
   }
   digitalWriteFast(DEBUG_PIN2, 0);
-  Serial.print("stime: ");
-  Serial.println(since_sd_op);
+  w_sync_us += since_sd_op;
+}
+
+// (fork) Prints the write timing for the command just finished: total is the
+// time from the command block to telling the host it's done, which includes
+// the sync unless it comes afterwards (sync_after_irq).
+void printWriteTime(uint32_t total, bool sync_in_total)
+{
+  uint32_t other = total - w_sd_us - w_fpga_us - (sync_in_total ? w_sync_us : 0);
+  Serial.print("W ");
+  Serial.print(w_sectors);
+  Serial.print(" sectors, ");
+  Serial.print(total);
+  Serial.print(" us, ");
+  Serial.print(total ? w_sectors * 500000UL / total : 0);
+  Serial.print(" KB/s: SD ");
+  Serial.print(w_sd_us);
+  Serial.print(sync_in_total ? ", sync " : ", sync after ");
+  Serial.print(w_sync_us);
+  Serial.print(", FPGA ");
+  Serial.print(w_fpga_us);
+  Serial.print(", host and other ");
+  Serial.println(other);
 }
 
 // Prints a 16-bit hex value to the USB console
@@ -955,6 +991,8 @@ void processCmdBlock()
     case 0x4004: // Write with verify (page 49)
       current_rba = cmd_block[2] | cmd_block[3] << 16;
       rba_transfer_count = cmd_block[1];
+      w_sectors = rba_transfer_count;
+      w_sd_us = w_sync_us = w_fpga_us = 0;
       Serial.print("Preparing to write sector ");
       Serial.println(current_rba, DEC);
       status_max = 0; // No status data
@@ -1243,6 +1281,10 @@ void mainLoop() {
         Serial.print("Data-ready delay ");
         Serial.print(dtr_min_us);
         Serial.println(" us.");
+      } else if (c == 'w') {
+        sync_after_irq = !sync_after_irq;
+        Serial.println(sync_after_irq ? "SD sync after the write's interrupt." :
+                                        "SD sync before the write's interrupt.");
       }
     }
 
@@ -1374,12 +1416,14 @@ void mainLoop() {
 
     if (transfer_state == TS_WRITE && use_buf) {
       if (flags & _BV(FLAG_BUF_READY)) { // A full half: write it to the card
+        uint32_t t = micros();
         bufReadSector();
         setFlag(_BV(FLAG_BUF_DONE));
         if (buf_to_arm > 0) {
           setFlag(_BV(FLAG_BUF_GO)); // The half just freed takes a later sector
           buf_to_arm--;
         }
+        w_fpga_us += micros() - t;
         if (!no_disk_op) {
           writeDiskRBA(current_rba);
         }
@@ -1387,7 +1431,11 @@ void mainLoop() {
         if (rba_transfer_count > 0) {
           current_rba++;
         } else {
-          commitWrites(); // On the card before the host hears it's done
+          bool sync_first = !sync_after_irq || no_disk_op;
+          if (sync_first) {
+            commitWrites(); // On the card before the host hears it's done
+          }
+          uint32_t w_total = since_cmd;
           bufEnd();
           transfer_state = TS_IDLE;
           sb_cmd_status = 1;
@@ -1399,6 +1447,10 @@ void mainLoop() {
           loadStatusBlock();
           doISR((cmd_block[0] & ATN_DEV_MASK) | 0x1); // Command complete
           pendInterrupt(PEND_INT);
+          if (!sync_first) {
+            commitWrites(); // While the host handles the interrupt
+          }
+          if (!no_disk_op) printWriteTime(w_total, sync_first);
         }
       }
     } else if (transfer_state == TS_WRITE) {
@@ -1437,7 +1489,11 @@ void mainLoop() {
             transfer_index = 0;
             setFlag(_BV(FLAG_TREQ_SET)); // Start the transfer
           } else {
-            commitWrites(); // On the card before the host hears it's done
+            bool sync_first = !sync_after_irq || no_disk_op;
+            if (sync_first) {
+              commitWrites(); // On the card before the host hears it's done
+            }
+            uint32_t w_total = since_cmd;
             transfer_state = TS_IDLE;
             sb_cmd_status = 1;
             
@@ -1450,6 +1506,10 @@ void mainLoop() {
   
             doISR((cmd_block[0] & ATN_DEV_MASK) | 0x1); // Command complete
             pendInterrupt(PEND_INT);
+            if (!sync_first) {
+              commitWrites(); // While the host handles the interrupt
+            }
+            if (!no_disk_op) printWriteTime(w_total, sync_first);
           }          
         }
       }
