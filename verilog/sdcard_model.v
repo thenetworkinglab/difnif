@@ -570,8 +570,13 @@ module sdcard_model #(
                     end
                     @(negedge sd_clk);
                     dat_drv = 4'h0;
-                    if (reject || !wr_multi) wr_stop = 1;
-                    else state = S_RCV;
+                    if (reject && wr_multi) begin
+                        wait (wr_stop);     // ignore the host until CMD12
+                    end else if (reject || !wr_multi) begin
+                        wr_stop = 1;
+                    end else begin
+                        state = S_RCV;
+                    end
                 end
             end
             state = S_TRAN;

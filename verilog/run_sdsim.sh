@@ -1,9 +1,10 @@
 #!/bin/bash
 #
-# Run sd_t.v (sdhost.v against sdcard_model.v) at the timing corners.
+# Run sd_t.v (sdhost.v against sdcard_model.v) at the timing corners, then
+# sdbuf_t.v (card, sdhost, sdbridge, sectorbuf and a host side) at two.
 #
-#   ./run_sdsim.sh           all corners
-#   ./run_sdsim.sh one       one run, sample_late, with any failures listed
+#   ./run_sdsim.sh           everything (about a minute)
+#   ./run_sdsim.sh one       sd_t.v once, sample_late, with any failures listed
 #
 # Needs Icarus Verilog (PATH should include /opt/oss-cad-suite/bin). Builds
 # into a temporary directory.
@@ -17,10 +18,13 @@ trap 'rm -rf "$TMP"' EXIT
 FMT="%-5s %5s %5s %5s  %-22s %-22s %s\n"
 bad=0
 
+TB=sd_t
+SRC="sdcard_model.v sdhost.v"
+
 run() {   # sample_late card_delay pad_out pad_in expect
     iverilog -g2012 -o "$TMP/sim" \
         -DSAMPLE_LATE=$1 -DODLY=$2 -DPAD_OUT=$3 -DPAD_IN=$4 \
-        sd_t.v sdcard_model.v sdhost.v || exit 1
+        $TB.v $SRC || exit 1
     out=$(vvp -n "$TMP/sim")
     result=$(echo "$out" | grep -E "^(ALL PASS|FAILED)" | tail -1)
     speed=$(echo "$out" | grep -o "8 blocks in .*" | head -1)
@@ -51,4 +55,12 @@ run 0 14.0  0.0  0.0 pass   # window 0-14
 run 0 14.0  3.0  2.0 pass   # window 5-19
 run 0 14.0  6.0  4.0 fail   # window 10-24 contains 20 ns
 run 1 14.0 16.0 12.0 fail   # window 28-42 contains 40 ns
+
+echo
+echo "sdbuf_t: SD card to sector buffer"
+TB=sdbuf_t
+SRC="sdcard_model.v sdhost.v sdbridge.v sectorbuf.v"
+printf "$FMT" "late" "card" "out" "in" "result" "" ""
+run 1 14.0  0.0  0.0 pass
+run 1 14.0  6.0  4.0 pass
 exit $bad

@@ -47,6 +47,9 @@
 //   write: wr_word is the next word to send, and wr_next takes it (the next
 //          word must follow within two clocks). wr_ready: a whole block is
 //          there to send; between blocks the SD clock stops until it is.
+//          After each block, wr_blk_done with wr_blk_ok: the card accepted
+//          it and has finished programming it (low: rejected, or no CRC
+//          status or end of busy from the card).
 //
 // This file is part of a fork of DifNif; CERN-OHL-S-2.0.
 
@@ -70,6 +73,8 @@ module sdhost (
     input  wire [15:0] wr_word,
     output reg         wr_next,
     input  wire        wr_ready,
+    output reg         wr_blk_done,
+    output reg         wr_blk_ok,
 
     output reg         sd_clk,
     input  wire        cmd_in,
@@ -370,6 +375,7 @@ module sdhost (
         rd_strobe   <= 1'b0;
         rd_blk_done <= 1'b0;
         wr_next     <= 1'b0;
+        wr_blk_done <= 1'b0;
         if (rst || data_abort) begin
             dst     <= D_IDLE;
             dat_oe  <= 4'h0;
@@ -382,6 +388,7 @@ module sdhost (
                 err_dbto    <= 1'b0;
                 rd_blk_ok   <= 1'b0;
                 rd_word     <= 16'd0;
+                wr_blk_ok   <= 1'b0;
             end
         end else if (data_cmd) begin
             err_dcrc    <= 1'b0;
@@ -514,8 +521,10 @@ module sdhost (
                         dcount <= 13'd0;
                         dst    <= D_WTOKB;
                     end else if (dcount == 13'd16) begin
-                        err_wcrc <= 1'b1;
-                        dst      <= D_IDLE;
+                        err_wcrc    <= 1'b1;
+                        wr_blk_done <= 1'b1;
+                        wr_blk_ok   <= 1'b0;
+                        dst         <= D_IDLE;
                     end
                 end
 
@@ -527,8 +536,10 @@ module sdhost (
                         dcount <= 13'd0;
                         dtimer <= 24'd0;
                         if (tok != 3'b010 || !dat_in[0]) begin
-                            err_wcrc <= 1'b1;
-                            dst      <= D_IDLE;
+                            err_wcrc    <= 1'b1;
+                            wr_blk_done <= 1'b1;
+                            wr_blk_ok   <= 1'b0;
+                            dst         <= D_IDLE;
                         end else begin
                             dst <= D_WBUSYW;
                         end
@@ -543,12 +554,16 @@ module sdhost (
                 D_WBUSY: if (samp) begin
                     dtimer <= dtimer + 24'd1;
                     if (dat_in[0]) begin
+                        wr_blk_done <= 1'b1;
+                        wr_blk_ok   <= 1'b1;
                         blocks_left <= blocks_left - 16'd1;
                         dcount      <= 13'd0;
                         dst         <= (blocks_left == 16'd1) ? D_IDLE : D_WGAP;
                     end else if (&dtimer) begin
-                        err_dbto <= 1'b1;
-                        dst      <= D_IDLE;
+                        err_dbto    <= 1'b1;
+                        wr_blk_done <= 1'b1;
+                        wr_blk_ok   <= 1'b0;
+                        dst         <= D_IDLE;
                     end
                 end
 

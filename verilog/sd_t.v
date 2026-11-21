@@ -55,6 +55,7 @@ module sd_t;
         .rd_word(rd_word), .rd_strobe(rd_strobe), .rd_ready(rd_ready),
         .rd_blk_done(rd_blk_done), .rd_blk_ok(rd_blk_ok),
         .wr_word(wr_word), .wr_next(wr_next), .wr_ready(wr_ready),
+        .wr_blk_done(), .wr_blk_ok(),
         .sd_clk(sd_clk_h), .cmd_in(cmd_in), .cmd_out(cmd_out), .cmd_oe(cmd_oe),
         .dat_in(dat_in), .dat_out(dat_out), .dat_oe(dat_oe),
         .card_detect(1'b0)
