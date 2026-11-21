@@ -66,6 +66,7 @@ module mcabus(
     input [15:0] t_sifr_out, // Status iface data from Teensy
     output t_sifr_full,      // So Teensy can tell when host reads it
     input t_sifr_write,      // So we can set flag when Teensy writes it
+    input t_sifr_clear,      // Teensy drops an unread status word (fork)
 
     output [15:0] t_dreg_out, // DREG data to Teensy
     input [15:0] t_dreg_in,   // DREG data from Teensy
@@ -80,6 +81,7 @@ module mcabus(
     input t_clear_all,        // Clears all flag bits
 
     output [39:0] t_pos_regs,
+    output [15:0] t_host_diag,  // (fork) for the Teensy: BSR reads, BCR, IRQ 14
 
     // Sector buffer (sectorbuf.v)
     input buf_mode,           // DREG transfers go through the buffer
@@ -90,7 +92,8 @@ module mcabus(
     output clear_all_o,
 
     // Burst DMA (fork, stage 2)
-    input burst_en            // Teensy register 15 bit 0, synchronized
+    input burst_en,           // Teensy register 15 bit 0, synchronized
+    input isr_gate            // Teensy register 15 bit 2, synchronized
     );
 
     // Declared early: used before their definitions below
@@ -212,6 +215,7 @@ module mcabus(
     // Teensy-side strobes
     reg [1:0] reg_t_atn_read;
     reg [1:0] reg_t_busy_clear;
+    reg [1:0] reg_t_sifr_clear = 2'b00;
     reg [1:0] reg_t_cifr_read;
     reg [1:0] reg_t_isr_write;
     reg [1:0] reg_t_sifr_write;
@@ -220,6 +224,7 @@ module mcabus(
     always @ (posedge clk) begin
         reg_t_atn_read <= {reg_t_atn_read[0], t_atn_read};
         reg_t_busy_clear <= {reg_t_busy_clear[0], t_busy_clear};
+        reg_t_sifr_clear <= {reg_t_sifr_clear[0], t_sifr_clear};
         reg_t_cifr_read <= {reg_t_cifr_read[0], t_cifr_read};
         reg_t_isr_write <= {reg_t_isr_write[0], t_isr_write};
         reg_t_sifr_write <= {reg_t_sifr_write[0], t_sifr_write};
@@ -265,10 +270,11 @@ module mcabus(
     end
 
     // Status Interface Register Full
-    // Clear register at end of MCA transaction
+    // Clear register at end of MCA transaction, or when the Teensy drops a
+    // word the host left unread (fork)
     // Set register when Teensy latches new value
     always @ (posedge clk) begin
-        if (clear_all || ev_sifr) begin
+        if (clear_all || ev_sifr || (reg_t_sifr_clear == 2'b10)) begin
             flag_si_full <= 1'b0;
         end else if (reg_t_sifr_write == 2'b01) begin
             flag_si_full <= 1'b1;
@@ -307,6 +313,7 @@ module mcabus(
 
     wire [7:0] reg_bsr; // Assembled from assign statement
     reg [7:0] reg_bcr = 8'h00;
+    reg tg_bcr = 1'b0;          // (fork) host wrote BCR
 
     // Control lines
     wire control_dma_enable;
@@ -332,9 +339,9 @@ module mcabus(
 
     // Basic Control Register
     assign t_hard_reset = reg_bcr[7] | s_chreset[1]; // Resets the MCU
-    // TODO: Make it so completing a DMA transfer
-    // auto-clears the DMA enable
-    assign control_dma_enable = reg_bcr[1]; // Set to allow DMA operation
+    // DMA enable, cleared at terminal count (fork, below)
+    wire dma_tc_off;
+    assign control_dma_enable = reg_bcr[1] & ~dma_tc_off; // Set to allow DMA operation
     assign control_int_enable = reg_bcr[0]; // Set to en irq14 line to assert
 
 
@@ -359,6 +366,49 @@ module mcabus(
     wire [3:0] arb_level = reg_pos2[5:2]; // DMA arbitration level
 
     assign t_pos_regs = {reg_pos4, reg_pos3, reg_pos2, reg_pos01};
+
+    // (fork) DMA enable is reset at terminal count. With POS 3 bit 6 at 0
+    // ("Reset DMA Enable at Terminal Count", which the 55SX and Model 70
+    // set), the card stops asking for DMA once -TC has ended a DMA transfer
+    // to it, until the host writes BCR again (IBM DASD Storage Interface
+    // Specification, Figures 4 and 10: "to prevent unsolicited DMA requests
+    // after activation of terminal count"). OS/2 1.1 relies on it: it leaves
+    // DMA enabled, sends the next read, and programs the DMA controller only
+    // when "data transfer ready" arrives. A card that asks for the bus
+    // before that wins it with no DMA cycle to follow, and the PS/2 stops.
+    // PS/2 builds only: the ThinkPad build has no POS registers.
+    reg [2:0] s_bcrw = 3'b000;
+    reg [1:0] s_tco = 2'b00;
+    reg tc_off = 1'b0;
+    always @ (posedge clk) begin
+        s_bcrw <= {s_bcrw[1:0], tg_bcr};
+        // -TC need only arrive 30 ns before -CMD rises (T52), after the
+        // cycle's status may already have changed (T9/T10), so use the
+        // DMA selection latched at -CMD falling
+        s_tco <= {s_tco[0], ~tc_l & la_dma_selected};
+        if (s_chreset[1] | (s_bcrw[2] ^ s_bcrw[1]))
+            tc_off <= 1'b0;
+`ifdef MCA_NO_POS
+`else
+        if (s_tco[1] & ~reg_pos3[6])
+            tc_off <= 1'b1;
+`endif
+    end
+    assign dma_tc_off = tc_off;
+
+    // (fork) What the host is doing, for diagnosing a host that stops
+    // (OS/2 1.1): a count of its BSR reads, so the Teensy can tell polling
+    // from waiting for an interrupt, plus the BCR enables and IRQ 14 as
+    // the card drives it. Read by the Teensy at register 15 bits 15-3.
+    reg tg_bsr = 1'b0;
+    always @ (posedge cmd_l)
+        if (la_io & la_read & (la_addr == REG_BSR)) tg_bsr <= ~tg_bsr;
+    reg [2:0] s_bsr = 3'b000;
+    reg [7:0] bsr_reads = 8'h00;
+    always @ (posedge clk) begin
+        s_bsr <= {s_bsr[1:0], tg_bsr};
+        if (s_bsr[2] ^ s_bsr[1]) bsr_reads <= bsr_reads + 8'd1;
+    end
 
 
     // DMA
@@ -390,7 +440,12 @@ module mcabus(
     // transfer can reach the card. It stops after the last one.
     wire treq_now = buf_mode ? (treq_pending ? buf_h_more : buf_h_ready)
                              : (flag_treq & ~treq_pending);
-    wire dma_requested = control_dma_enable & treq_now & card_enable;
+    // (fork) With isr_gate, no DMA request while an interrupt is pending
+    // (ISR not yet read by the host). OS/2 1.1 enables DMA before it has
+    // handled "data transfer ready" and programmed the DMA controller; a
+    // request then wins the bus with no DMA cycle to follow, and the PS/2
+    // stops.
+    wire dma_requested = control_dma_enable & treq_now & card_enable & ~(isr_gate & flag_isr);
     //wire dma_requested = test3; // & cmd_l? FIXME: & card_enable
     reg dma_cycle = 1'b0; // latch is set when we are in a dma cycle
     wire arb_won;
@@ -497,7 +552,18 @@ module mcabus(
         else
             burst_cycle <= arb_won & burst_ok;
     end
-    assign burst_o_l = ~(burst_cycle & arb_won & ~arb_gnt_l & ~burst_stop & tc_l);
+    // -TC may last only 40 ns (T52, T53), less than the 50 MHz logic takes
+    // to set burst_stop, so its falling edge also latches the release until
+    // the next arbitration
+    reg tc_seen = 1'b0;
+    wire tc_seen_rst = arb_gnt_l | chreset;
+    always @ (negedge tc_l or posedge tc_seen_rst) begin
+        if (tc_seen_rst)
+            tc_seen <= 1'b0;
+        else
+            tc_seen <= 1'b1;
+    end
+    assign burst_o_l = ~(burst_cycle & arb_won & ~arb_gnt_l & ~burst_stop & tc_l & ~tc_seen);
 
     // dma_selected acts like another address select. This should enable access
     // by the bus to the DREG.
@@ -580,8 +646,10 @@ module mcabus(
             reg_pos4 <= 8'h00;
         end else if (la_write & (la_addressed | la_dma_selected)) begin
             if (la_cd_setup_l & card_enable) begin
-                if (~la_dma_selected && la_addr == REG_BCR)
+                if (~la_dma_selected && la_addr == REG_BCR) begin
                     reg_bcr <= bus_d[7:0];
+                    tg_bcr <= ~tg_bcr;
+                end
             end else if (~la_cd_setup_l) begin
                 case (la_addr)
                     4'h2       : reg_pos2 <= bus_d[7:0];
@@ -635,6 +703,13 @@ module mcabus(
             end
         end
     end
+
+    // (fork) Host diagnostics for the Teensy (register 15), see above:
+    // bits: 15-9 BSR reads, 8 the card drives -PREEMPT, 7 it holds the bus
+    // (granted to it), 6 it is requesting the bus, 5 IRQ 14, 4 BCR interrupt
+    // enable, 3 DMA enable (as used, after -TC), 1 DMA enable was reset by -TC
+    assign t_host_diag = {bsr_reads[6:0], ~preempt_o_l, arb_won & ~arb_gnt_l, dma_requested, ~irq14_l,
+                          control_int_enable, control_dma_enable, 1'b0, dma_tc_off, 1'b0};
 
     // Test outputs, on the SD card pins (J4 pins 3, 19, 18, 17, 16, 15 on the
     // 72-pin board). Normally driven low. "make PROBES=1" copies bus signals

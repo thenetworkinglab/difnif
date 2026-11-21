@@ -85,6 +85,7 @@ module difnif72_t;
     localparam real T_ARB     = 300;                // T44 ARB/-GNT high (arbitration) time
     localparam real T_GNT_CMD = 115;                // T43B -CMD after ARB/-GNT low
     localparam real T_PRE_OFF = 50;                 // T42 winner releases -PREEMPT
+    localparam real T_TC_SU     = 30;               // T52 -TC setup to -CMD inactive (asserted that late)
     localparam real T_BURST_ON  = 50;               // T43 -BURST active from ARB/-GNT low
     localparam real T_BURST_TC  = 30;               // T54 -BURST released from -TC active
     localparam real T_BURST_SU  = 35;               // T56 -BURST high before the last I/O -CMD rises
@@ -106,7 +107,8 @@ module difnif72_t;
                FL_TREQ = 8;
     // Sector buffer (sectorbuf.v): register 14, flag bits 11-15
     localparam [3:0] TN_BUF = 14;
-    localparam [3:0] TN_CTRL = 15;      // bit 0: burst DMA allowed (stage 2)
+    localparam [3:0] TN_CTRL = 15;      // bit 0: burst DMA allowed; bit 1 (write 1): drop unread status;
+                                        // bit 2: no DMA requests while an interrupt is pending
     localparam FL_BUF_MODE = 11, FL_BUF_DIR = 12,
                FL_BUF_GO = 13, FL_BUF_DONE = 14,                        // written as 1
                FL_BUF_READY = 13, FL_BUF_CAN_ARM = 14, FL_BUF_IDLE = 15; // read
@@ -351,6 +353,12 @@ module difnif72_t;
         tc = end_tc;
         mem = end_mem;
         id = end_id;
+        if (tc) begin
+            // -TC as late as T52 allows, after the cycle's address and
+            // status have gone invalid
+            wait_until(rise - T_TC_SU);
+            h_tc_l = 1'b0;
+        end
         wait_until(rise);
         if (!mem) begin
             io_burst_l = h_burst_l;
@@ -426,10 +434,6 @@ module difnif72_t;
             wait_until(t0 - T_ADL_OFF);
             h_adl_l = 1'b1;
 
-            if (tc) begin
-                wait_until(t0);         // well over 30 ns before -CMD rises (T52)
-                h_tc_l = 1'b0;
-            end
 
             wait_until(t0);
             h_cmd_l = 1'b0;
@@ -650,6 +654,7 @@ module difnif72_t;
             begin_test("Teensy reads version registers 10-13, and 0 at 14-15");
             for (i = 0; i < 6; i = i + 1) begin
                 tn_read(10 + i, d);
+                if (i == 5) d = d & 16'h0007;   // 15: bits 15-3 report host activity
                 if (d !== want[i])
                     fail($sformatf("register %0d = %h, expected %h", 10 + i, d, want[i]));
             end
@@ -792,6 +797,34 @@ module difnif72_t;
     endtask
 
     // Teensy to host: status interface register (16-bit)
+    // The host may end a command (EOI) without reading all of the status
+    // block (IBM DASD spec 3.3). The Teensy then drops the unread word, so
+    // "status interface full" doesn't still show at the next command
+    // (OS/2 1.1 hung on that).
+    task automatic test_sifr_clear;
+        reg ok;
+        reg [15:0] d, fl;
+        begin
+            begin_test("unread status word dropped by the Teensy (register 15 bit 1)");
+            tn_write(TN_SIFR, 16'h5A5A);
+            host_wait_bsr(BSR_SI_FULL, 1'b1, ok);
+            if (!ok) fail("status interface full not shown after the Teensy wrote SIFR");
+            tn_write(TN_CTRL, 16'h0001);    // bit 1 clear: nothing to drop
+            #300;
+            host_in(A_BSR, 0, d);
+            if (d[BSR_SI_FULL] !== 1'b1) fail("writing register 15 without bit 1 cleared status interface full");
+            tn_write(TN_CTRL, 16'h0002);
+            #300;
+            host_in(A_BSR, 0, d);
+            if (d[BSR_SI_FULL] !== 1'b0) fail($sformatf("status interface full still set after the Teensy dropped it: BSR %h", d));
+            tn_read(TN_FLAGS, fl);
+            if (fl[FL_SIFR] !== 1'b0) fail($sformatf("Teensy still sees SIFR full: flags %h", fl));
+            tn_read(TN_CTRL, d);
+            if (d[2:0] !== 3'b000) fail($sformatf("register 15 reads %h after the strobe, expected bits 2-0 clear", d));
+            end_test;
+        end
+    endtask
+
     task automatic test_sifr;
         integer ia, ib;
         reg ok;
@@ -844,6 +877,41 @@ module difnif72_t;
     endtask
 
     // Teensy to host: interrupt status register (8-bit)
+    // Register 15 bits 15-3 (fork): the host's BSR reads, counted; BCR's
+    // interrupt and DMA enables; and IRQ 14 as the card drives it. Also the
+    // first check of the IRQ 14 line itself at the connector.
+    task automatic test_host_diag;
+        reg [15:0] d0, d1, d;
+        integer i;
+        begin
+            begin_test("register 15 reports BSR reads, BCR and IRQ 14; IRQ 14 at the connector");
+            host_out(A_BSR, 0, 16'h0000);           // BCR: interrupts and DMA off
+            tn_read(TN_CTRL, d0);
+            for (i = 0; i < 3; i = i + 1) host_in(A_BSR, 0, d);
+            #300;
+            tn_read(TN_CTRL, d1);
+            if (d1[15:9] !== d0[15:9] + 7'd3)
+                fail($sformatf("BSR read count went from %0d to %0d after 3 reads", d0[15:9], d1[15:9]));
+            if (d1[8:3] !== 6'b000000) fail($sformatf("register 15 = %h with BCR 00 and no interrupt", d1));
+            tn_write(TN_ISR, 16'h0001);             // interrupt, but not enabled
+            #300;
+            tn_read(TN_CTRL, d);
+            if (d[5] !== 1'b0 || h_irq14_l !== 1'b1) fail("IRQ 14 asserted with BCR interrupt enable off");
+            host_out(A_BSR, 0, 16'h0003);           // interrupts and DMA on
+            #300;
+            tn_read(TN_CTRL, d);
+            if (d[5:3] !== 3'b111) fail($sformatf("register 15 = %h, expected IRQ, interrupt enable, DMA enable", d));
+            if (h_irq14_l !== 1'b0) fail("IRQ 14 not low at the connector with an interrupt enabled");
+            host_in(A_ATN, 0, d);                   // the host reads ISR
+            #300;
+            if (h_irq14_l !== 1'b1) fail("IRQ 14 still low after the host read ISR");
+            tn_read(TN_CTRL, d);
+            if (d[5] !== 1'b0) fail("register 15 still shows IRQ 14 after the host read ISR");
+            host_out(A_BSR, 0, 16'h0000);
+            end_test;
+        end
+    endtask
+
     task automatic test_isr;
         integer ia, ib;
         reg ok;
@@ -1115,7 +1183,7 @@ module difnif72_t;
                                     blen = blen + 1;
                                 end
                                 if (io_burst_l === 1'bx) fail("-BURST unknown at the end of an I/O cycle");
-                                if (burst_seen && io_burst_age < T_BURST_SU)
+                                if (burst_seen && io_burst_age < T_BURST_SU && dma_done < n)
                                     fail($sformatf("-BURST changed %0.1f ns before -CMD rose (T56, min %0.0f)",
                                                    io_burst_age, T_BURST_SU));
                                 more = io_burst_l === 1'b0 && dma_done < n;
@@ -1295,6 +1363,99 @@ module difnif72_t;
         end
     endtask
 
+    // n words from the Teensy to memory by DMA, the old way (DREG + TREQ),
+    // with -TC on the last
+    task automatic dma_words_from_card(input integer n);
+        integer ib;
+        reg ok;
+        begin
+            fork
+                dma_run(0, n, 0);
+                for (ib = 0; ib < n && !aborted; ib = ib + 1) begin
+                    tn_wait_flag(FL_TREQ, 1'b0, ok);
+                    if (ok) begin
+                        tn_write(TN_DREG, 16'hC0DE + ib);
+                        tn_write(TN_FLAGS, 16'h0001 << FL_TREQ_SET);
+                    end
+                end
+            join
+        end
+    endtask
+
+    // Terminal count resets DMA enable when POS 3 bit 6 is 0, as on IBM's
+    // drives: the card mustn't ask for DMA again until the host re-enables
+    // it (OS/2 1.1 hung without this). With bit 6 set, DMA stays enabled.
+    task automatic test_tc_dma_reset;
+        reg [15:0] d;
+        integer i;
+        reg asked;
+        begin
+            begin_test("-TC resets DMA enable (POS 3 bit 6 = 0); not with bit 6 set");
+            host_out(A_BSR, 0, 16'h0002);
+            dma_words_from_card(2);
+            #300;
+            host_in(A_BSR, 0, d);
+            if (d[7] !== 1'b0) fail($sformatf("BSR %h after -TC: DMA still enabled", d));
+            // More data ready, DMA not re-enabled: the card must not ask
+            tn_write(TN_DREG, 16'hBEEF);
+            tn_write(TN_FLAGS, 16'h0001 << FL_TREQ_SET);
+            asked = 1'b0;
+            for (i = 0; i < 50; i = i + 1) begin
+                #100;
+                if (b_out[4] === 1'b0) asked = 1'b1;
+            end
+            if (asked) fail("card asked for the bus (-PREEMPT) after -TC, before the host re-enabled DMA");
+            // The host re-enables DMA: now it asks, and the word goes across
+            host_out(A_BSR, 0, 16'h0002);
+            #300;
+            if (b_out[4] !== 1'b0) fail("card didn't ask for the bus after the host re-enabled DMA");
+            dma_run(0, 1, 0);
+            if (!aborted && dma_buf[0] !== 16'hBEEF) fail($sformatf("word after re-enabling: %h", dma_buf[0]));
+            // POS 3 bit 6 set: DMA stays enabled after -TC
+            pos_out(3, 8'h40);
+            host_out(A_BSR, 0, 16'h0002);
+            dma_words_from_card(1);
+            #300;
+            host_in(A_BSR, 0, d);
+            if (d[7] !== 1'b1) fail($sformatf("BSR %h after -TC with POS 3 bit 6 set: DMA should stay enabled", d));
+            pos_out(3, 8'h00);
+            host_out(A_BSR, 0, 16'h0000);
+            end_test;
+        end
+    endtask
+
+    // With register 15 bit 2, the card asks for DMA only once the host has
+    // read the interrupt status: OS/2 1.1 enables DMA before it handles
+    // "data transfer ready" and programs the DMA controller.
+    task automatic test_isr_gate;
+        reg [15:0] d;
+        integer i;
+        reg asked;
+        begin
+            begin_test("register 15 bit 2: no DMA request until the host reads the interrupt status");
+            tn_write(TN_CTRL, 16'h0004);
+            tn_write(TN_ISR, 16'h000B);             // data transfer ready
+            tn_write(TN_DREG, 16'hFACE);
+            tn_write(TN_FLAGS, 16'h0001 << FL_TREQ_SET);
+            host_out(A_BSR, 0, 16'h0003);           // DMA and interrupts on
+            asked = 1'b0;
+            for (i = 0; i < 30; i = i + 1) begin
+                #100;
+                if (b_out[4] === 1'b0) asked = 1'b1;
+            end
+            if (asked) fail("card asked for the bus with the interrupt still pending");
+            host_in(A_ATN, 0, d);                   // the host reads ISR
+            if (d[7:0] !== 8'h0B) fail($sformatf("ISR read %h, expected 0B", d[7:0]));
+            #300;
+            if (b_out[4] !== 1'b0) fail("card didn't ask for the bus after the host read the interrupt status");
+            dma_run(0, 1, 0);
+            if (!aborted && dma_buf[0] !== 16'hFACE) fail($sformatf("DMA word %h, expected FACE", dma_buf[0]));
+            tn_write(TN_CTRL, 16'h0000);
+            host_out(A_BSR, 0, 16'h0000);
+            end_test;
+        end
+    endtask
+
     // Sector buffer, disk read: the Teensy loads sectors into the buffer,
     // DMA moves them to memory. slow: the Teensy takes 400 us over each
     // sector, so the host has to wait for it.
@@ -1443,8 +1604,10 @@ module difnif72_t;
 `endif
         test_cifr;
         test_sifr;
+        test_sifr_clear;
         test_atn;
         test_isr;
+        test_host_diag;
         test_dreg_write;
         test_dreg_read;
 
@@ -1474,10 +1637,14 @@ module difnif72_t;
         test_buf_to_card(1, 1, 1, "burst: DMA sector write, slow Teensy, device competing");
         test_burst_tc;
         test_dma_from_card(0, "DMA sector read without the buffer, after it");
+`ifdef MCA_USE_POS
+        test_tc_dma_reset;
+`endif
         // Burst allowed but the buffer off: the old path must not burst
         tn_write(TN_CTRL, 16'h0001);
         test_dma_from_card(0, "DMA sector read without the buffer, burst allowed");
         tn_write(TN_CTRL, 16'h0000);
+        test_isr_gate;
         test_channel_reset;
         test_not_selected(16'h0080, "no response at 0080 after DMA");
 

@@ -134,6 +134,9 @@ module mcabus_t;
         .buf_h_more(1'b0),
         .buf_h_rdata(16'h0000),
         .burst_en(1'b0),
+        .isr_gate(1'b0),
+        .t_sifr_clear(1'b0),
+        .t_host_diag(),
 
         .test3(test3)
     );

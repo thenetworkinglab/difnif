@@ -92,10 +92,13 @@ module difnif_top(
     wire t_clear_all;
 
     wire [39:0] t_pos_regs;
+    wire [15:0] t_host_diag;
 
     // Sector buffer (fork)
     wire buf_mode, buf_dir;
     wire burst_en;
+    wire isr_gate;
+    wire t_sifr_clear;
     wire t_buf_wr, t_buf_rd, t_buf_go, t_buf_done;
     wire [15:0] t_buf_wdata, t_buf_rdata;
     wire t_buf_ready, t_buf_can_arm, t_buf_h_idle;
@@ -179,6 +182,7 @@ module difnif_top(
         .t_clear_all(t_clear_all),
 
         .t_pos_regs(t_pos_regs),
+        .t_host_diag(t_host_diag),
 
         .buf_mode(buf_mode),
         .buf_h_ready(buf_h_ready),
@@ -186,7 +190,9 @@ module difnif_top(
         .buf_h_rdata(buf_h_rdata),
         .buf_h_ev(buf_h_ev),
         .clear_all_o(mca_clear_all),
-        .burst_en(burst_en)
+        .burst_en(burst_en),
+        .isr_gate(isr_gate),
+        .t_sifr_clear(t_sifr_clear)
     );
 
     teensy tn1 (
@@ -222,10 +228,13 @@ module difnif_top(
         .t_clear_all(t_clear_all),
 
         .t_pos_regs(t_pos_regs),
+        .t_host_diag(t_host_diag),
 
         .buf_mode(buf_mode),
         .buf_dir(buf_dir),
         .burst_en(burst_en),
+        .isr_gate(isr_gate),
+        .t_sifr_clear(t_sifr_clear),
         .t_buf_wr(t_buf_wr),
         .t_buf_wdata(t_buf_wdata),
         .t_buf_rd(t_buf_rd),
