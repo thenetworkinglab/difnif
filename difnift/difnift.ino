@@ -2,7 +2,7 @@
 
 // Firmware version: the release date plus a count of releases that day.
 // Change it for each release and note the change in CHANGELOG.md.
-#define FW_VERSION "v2026.11.19-1"
+#define FW_VERSION "v2026.11.21-1"
 
 
 // Pin definitions
@@ -38,7 +38,9 @@
 #define REG_VER_COUNT 12  // 0001
 #define REG_VARIANT 13    // 1 = make BOARD=ps2, 0 = ThinkPad build
 #define REG_BUF 14        // sector buffer data (fork)
-#define REG_CTRL 15       // bit 0: burst DMA allowed (fork, FPGA v2026.11.19-1 and later)
+#define REG_CTRL 15       // bit 0: burst DMA allowed (fork, FPGA v2026.11.19-1 and later);
+                          // bit 1 written as 1 drops an unread status word (v2026.11.21-1);
+                          // bit 2: no DMA requests while an interrupt is pending (v2026.11.21-1)
 
 // Bit definitions for REG_FLAGS
 #define FLAG_ATN_FULL 0
@@ -258,8 +260,18 @@ uint32_t buf_to_arm = 0;    // write: sectors not yet armed
 // several words per arbitration while the sector buffer is in use, instead
 // of the planar arbitrating for every word. The FPGA does it all; the
 // firmware only allows it, through register 15.
+// (fork) Minimum time from receiving a command to "data transfer ready".
+// A real drive needs milliseconds to seek and find the sector; with the
+// SD card and read-ahead the DifNif can answer in 0.2 ms, and OS/2 1.1
+// stopped at such a read. 'd' on the serial port changes it.
+uint32_t dtr_min_us = 0;
+elapsedMicros since_cmd;
+uint8_t bsr_at_cmd = 0;     // (fork) host BSR read count when the command arrived
+
 bool fpga_has_burst = false;  // found at startup
 bool burst_enabled = true;    // 'B' on the serial port switches it off and on
+bool fpga_has_gate = false;   // (fork) register 15 bit 2 reads back
+bool gate_enabled = true;     // 'g' switches it off and on
 
 // Does the FPGA have burst control? Older builds read 0 at register 15.
 bool detectBurst()
@@ -271,9 +283,47 @@ bool detectBurst()
   return found;
 }
 
+// Register 15's stored bits: burst DMA (bit 0) and holding DMA requests
+// while an interrupt is pending (bit 2)
+uint16_t ctrlBits()
+{
+  return ((fpga_has_burst && burst_enabled) ? 0x0001 : 0x0000) |
+         ((fpga_has_gate && gate_enabled) ? 0x0004 : 0x0000);
+}
+
 void applyBurst()
 {
-  portWrite(REG_CTRL, (fpga_has_burst && burst_enabled) ? 0x0001 : 0x0000);
+  portWrite(REG_CTRL, ctrlBits());
+}
+
+bool detectGate()
+{
+  bool found;
+  portWrite(REG_CTRL, 0x0004);
+  found = (portRead(REG_CTRL) & 0x0004) != 0;
+  portWrite(REG_CTRL, 0x0000);
+  return found;
+}
+
+// (fork) At an EOI the host has finished with the command, and IBM lets it
+// skip the rest of the status block (DASD spec 3.3). Stop loading status
+// words, and drop one still waiting in SIFR, so "status interface full"
+// doesn't show at the next command: OS/2 1.1 hung on that. FPGAs before
+// v2026.11.21-1 ignore bit 1.
+void dropStatus(uint16_t f)
+{
+  if (fpga_has_burst) {
+    // (fork) How the host waited during the command: a few BSR reads means
+    // it used IRQ 14, many means it polled (FPGA v2026.11.21-1 and later;
+    // the count wraps at 128)
+    Serial.print("BSR reads during the command: ");
+    Serial.println((uint8_t)((portRead(REG_CTRL) >> 9) - bsr_at_cmd) & 0x7F);
+  }
+  status_max = 0;
+  if (fpga_has_burst && (f & _BV(FLAG_SIFR_FULL))) {
+    portWrite(REG_CTRL, ctrlBits() | 0x0002);
+    Serial.println("Dropped unread status.");
+  }
 }
 
 // Does the FPGA have the buffer? Older builds read 0 in the mode bit.
@@ -342,6 +392,68 @@ void bufReadSector()
   }
 }
 
+// (fork) Prints the transfer state and the flag register, to see where a
+// stuck transfer is waiting: whether the host has read the interrupt status
+// (ISR full clears when it does), and whether data is still waiting for it
+// (TREQ, or the buffer not idle).
+void printStuck(uint16_t f, uint32_t ms)
+{
+  if (ms) {
+    Serial.print("Transfer waiting ");
+    Serial.print(ms);
+    Serial.print(" ms: ");
+  }
+  Serial.print("state ");
+  Serial.print(transfer_state == TS_READ ? "read" : transfer_state == TS_WRITE ? "write" :
+               transfer_state == TS_IDLE ? "idle" : "other");
+  Serial.print(use_buf ? " (buffer)" : "");
+  Serial.print(", RBA ");
+  Serial.print(current_rba, HEX);
+  Serial.print(", sectors left ");
+  Serial.print(rba_transfer_count);
+  Serial.print(", index ");
+  Serial.print(transfer_index, HEX);
+  Serial.print(", flags ");
+  Serial.print(f, HEX);
+  Serial.print(": ISR full ");
+  Serial.print((f >> FLAG_ISR_FULL) & 1);
+  Serial.print(", SIFR full ");
+  Serial.print((f >> FLAG_SIFR_FULL) & 1);
+  Serial.print(", busy ");
+  Serial.print((f >> FLAG_BUSY) & 1);
+  Serial.print(", TREQ ");
+  Serial.print((f >> FLAG_TREQ_STATE) & 1);
+  Serial.print(", 16-bit ");
+  Serial.print((f >> FLAG_TRANSFER_16) & 1);
+  if (f & _BV(FLAG_BUF_MODE)) {
+    Serial.print(", buffer ready ");
+    Serial.print((f >> FLAG_BUF_READY) & 1);
+    Serial.print(" idle ");
+    Serial.print((f >> FLAG_BUF_IDLE) & 1);
+  }
+  if (fpga_has_burst) {
+    // FPGA v2026.11.21-1 and later: what the host is doing (register 15)
+    uint16_t h = portRead(REG_CTRL);
+    Serial.print("; host: BSR reads ");
+    Serial.print(h >> 9);
+    Serial.print(" (count, wraps at 128), IRQ 14 ");
+    Serial.print((h >> 5) & 1);
+    Serial.print(", BCR interrupt enable ");
+    Serial.print((h >> 4) & 1);
+    Serial.print(" DMA enable ");
+    Serial.print((h >> 3) & 1);
+    Serial.print(" (reset by -TC ");
+    Serial.print((h >> 1) & 1);
+    Serial.print("), card holds the bus ");
+    Serial.print((h >> 7) & 1);
+    Serial.print(", card requesting ");
+    Serial.print((h >> 6) & 1);
+    Serial.print(", card drives -PREEMPT ");
+    Serial.print((h >> 8) & 1);
+  }
+  Serial.println();
+}
+
 // Prints the firmware and FPGA versions. FPGA builds from before the
 // version registers read 0 there.
 void printVersions()
@@ -379,6 +491,12 @@ void printVersions()
   if (fpga_has_buf) {
     Serial.print(buf_enabled ? ", sector buffer on" : ", sector buffer off");
   }
+  Serial.print(", data-ready delay ");
+  Serial.print(dtr_min_us);
+  Serial.print(" us");
+  if (fpga_has_gate) {
+    Serial.print(gate_enabled ? ", DMA waits for the interrupt" : ", DMA doesn't wait for the interrupt");
+  }
   if (fpga_has_burst) {
     Serial.print(burst_enabled ? ", burst DMA on" : ", burst DMA off");
     if (burst_enabled && !(fpga_has_buf && buf_enabled)) {
@@ -407,6 +525,7 @@ void setup() {
 
   fpga_has_buf = detectBuffer();
   fpga_has_burst = detectBurst();
+  fpga_has_gate = detectGate();
   applyBurst();
   printVersions();
 
@@ -433,6 +552,8 @@ void setup() {
   Serial.println("Press 'v' for the firmware and FPGA versions.");
   Serial.println("Press 'b' to switch the FPGA's sector buffer off or on.");
   Serial.println("Press 'B' to switch burst DMA off or on.");
+  Serial.println("Press 'g' (while running) to switch DMA waiting for the interrupt off or on.");
+  Serial.println("Press 'd' (while running) to change the data-ready delay.");
 }
 
 
@@ -645,6 +766,10 @@ uint8_t cmdBlockLen()
 // Loads the ISR with the code, updates the command status register
 void doISR(uint16_t code)
 {
+  if ((code & 0xF) == ISR_DATA_XFER_RDY) {
+    while (since_cmd < dtr_min_us) {
+    }
+  }
   sb_cmd_status = code & 0xF;
   portWrite(REG_ISR, code);
 }
@@ -749,8 +874,20 @@ void processCmdBlock()
 {
   uint16_t i;
   uint16_t cmd_no_opt = cmd_block[0] & CMD_NO_OPT_MASK;
+  since_cmd = 0;
+  uint16_t hd = fpga_has_burst ? portRead(REG_CTRL) : 0;
+  bsr_at_cmd = hd >> 9;
   Serial.print("CMD: ");
-  Serial.println(cmd_block[0], HEX);
+  Serial.print(cmd_block[0], HEX);
+  if (fpga_has_burst) {
+    // (fork) DMA state as the command starts: enabled, reset by -TC
+    Serial.print(" (DMA enable ");
+    Serial.print((hd >> 3) & 1);
+    Serial.print(", reset by -TC ");
+    Serial.print((hd >> 1) & 1);
+    Serial.print(")");
+  }
+  Serial.println();
 
   // After command, fill in the status block
   // then trigger a command complete interrupt
@@ -1039,17 +1176,27 @@ void mainLoop() {
   bool reset_pending = false;
   bool hard_reset = false;
   uint16_t serial_poll = 0;
+  // (fork) Stuck-transfer diagnostic: see printStuck()
+  uint8_t last_state = TS_IDLE;
+  uint16_t last_index = 0;
+  uint16_t last_flags = 0;
+  elapsedMillis since_progress;
+  uint8_t stuck_shown = 0;   // lines printed for this stall
 
   diskSetup();
   
   while (1) {
-    // Serial commands while running: 'v' prints the versions, 'b' switches
-    // the sector buffer and 'B' burst DMA off and on. Checked only between
-    // transfers, and only every 65536 passes (a few ms), to stay out of the
-    // way of the host.
-    if (transfer_state == TS_IDLE && ++serial_poll == 0 && Serial.available() > 0) {
+    // Serial commands while running: 'f' prints the flag register (any
+    // time); between transfers, 'v' prints the versions, 'b' switches the
+    // sector buffer and 'B' burst DMA off and on. Checked only every 65536
+    // passes (a few ms), to stay out of the way of the host.
+    if (++serial_poll == 0 && Serial.available() > 0) {
       int c = Serial.read();
-      if (c == 'v') {
+      if (c == 'f') {
+        printStuck(portRead(REG_FLAGS), 0);
+      } else if (transfer_state != TS_IDLE) {
+        Serial.println("(only 'f' works during a transfer)");
+      } else if (c == 'v') {
         printVersions();
       } else if (c == 'b' && fpga_has_buf) {
         buf_enabled = !buf_enabled;
@@ -1058,10 +1205,35 @@ void mainLoop() {
         burst_enabled = !burst_enabled;
         applyBurst();
         Serial.println(burst_enabled ? "Burst DMA on." : "Burst DMA off.");
+      } else if (c == 'g' && fpga_has_gate) {
+        gate_enabled = !gate_enabled;
+        applyBurst();
+        Serial.println(gate_enabled ? "DMA waits for the interrupt to be read." : "DMA doesn't wait for the interrupt.");
+      } else if (c == 'd') {
+        // Data-ready delay: 0, 0.5, 1, 2, 5 ms, then round again
+        dtr_min_us = dtr_min_us == 0 ? 500 : dtr_min_us == 500 ? 1000 : dtr_min_us == 1000 ? 2000 :
+                     dtr_min_us == 2000 ? 5000 : 0;
+        Serial.print("Data-ready delay ");
+        Serial.print(dtr_min_us);
+        Serial.println(" us.");
       }
     }
 
     flags = portRead(REG_FLAGS);
+
+    // (fork) A transfer that makes no progress prints the flags at 2, 4 and 6 s
+    if (transfer_state != last_state || transfer_index != last_index || flags != last_flags) {
+      last_state = transfer_state;
+      last_index = transfer_index;
+      last_flags = flags;
+      since_progress = 0;
+      stuck_shown = 0;
+    } else if (transfer_state != TS_IDLE && stuck_shown < 3 &&
+               since_progress > 2000 * (stuck_shown + 1)) {
+      // Three lines, 2 s apart, to show whether the host is still polling
+      stuck_shown++;
+      printStuck(flags, since_progress);
+    }
 
     // Hard reset bit has been set, we should check to see if we've exited it or
     // just skip all processing if we stay in hard reset.
@@ -1304,11 +1476,13 @@ void mainLoop() {
             clearFlag(_BV(FLAG_CMD_PROG));
             clearFlag(_BV(FLAG_BUSY));
             Serial.println("Cleared pending reset int.");
+            dropStatus(flags);
           } else if (int_pending != 0) {
             int_pending = 0;
             clearFlag(_BV(FLAG_CMD_PROG));
             clearFlag(_BV(FLAG_BUSY)); // FIXME: may not want to clear busy flag here?
             Serial.println("Cleared some other int.");
+            dropStatus(flags);
           } else {
             // FIXME: Sometimes we get an extra EOI. Mailbox problem?
             // ES testing (off: the pins are timing markers now)
