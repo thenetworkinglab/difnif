@@ -18,6 +18,40 @@ it, or from this fork before v2026.11.18-1, is reported as "has no version".
 
 ## Firmware
 
+### v2026.11.21-1
+
+OS/2 1.1 now installs and boots: see [docs/os2.md](docs/os2.md). Needs FPGA
+v2026.11.21-1 for the fixes; older FPGAs work as before.
+
+- **Unread status is dropped at each end-of-interrupt** (finding 18). IBM
+  lets the host skip the status block and go straight to EOI (DASD spec
+  3.3), which OS/2 does; the first word was left waiting, and "status
+  interface full" showed at the next command.
+- **DMA waits for the interrupt to be read** (finding 20): the firmware turns
+  on the FPGA's hold on DMA requests while an interrupt is pending. OS/2
+  doesn't need it, but it's on by default; the `g` serial command switches
+  it.
+- **Diagnostics:**
+  - If a transfer makes no progress for 2 seconds, the flag register and
+    the host's activity are printed at 2, 4 and 6 s. `f` prints them at any
+    time.
+  - Each command logs the DMA enable as it starts, and the number of times
+    the host read the status register during it.
+  - `d` sets a minimum delay before "data transfer ready" (0, 0.5, 1, 2 or
+    5 ms); the default is 0.
+- **difbench** allows register 15's new bits.
+
+Tested with FPGA v2026.11.21-1, on a Rev P2 board. The hardware tests ran on
+the development builds (firmware v2026.11.20-8, FPGA v2026.11.20-6), which
+differ from this release only in the version numbers:
+
+| Machine | OS/2 1.1 | DiskMeter, KB/s (random / sequential / buffered) | 20-round copy test |
+|---|---|---|---|
+| 55SX | Installs and boots from the disk | 1900 / 2111 / 2266 in DOS, 2139 / 2266 / 2305 in OS/2 | 120 of 120 identical, every SHA-256 correct |
+| Model 70 | Boots to the desktop (with `g` off) | 2000 / 2078 / 2070 | 120 of 120 identical, every SHA-256 correct |
+
+DiskMeter matches v2026.11.19-1.
+
 ### v2026.11.19-1
 
 - **Burst DMA:** with FPGA v2026.11.19-1 or later, the firmware allows the
@@ -113,6 +147,37 @@ below (built just before the version registers were added):
     identical, with every file's SHA-256 correct.
 
 ## FPGA
+
+### v2026.11.21-1
+
+- **DMA enable is reset at terminal count** (finding 19, the cause of the
+  OS/2 hang; [verilog/mcabus.v](verilog/mcabus.v)). With POS 3 bit 6 at 0,
+  which the 55SX and Model 70 set, IBM's drives switch off their DMA enable
+  when `-TC` ends a transfer, and keep it off until the host next writes the
+  control register. OS/2 relies on this. `-TC` is caught using the card's DMA
+  selection as latched when `-CMD` fell, because `-TC` can come after the
+  cycle's address and status have gone. PS/2 builds only.
+- **Register 15:**
+  - Writing bit 1 as 1 drops an unread status word (finding 18).
+  - Bit 2 holds the card's DMA requests while an interrupt is pending
+    (finding 20).
+  - The read bits report what the host is doing: a count of its status
+    register reads, IRQ 14, the control register's interrupt and DMA
+    enables, whether the card is requesting or holding the bus or driving
+    `-PREEMPT`, and whether `-TC` has reset DMA enable.
+- **`-BURST` after a short `-TC`:** `-TC`'s falling edge now latches the
+  release of `-BURST` until the next arbitration. Before, a `-TC` that ended
+  before the 50 MHz logic saw it let `-BURST` come back for about 20 ns.
+- **Simulation:**
+  - `-TC` is asserted as late as IBM allows (T52), which the first version
+    of the `-TC` reset failed.
+  - New tests cover the dropped status, IRQ 14 at the edge connector, the
+    `-TC` reset with POS 3 bit 6 clear and set, and the hold on DMA
+    requests. Each fails on the design before its fix. 36 tests pass.
+- **Timing budget** passes. The smallest margins are T54 at 0.8 ns (worst
+  case stacked) and T22 at 7.8 ns. Uses 800 of 7680 logic cells.
+
+Tested with firmware v2026.11.21-1: see the firmware entry.
 
 ### v2026.11.19-1
 

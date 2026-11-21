@@ -79,7 +79,9 @@ There are also debugging aids:
     in the Model 70. That's up from about 690 and 990 KB/s with Eric's design,
     and faster than an IDE adapter (McIDE) in the 55SX (docs/formfactor-review.md,
     "Speed: burst DMA"). Both machines passed the 20-round copy test with it.
-  - **Not yet tried with OS/2.**
+  - OS/2 1.1 installs and boots in the 55SX, and boots to its desktop in the
+    Model 70, with firmware and FPGA v2026.11.21-1 (docs/os2.md). Earlier
+    releases hang at OS/2's second disk read.
   - Use firmware v2026.11.18-2 or later: earlier firmware, including Eric's,
     can lose the last sector written before the PS/2 is switched off
     (finding 17).
