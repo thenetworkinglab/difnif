@@ -79,6 +79,9 @@ There are also debugging aids:
     in the Model 70. That's up from about 690 and 990 KB/s with Eric's design,
     and faster than an IDE adapter (McIDE) in the 55SX (docs/formfactor-review.md,
     "Speed: burst DMA"). Both machines passed the 20-round copy test with it.
+  - Writes run at 1.95 MB/s with 64 KB blocks in the Model 70 (sunbench,
+    through DOS), and small writes are up to 40% faster with firmware
+    v2026.11.21-5 (docs/formfactor-review.md, "Speed: writes").
   - OS/2 1.1 installs and boots in the 55SX, and boots to its desktop in the
     Model 70, with firmware and FPGA v2026.11.21-1 (docs/os2.md). Earlier
     releases hang at OS/2's second disk read.

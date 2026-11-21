@@ -169,7 +169,7 @@ OS/2 also sends a seek to a second drive (device 1). The spec reserves
 device numbers 1-6 (Figures 2 and 21), and has a command error for this,
 13h, "invalid device number for the command" (Figure 52). Releases up to
 v2026.11.21-1 rejected the seek as an unknown command (error 03) instead.
-From firmware v2026.11.21-2 the card answers with a command block error,
+From firmware v2026.11.21-5 the card answers with a command block error,
 error 13h, and a device status that is neither ready nor selected.
 
 OS/2 does the same with either answer: it reads the status block, sends

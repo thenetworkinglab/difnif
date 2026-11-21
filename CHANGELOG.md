@@ -18,7 +18,11 @@ it, or from this fork before v2026.11.18-1, is reported as "has no version".
 
 ## Firmware
 
-### Unreleased
+### v2026.11.21-5
+
+Faster small writes, and the spec's answer to OS/2's probe for a second
+drive. Use with FPGA v2026.11.21-1 (unchanged). Versions -2 to -4 were
+development builds that appeared in test logs, so the release skips to -5.
 
 - **Commands to devices 1-6** (OS/2 probes for a second drive with a seek to
   device 1) get a command block error with command error 13h, "invalid
@@ -28,6 +32,27 @@ it, or from this fork before v2026.11.18-1, is reported as "has no version".
 - **The command error code is cleared at each command.** It was never
   cleared, so after one rejected command every later status block, including
   successful reads and writes, reported "command not supported".
+- **Write timing in the serial log:** one line per write command, `W <n>
+  sectors, <us> us, <KB/s>: SD …, sync …, FPGA …, host and other …`,
+  replacing the per-sector `wtime:` and per-command `stime:` lines.
+- **The SD sync comes after a write's completion interrupt** (`w` switches
+  it back), so it overlaps the host handling the interrupt. The host can't
+  start another command until it has finished, but for about 1 ms the host
+  has been told data is written that the card hasn't yet stored.
+
+Tested in the Model 70 with sunbench's DOS file benchmark (32 MB file,
+sequential, MB/s):
+
+| Block | Write, sync first (-3) | Write, sync after | Read |
+|---|---|---|---|
+| 1 KB | 0.39 | 0.55 | 0.90 |
+| 4 KB | 1.04 | 1.28 | 1.52 |
+| 16 KB | 1.63 | 1.75 | 1.77 |
+| 64 KB | 1.81 | 1.95 | 1.87 |
+
+The 20-round copy test passed (120 of 120 identical), and a 1 MB file copied
+to C: about 4 s before switching the PS/2 off was complete afterwards, with
+its directory entry and FAT.
 
 ### v2026.11.21-1
 

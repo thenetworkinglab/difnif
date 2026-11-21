@@ -1061,19 +1061,65 @@ the faster processor, and is a little slower in the 70 than in the 55SX.
 
 - `FC /B` is CPU-bound. It's most of each round of the copy test, which is
   why rounds take about 2.5 minutes in the 55SX and 1.3 in the 70.
-- Copies take about the same time in both machines, about 1.2-1.4 s per MB,
-  so writes are probably near 1 MB/s. DiskMeter only measures reads. Writes
-  are the likely next target.
+- Copies take about the same time in both machines, about 1.2-1.4 s per MB.
+  That suggested writes near 1 MB/s, but measuring them showed otherwise
+  (see "Speed: writes").
 - (`COPY` to `NUL`, also in the batch file, finishes faster than the bus
   could deliver the data, so it doesn't seem to read the whole file. It
   isn't a useful measurement.)
+
+## Speed: writes
+
+Measured in the Model 70 with sunbench (Tim's disk benchmark, DOS version),
+on a 32 MB file through DOS, with FPGA v2026.11.21-1 and the development
+builds of firmware v2026.11.21-5: -3 syncs first, as earlier releases do,
+and -4 is the same code as the release:
+
+| Block | Write, sync first | Write, sync after | Read |
+|---|---|---|---|
+| 1 KB | 0.39 | 0.55 | 0.90 |
+| 2 KB | 0.70 | 1.00 | 1.27 |
+| 4 KB | 1.04 | 1.28 | 1.52 |
+| 8 KB | 1.37 | 1.59 | 1.68 |
+| 16 KB | 1.63 | 1.75 | 1.77 |
+| 32 KB | 1.83 | 1.84 | 1.86 |
+| 64 KB | 1.81 | 1.95 | 1.87 |
+
+(MB/s, sequential.) Raw INT 13h reads, without DOS, run at 1.87 MB/s
+sequential and 1.82 random. Random access through a file is much slower,
+0.4 MB/s at 64 KB, because DOS follows the file's FAT chain one sector at a
+time for each seek; that measures DOS's buffers more than the card.
+
+Large writes were never slow: the bus transfer limits them as it does
+reads. The cost was a fixed extra time per write command. The firmware's
+new per-command log (`W …` lines) split a 4 KB write, 2.75 ms in all, into:
+
+| Part | Time |
+|---|---|
+| Waiting for the host's data | 1.15 ms |
+| SD card sync (finding 17) | 0.84 ms |
+| Reading the sectors out of the FPGA | 0.54 ms |
+| SD writes | 0.23 ms |
+
+Without the sync a write takes about as long as a read. The sync now comes
+just after the completion interrupt instead of before it, so it overlaps
+the host handling the interrupt. The host can't start another command until
+it has finished, so the window in which the host has been told data is
+written that isn't yet on the card is about 1 ms. The `w` serial command
+switches back to the old order. The copy test passed with it, and a file
+copied to C: a few seconds before switching off survived complete.
+
+Small writes are still slower than small reads (1.8 against 1.1 ms per
+1 KB), probably because the host's next command arrives before the sync
+has finished. Hiding that too would mean leaving writes open across
+commands, which widens the power-off window.
 
 ## Suggested next steps
 
 Done: DMA in the testbench, the timing check, Rev P2 schematic and layout,
 assembled boards from PCBWay, Eric's printed sled, bring-up in a 55SX
 (including the overnight copy test), the Model 70 (finding 16), the sector
-buffer and burst DMA.
+buffer, burst DMA and measuring writes.
 
 1. **Rev P3 board change:** a separate direction line for U7 (finding 16),
    and route J4 pins 4-14 to their labelled signals (or drop the labels).
@@ -1082,8 +1128,8 @@ buffer and burst DMA.
 2. **Speed:** with burst DMA (see "Speed: burst DMA") reads run at about
    2.0-2.3 MB/s in both machines. The simulated bus does better than that,
    so the limit has moved again. Next:
-   - **Writes:** measure them properly. The copy timings suggest about
-     1 MB/s.
+   - **Writes:** done (see "Speed: writes"): 1.95 MB/s at 64 KB, and small
+     writes up to 40% faster with the sync after the interrupt.
    - **Reads:** take a scope capture during bursts, with the `PROBES` build,
      to see the gaps between bursts and whether the buffer runs dry.
    - **Smaller gains:** start the SD read for the first sectors of a command
