@@ -79,9 +79,16 @@ static void set_disk(uint32_t blocks)
 }
 
 // Bring-up trace: each attention request and reset interrupt, with the time
-// in microseconds. On at start-up; 'v' in the serial monitor turns it off
-// and on (it slows the log down once the drive is busy).
-static int trace = 1;
+// in microseconds, and the checksums after each disk transfer. Off at
+// start-up: it's about 115 characters a command, 1.15 ms at 1 Mbaud, and the
+// firmware waits for the log, listened to or not, so it slows small
+// transfers by about half. 'v' in the serial monitor turns it on and off.
+static int trace = 0;
+
+static void show_trace(void)
+{
+    puts_(trace ? "trace on ('v' turns it off)\n" : "trace off ('v' turns it on)\n");
+}
 static uint32_t key_time;           // MICROS at the last key from the serial monitor
 static int      keyed;              // ...if there has been one
 
@@ -559,6 +566,7 @@ void esdi_run(uint32_t blocks)
 
     set_disk(blocks);
     logline("drive blocks ", disk_size);
+    show_trace();
 
     MBOX(MB_CTRL) = ctrl_bits;
     esdi_reset();
@@ -576,10 +584,11 @@ void esdi_run(uint32_t blocks)
                 ;
             } else if (k == 'v') {
                 trace = !trace;
-                puts_(trace ? "trace on\n" : "trace off\n");
+                show_trace();
             } else {
                 show_status();
                 logline("drive blocks ", disk_size);
+                show_trace();
             }
             key_time = MICROS;
             keyed = 1;
