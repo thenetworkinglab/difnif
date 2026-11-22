@@ -114,6 +114,25 @@ static int      state = TS_IDLE;
 static uint32_t x_first, x_count;    // drive blocks
 static int      x_stopped;           // the card's transfer ended (CMD12 sent)
 static int      x_retries;
+
+// Read-ahead. A read's card command (CMD18) runs on to the end of the image;
+// the bridge holds the card after the command's blocks (its read limit), so
+// the card has the next block ready. ra_held: that's the state of the
+// current read once its blocks are through; ra_active: between commands,
+// the card is held with image block ra_next ready. A read of exactly that
+// block resumes it with a bridge restart and no card command, which saves
+// the card's access time (about 180 us on Tim's card). Anything else
+// (another read, a write, a reset) ends it first with CMD12.
+static int      ra_held, ra_active;
+static uint32_t ra_next;
+
+static void ra_cancel(void)
+{
+    if (ra_active) {
+        sd_stop(1);
+        ra_active = 0;
+    }
+}
 // Trace timing, microseconds from the command: the card's first block
 // through the bridge, the host's first word, the card side finished
 static uint32_t x_t0, x_t_card, x_t_host, x_t_done;
@@ -213,10 +232,16 @@ static void buf_end(void)
 // Stops whatever transfer is running (reset)
 static void abort_transfer(void)
 {
-    if (state == TS_READ || state == TS_WRITE) {
+    if (state == TS_READ) {
+        sd_stop(1);                    // reads are always CMD18
+        buf_end();
+    } else if (state == TS_WRITE) {
         sd_stop(x_count > 1 && !x_stopped);
         buf_end();
     }
+    ra_held = 0;
+    if (state != TS_READ) ra_cancel();
+    ra_active = 0;
     state = TS_IDLE;
 }
 
@@ -228,16 +253,29 @@ static int out_of_range(uint32_t rba, uint32_t n)
 // Starts the card's part of a transfer: n blocks from image block rba. If the
 // card doesn't answer it has probably been taken out and put back: start it
 // again (and find disk0.img again) and try once more. 0 when started.
+// A read asks the card for everything to the end of the image (sdhost
+// counts at most 0xFFFF): see read-ahead above
+static int card_cmd(int write, uint32_t rba, uint32_t n)
+{
+    uint32_t to_end = disk_size - rba;
+    if (write) return sd_start_write(img_lba + rba, n);
+    return sd_start_read(img_lba + rba, to_end > 0xFFFF ? 0xFFFF : to_end);
+}
+
 static int card_start(int write, uint32_t rba, uint32_t n)
 {
-    int e = write ? sd_start_write(img_lba + rba, n) : sd_start_read(img_lba + rba, n);
+    int e = card_cmd(write, rba, n);
     if (!e) return 0;
     logline(write ? "W card command failed, status " : "R card command failed, status ", sd_status);
     if (!sd_check()) return e;         // it answers: an ordinary error
     set_disk(card_restart());
     logline("drive blocks ", disk_size);
+    // Finding disk0.img read blocks into cbuf, which routes the card there:
+    // back to the sector buffer, keeping the bridge's count. (Before
+    // read-ahead the misrouted block just ended in a retry.)
+    BR_CTRL = (write ? BRC_WRITE : 0) | BRC_CLRFAIL;
     if (out_of_range(rba, n)) return 1;
-    return write ? sd_start_write(img_lba + rba, n) : sd_start_read(img_lba + rba, n);
+    return card_cmd(write, rba, n);
 }
 
 // The card can't do the transfer: a device error, as after 3 retries
@@ -266,11 +304,23 @@ static void start_disk(int write)
     x_count = cmd_block[1];
     x_stopped = 0;
     x_retries = 0;
+    ra_held = 0;
     if (out_of_range(x_first, x_count)) {
         logline(write ? "W out of range " : "R out of range ", x_first);
         fail_range();
         return;
     }
+    // The next sequential read, with the card held there and enough left in
+    // its count: let it go
+    if (!write && ra_active && x_first == ra_next
+        && (SD(SD_STATUS) >> 16) >= x_count) {
+        ra_active = 0;
+        buf_begin(0, x_count);
+        do_isr(DEV_DRIVE | ISR_DTR);
+        state = TS_READ;
+        return;
+    }
+    ra_cancel();
     buf_begin(write, x_count);
     if (card_start(write, x_first, x_count)) {
         current_rba = x_first;
@@ -286,7 +336,7 @@ static void retry(int write)
 {
     uint32_t done = BR_STATUS & 0xFFFF;
     uint32_t left = x_count - done;
-    sd_stop(x_count > 1);
+    sd_stop(write ? x_count > 1 : 1);
     logline(write ? "W retry at " : "R retry at ", x_first + done);
     current_rba = x_first + done;
     if (++x_retries > 3) {
@@ -319,12 +369,27 @@ static void disk_progress(uint16_t f)
         retry(write);
         return;
     }
-    if (!x_stopped && (br & 0xFFFF) == x_count && !sd_data_busy()) {
-        // Every block is through: end the card's transfer. For a write,
-        // CMD12's busy (or a single block's) means it's programmed.
-        if (x_count > 1) sd_stop(1);
-        x_stopped = 1;
-        x_t_done = MICROS - x_t0;
+    if (!x_stopped && (br & 0xFFFF) == x_count) {
+        if (write) {
+            // Every block is through: end the card's transfer. CMD12's busy
+            // (or a single block's) means it's programmed.
+            if (!sd_data_busy()) {
+                if (x_count > 1) sd_stop(1);
+                x_stopped = 1;
+            }
+        } else {
+            // The card is held before the next block if its count goes on;
+            // if the count ran out (the end of the image), stop it
+            uint32_t st = SD(SD_STATUS);
+            if ((st >> 16) && (st & SDS_DATA_BUSY)) {
+                ra_held = 1;
+                x_stopped = 1;
+            } else if (!(st & SDS_DATA_BUSY)) {
+                sd_stop(1);
+                x_stopped = 1;
+            }
+        }
+        if (x_stopped) x_t_done = MICROS - x_t0;
     }
     // For a read, the host has had every word once the buffer's host side is
     // idle. That has to come from the same read of BR_STATUS as the block
@@ -358,9 +423,14 @@ static void disk_progress(uint16_t f)
             putdec(MICROS - x_t0);
             putch('\n');
         }
-        buf_end();
+        buf_end();                     // the bridge still holds the card
         state = TS_IDLE;
         current_rba = x_first + x_count - 1;
+        if (ra_held) {
+            ra_held = 0;
+            ra_active = 1;
+            ra_next = x_first + x_count;
+        }
         finish(0x01);
     }
 }

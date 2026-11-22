@@ -120,22 +120,13 @@ module sdcard_model #(
 
     integer   state = S_IDLE;
     reg       swapped = 0;      // power_cycle: until CMD0
+    integer   n_reads = 0;      // CMD17/18 accepted (the testbench checks read-ahead with it)
     reg       app = 0;
     integer   acmd41_count = 0;
     reg [15:0] rca = 16'h4D2A;
     reg       bus4 = 0;
     reg [31:0] errbits = 0;     // card status error bits, cleared when sent
 
-    task power_cycle;
-        begin
-            state = S_IDLE;
-            app = 0;
-            acmd41_count = 0;
-            bus4 = 0;
-            errbits = 0;
-            swapped = 1;
-        end
-    endtask
 
     function [31:0] card_status;
         input dummy;
@@ -329,6 +320,18 @@ module sdcard_model #(
     integer rd_addr;
     reg     rd_multi;
     reg     rd_stop = 0;
+
+    task power_cycle;
+        begin
+            state = S_IDLE;
+            app = 0;
+            acmd41_count = 0;
+            bus4 = 0;
+            errbits = 0;
+            swapped = 1;
+            rd_stop = 1;                // a read in progress (or held) ends with the power
+        end
+    endtask
     integer wr_addr;
     reg     wr_multi;
     reg     wr_stop = 0;
@@ -406,6 +409,7 @@ module sdcard_model #(
                             r1(idx);
                         end else begin
                             r1(idx);
+                            n_reads = n_reads + 1;
                             rd_addr = a;
                             rd_multi = (idx == 6'd18);
                             rd_stop = 0;

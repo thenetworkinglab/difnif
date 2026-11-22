@@ -167,10 +167,11 @@ clock enables took the last of the FPGA's 8 global buffers, and `ARB/-GNT`
 and `-TC`, which clock parts of `mcabus.v`, were left on ordinary routing.
 `tools/timing_budget.py --pos --cpu` checks the bus timing of this build:
 everything passes, the tightest being T54 (`-BURST` released after `-TC`)
-at 1.3 ns on stacked worst cases (0.8 ns in the normal build). T54 depends
-on placement: with 10 KB of RAM, 4 of seeds 1-12 fail by up to 0.5 ns, so
-the processor build uses seed 10 (`PNR_SEED` in the Makefile; it was 3,
-then 1, as the design changed). Check it again
+at 0.7 ns on stacked worst cases (0.8 ns in the normal build). T54 depends
+on placement: with read-ahead's bridge change, 7 of seeds 1-15 fail by up to
+0.7 ns, so the processor build uses seed 7 (`PNR_SEED` in the Makefile; it
+was 1, 3 and 10 as the design changed). That's fragile: the -TC to -BURST
+path wants shortening before a release. Check it again
 after any change to the design. Shortening that path (the `-TC` latch next
 to the `-BURST` pin) would make it robust.
 
@@ -256,7 +257,7 @@ DMA runs at 0.54 us per word for 8 sectors at the Model 70's cycle, as
 with the Teensy build's burst DMA (0.57): the bus is still the limit.
 
 The normal build's matrix (`./run_sim72.sh quick`) is unchanged, and
-`tools/timing_budget.py --pos --cpu` passes (T54 1.3 ns on stacked worst
+`tools/timing_budget.py --pos --cpu` passes (T54 0.7 ns on stacked worst
 cases).
 
 On a P2 board on the bench (21 November) it started first time: card up

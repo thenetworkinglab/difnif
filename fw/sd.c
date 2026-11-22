@@ -77,10 +77,13 @@ int sd_read_cpu(uint32_t lba)
 // Disk transfers through the bridge to the sector buffer: n blocks from
 // card block lba. They run on their own; sd_data_busy() says when the
 // blocks have all gone, and the bridge counts them (BR_STATUS).
+// Always CMD18, ended by CMD12 (sd_stop(1)): n can be more than the command
+// wants, and the bridge holds the card after the command's blocks
+// (read-ahead, esdi.c)
 int sd_start_read(uint32_t lba, uint32_t n)
 {
     SD(SD_BLKCNT) = n;
-    return sd_cmd(n > 1 ? 18 : 17, sd_high_capacity ? lba : lba * 512, R_SHORT | D_READ);
+    return sd_cmd(18, sd_high_capacity ? lba : lba * 512, R_SHORT | D_READ);
 }
 
 int sd_start_write(uint32_t lba, uint32_t n)

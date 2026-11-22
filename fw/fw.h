@@ -25,7 +25,7 @@ extern int sd_high_capacity;       // block addresses (1) or byte addresses (0)
 int sd_init(void);                 // 0 on success, else a step number
 int sd_cmd(uint32_t idx, uint32_t arg, uint32_t flags);   // 0 or the error bits
 int sd_read_cpu(uint32_t lba);     // one block into the processor's buffer
-int sd_start_read(uint32_t lba, uint32_t n);    // n blocks to the sector buffer
+int sd_start_read(uint32_t lba, uint32_t n);    // up to n blocks to the sector buffer (CMD18)
 int sd_start_write(uint32_t lba, uint32_t n);   // n blocks from it
 int sd_data_busy(void);
 int sd_stop(int multi);            // end a transfer (CMD12 if multi)

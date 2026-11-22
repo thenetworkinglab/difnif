@@ -1736,6 +1736,26 @@ module difnif72_t;
         end
     endtask
 
+    // Read-ahead: the card stays held after a read, and the next sequential
+    // read takes its blocks with no new card command. A write where the card
+    // was held has to end it first (and the data read back is the new data).
+    task automatic test_cpu_readahead;
+        integer r0;
+        begin
+            test_cpu_rw(0, 300, 8, "read-ahead: read 8 sectors");
+            r0 = card.n_reads;
+            test_cpu_rw(0, 308, 8, "read-ahead: the next 8, from the held card");
+            test_cpu_rw(0, 316, 1, "read-ahead: and the next 1");
+            test_cpu_rw(0, 317, 2, "read-ahead: and the next 2");
+            begin_test("read-ahead: no card read command for those 3");
+            if (card.n_reads != r0) fail($sformatf("%0d card read commands", card.n_reads - r0));
+            end_test;
+            test_cpu_rw(1, 319, 4, "read-ahead: write where the card was held");
+            test_cpu_rw(0, 319, 4, "read-ahead: read back the write");
+            test_cpu_rw(0, 100, 1, "read-ahead: a read elsewhere ends it");
+        end
+    endtask
+
     task automatic test_cpu_range;
         begin
             begin_test("read past the end of the image: command failed, RBA out of range");
@@ -1858,6 +1878,7 @@ module difnif72_t;
         test_cpu_attach;
         test_cpu_reset("soft reset", 1);
         test_cpu_rw(0, 2040, 8, "read the last 8 sectors after the reset");
+        test_cpu_readahead;
         // The card taken out and put back while the board stays powered (on
         // the bench the Teensy's USB keeps it running): the firmware has to
         // notice and start the card again

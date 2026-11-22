@@ -23,7 +23,12 @@
 //
 // restart starts a transfer: set dir first (or in the same clock). It
 // empties the sector buffer (sb_clear) and, for a write, sets how many
-// halves to arm, so the arming can't run ahead of the buffer.
+// halves to arm, so the arming can't run ahead of the buffer. For a read,
+// arm_n is a limit (0: none): once that many blocks have gone to the host
+// side, rd_ready stays low, so sdhost stops the SD clock before the next
+// block and the card holds it. That's read-ahead: the card's multiple-block
+// read stays open, and a restart for the next sequential sectors lets the
+// held block through at once, without the card's access time.
 //
 // blocks_done counts the blocks passed to the host (dir 0) or accepted by
 // the card (dir 1) since restart, which tells the controller where to
@@ -40,7 +45,7 @@ module sdbridge (
     input  wire        dir,         // the sector buffer's direction
     input  wire        restart,     // one clock: a new transfer
     output wire        sb_clear,    // to the sector buffer's clear
-    input  wire [15:0] arm_n,       // with restart, dir 1: sectors the host will write
+    input  wire [15:0] arm_n,       // with restart: sectors to transfer (dir 0: a limit, 0 none)
     input  wire        clear_fail,  // one clock: carry on after a failure
     output reg  [15:0] blocks_done,
     output reg         failed,
@@ -69,6 +74,7 @@ module sdbridge (
 );
 
     reg [15:0] to_arm;
+    reg [15:0] rd_limit = 16'd0;  // dir 0: blocks to pass before holding the card (0: no limit)
     reg [7:0]  wcount;    // dir 1: words of the current half sent
     reg        sent;      // dir 1: the whole half sent, waiting for the card
 
@@ -76,7 +82,7 @@ module sdbridge (
     assign t_wdata  = rd_word;
     assign t_wr     = ~dir & rd_strobe & ~failed;
     wire   load     = ~dir & rd_blk_done & rd_blk_ok & ~failed;
-    assign rd_ready = ~dir & t_ready & ~failed;
+    assign rd_ready = ~dir & t_ready & ~failed & (rd_limit == 16'd0 || blocks_done != rd_limit);
 
     // Write
     wire   arm      = dir & t_can_arm & (to_arm != 16'd0) & ~restart;
@@ -91,6 +97,7 @@ module sdbridge (
         t_done <= 1'b0;
         if (rst || restart) begin
             to_arm      <= (rst || !dir) ? 16'd0 : arm_n;
+            rd_limit    <= (rst || dir) ? 16'd0 : arm_n;
             wcount      <= 8'd0;
             sent        <= 1'b0;
             failed      <= 1'b0;
