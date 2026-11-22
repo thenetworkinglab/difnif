@@ -15,6 +15,9 @@ one where host differs from card went wrong between the buffer and the PS/2.
 
 Usage: blocksum.py disk0.img LOG       (check every read in a saved log)
        blocksum.py disk0.img RBA [N]   (one transfer, RBA in hex)
+       blocksum.py --writes disk0.img LOG
+           (the image as it is now, after the session: each write in the log
+           that nothing later in the log overwrote should be on it as sent)
 
 Give it the image as it was before the session (a copy taken first, if the
 PS/2 has written since). A read of exactly the blocks of an earlier write in
@@ -43,6 +46,9 @@ def blocks(img, rba, n):
 
 
 def main():
+    if len(sys.argv) == 4 and sys.argv[1] == "--writes":
+        check_writes(open(sys.argv[2], "rb"), sys.argv[3])
+        return
     if len(sys.argv) < 3:
         sys.exit(__doc__)
     img = open(sys.argv[1], "rb")
@@ -94,6 +100,35 @@ def main():
                       % ("ok " if ok else "BAD", rba, n, card, host, m.group(3), m.group(4)))
             cmd = None
     print("%d reads match, %d don't, %d can't be checked" % (good, bad, unk))
+
+
+def check_writes(img, log):
+    writes = []                            # (rba, n, card sum, host sum)
+    cmd = None
+    for line in open(log, errors="replace"):
+        m = re.match(r"\s*C(46[0-9A-F]{2}) ([0-9A-F]{4}) ([0-9A-F]{8})", line)
+        if m:
+            cmd = (m.group(1), int(m.group(2), 16), int(m.group(3), 16))
+            continue
+        m = re.match(r"\s*D card ([0-9A-F]{8}) host ([0-9A-F]{8})", line)
+        if m and cmd:
+            if cmd[0][2:] in ("02", "04"):     # write, write with verify
+                writes.append((cmd[2], cmd[1], int(m.group(1), 16), int(m.group(2), 16)))
+            cmd = None
+    good = bad = later = 0
+    for i, (rba, n, card, host) in enumerate(writes):
+        if any(r < rba + n and rba < r + k for r, k, _, _ in writes[i + 1:]):
+            later += 1                     # overwritten later in the log
+            continue
+        now = fletcher(blocks(img, rba, n))
+        ok = card == host == now
+        if not ok:
+            print("BAD write %08X x%-3X sent %08X card %08X on the image now %08X"
+                  % (rba, n, host, card, now))
+        good += ok
+        bad += not ok
+    print("%d writes on the image as sent, %d not, %d overwritten later in the log"
+          % (good, bad, later))
 
 
 if __name__ == "__main__":

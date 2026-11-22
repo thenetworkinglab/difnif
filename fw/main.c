@@ -39,10 +39,12 @@ void show_status(void)
     }
 }
 
-int main(void)
+// Starts the card and finds disk0.img; the image's blocks, or 0
+static uint32_t start_card(void)
 {
     uint32_t blocks = 0;
 
+    img_err = 0;
     sd_err = sd_init();
     if (sd_err) {
         LEDS = 1;
@@ -55,6 +57,25 @@ int main(void)
             LEDS = 3;
         }
     }
+    return blocks;
+}
+
+// After the card stopped answering, or at a hard reset when it doesn't (it
+// was taken out and put back while the board kept its power from USB)
+uint32_t card_restart(void)
+{
+    uint32_t blocks;
+
+    sd_stop(0);                        // sdhost's data engine, if it's waiting
+    puts_("SD card not answering: starting it again\n");
+    blocks = start_card();
+    show_status();
+    return blocks;
+}
+
+int main(void)
+{
+    uint32_t blocks = start_card();
     show_status();
     esdi_run(blocks);
 }

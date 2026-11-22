@@ -37,9 +37,9 @@ DEFINES += -DDIFNIF_CPU
 # and ARB/-GNT and -TC (clocks for mcabus.v) go on ordinary routing
 PNR_FLAGS += --no-promote-ce
 # T54 (-BURST released after -TC, tools/timing_budget.py --pos --cpu) passes
-# for some placements and not others; seed 3 gives 0.9 ns (the normal build
+# for some placements and not others; seed 10 gives 1.3 ns (the normal build
 # has 0.8). Check it again after changing the design: make PNR_SEED=n to try others.
-PNR_SEED ?= 3
+PNR_SEED ?= 10
 PNR_FLAGS += --seed $(PNR_SEED)
 SOURCES += soc.v picorv32.v sdhost.v sdbridge.v
 INCLUDES += fw.hex

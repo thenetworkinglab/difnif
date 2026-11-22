@@ -103,6 +103,14 @@ int sd_stop(int multi)
     return multi ? sd_cmd(12, 0, R_SHORT | R_BUSY) : 0;
 }
 
+// The card answers CMD13 and is in the transfer state. A card that was
+// taken out and put back has forgotten its address and doesn't answer.
+int sd_check(void)
+{
+    if (sd_cmd(13, rca, R_SHORT)) return 1;
+    return ((SD(SD_RESP0) >> 9) & 15) != 4;
+}
+
 uint8_t cbuf_byte(int i)
 {
     uint32_t w = CBUF(i >> 1);

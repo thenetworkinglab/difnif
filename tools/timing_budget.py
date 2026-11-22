@@ -169,7 +169,7 @@ def main():
         GBUF.update(PROBE_GBUF)
 
     with tempfile.TemporaryDirectory() as tmp:
-        seed = args.seed if args.seed is not None else (3 if args.cpu else None)   # Makefile's PNR_SEED
+        seed = args.seed if args.seed is not None else (10 if args.cpu else None)   # Makefile's PNR_SEED
         report, sdf = build(tmp, args.pos, args.probes, args.cpu, seed)
         w = path_classes(report)
         ins_cmd = clock_insertion(sdf, "cmd_l")

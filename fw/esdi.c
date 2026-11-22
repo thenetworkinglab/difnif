@@ -71,6 +71,13 @@ static const uint16_t ctrl_bits = 0x0005;   // burst DMA, and DMA waits for the 
 
 static uint32_t disk_size, psu_rba_max;
 
+static void set_disk(uint32_t blocks)
+{
+    disk_size = (blocks / 2048) * 2048;           // whole megabytes
+    if (disk_size > 0x1FF800) disk_size = 0x1FF800;   // 1023 MB
+    psu_rba_max = disk_size ? disk_size - 1 : 0;
+}
+
 // Bring-up trace: each attention request and reset interrupt, with the time
 // in microseconds. On at start-up; 'v' in the serial monitor turns it off
 // and on (it slows the log down once the drive is busy).
@@ -98,7 +105,10 @@ static int      x_retries;
 
 // Transfers through DREG a word at a time: the attachment buffer and the
 // manufacturing header
-static uint8_t  pio_buf[512];
+// The data is in cbuf, the processor's own sector buffer in the SoC (idle
+// except while the card is starting up), which saves 512 bytes of RAM. A
+// card restart overwrites it; the attachment buffer is only for diagnostics.
+#define PIO_WORD(i)  CBUF(i)
 static int      pio_index, pio_blocks;
 
 // ------------------------------------------------------------------
@@ -200,6 +210,31 @@ static int out_of_range(uint32_t rba, uint32_t n)
     return n == 0 || rba >= disk_size || n > disk_size - rba;
 }
 
+// Starts the card's part of a transfer: n blocks from image block rba. If the
+// card doesn't answer it has probably been taken out and put back: start it
+// again (and find disk0.img again) and try once more. 0 when started.
+static int card_start(int write, uint32_t rba, uint32_t n)
+{
+    int e = write ? sd_start_write(img_lba + rba, n) : sd_start_read(img_lba + rba, n);
+    if (!e) return 0;
+    logline(write ? "W card command failed, status " : "R card command failed, status ", sd_status);
+    if (!sd_check()) return e;         // it answers: an ordinary error
+    set_disk(card_restart());
+    logline("drive blocks ", disk_size);
+    if (out_of_range(rba, n)) return 1;
+    return write ? sd_start_write(img_lba + rba, n) : sd_start_read(img_lba + rba, n);
+}
+
+// The card can't do the transfer: a device error, as after 3 retries
+static void fail_card(int write)
+{
+    buf_end();
+    state = TS_IDLE;
+    sb_dev_error = write ? DEV_ERR_WRITE : DEV_ERR_READ;
+    finish(ISR_FAILED);
+    sb_dev_error = 0;
+}
+
 static void fail_range(void)
 {
     sb_dev_error = DEV_ERR_RANGE;
@@ -220,8 +255,11 @@ static void start_disk(int write)
         return;
     }
     buf_begin(write, x_count);
-    if (write) sd_start_write(img_lba + x_first, x_count);
-    else sd_start_read(img_lba + x_first, x_count);
+    if (card_start(write, x_first, x_count)) {
+        current_rba = x_first;
+        fail_card(write);
+        return;
+    }
     do_isr(DEV_DRIVE | ISR_DTR);       // no EOI follows this
     state = write ? TS_WRITE : TS_READ;
 }
@@ -233,18 +271,13 @@ static void retry(int write)
     uint32_t left = x_count - done;
     sd_stop(x_count > 1);
     logline(write ? "W retry at " : "R retry at ", x_first + done);
+    current_rba = x_first + done;
     if (++x_retries > 3) {
-        buf_end();
-        state = TS_IDLE;
-        current_rba = x_first + done;
-        sb_dev_error = write ? DEV_ERR_WRITE : DEV_ERR_READ;
-        finish(ISR_FAILED);
-        sb_dev_error = 0;
+        fail_card(write);
         return;
     }
     BR_CTRL = (write ? BRC_WRITE : 0) | BRC_CLRFAIL;
-    if (write) sd_start_write(img_lba + x_first + done, left);
-    else sd_start_read(img_lba + x_first + done, left);
+    if (card_start(write, x_first + done, left)) fail_card(write);
 }
 
 static void disk_progress(uint16_t f)
@@ -253,6 +286,15 @@ static void disk_progress(uint16_t f)
     uint32_t br = BR_STATUS;
 
     if (br & (1u << 16)) {                  // bridge failed
+        retry(write);
+        return;
+    }
+    // The card's transfer ended before all its blocks came through: it
+    // stopped answering (sdhost gives up after about 0.67 s with no data, or
+    // after a write's busy time-out). The count is read again after busy,
+    // so a last block finishing just then isn't taken for a short one.
+    if (!x_stopped && (br & 0xFFFF) < x_count && !sd_data_busy()
+        && (BR_STATUS & 0xFFFF) < x_count) {
         retry(write);
         return;
     }
@@ -305,15 +347,14 @@ static void pio_progress(uint16_t f)
     if (f & F_TREQ_STATE) return;      // the host hasn't taken (or sent) a word yet
     if (state == TS_PIO_READ) {
         if (pio_index < 512) {
-            MBOX(MB_DREG) = pio_buf[pio_index] | (pio_buf[pio_index + 1] << 8);
+            MBOX(MB_DREG) = (uint16_t)PIO_WORD(pio_index >> 1);
             pio_index += 2;
             set_flag(F_TREQ_SET);
             return;
         }
     } else {
         uint16_t d = (uint16_t)MBOX(MB_DREG);
-        pio_buf[pio_index] = (uint8_t)d;
-        pio_buf[pio_index + 1] = (uint8_t)(d >> 8);
+        PIO_WORD(pio_index >> 1) = d;
         pio_index += 2;
         if (pio_index < 512) {
             set_flag(F_TREQ_SET);
@@ -472,10 +513,11 @@ static void process_cmd(void)
         start_pio(0, cmd_block[1]);
         return;
     case 0x0015:                       // get manufacturing header (pages 38, 72)
-        for (i = 0; i < 512; i++) pio_buf[i] = 0;
-        pio_buf[0] = 'D'; pio_buf[1] = 'E'; pio_buf[2] = 'F';
-        pio_buf[3] = 'E'; pio_buf[4] = 'C'; pio_buf[5] = 'T';
-        pio_buf[9] = 0xFF;
+        for (i = 0; i < 256; i++) PIO_WORD(i) = 0;
+        PIO_WORD(0) = 'D' | ('E' << 8);
+        PIO_WORD(1) = 'F' | ('E' << 8);
+        PIO_WORD(2) = 'C' | ('T' << 8);
+        PIO_WORD(4) = 0xFF << 8;           // byte 9
         start_pio(0, cmd_block[1]);
         return;
     default:
@@ -513,9 +555,7 @@ void esdi_run(uint32_t blocks)
     uint16_t f;
     uint8_t atn;
 
-    disk_size = (blocks / 2048) * 2048;           // whole megabytes
-    if (disk_size > 0x1FF800) disk_size = 0x1FF800;   // 1023 MB
-    psu_rba_max = disk_size ? disk_size - 1 : 0;
+    set_disk(blocks);
     logline("drive blocks ", disk_size);
 
     MBOX(MB_CTRL) = ctrl_bits;
@@ -542,6 +582,11 @@ void esdi_run(uint32_t blocks)
             hard_reset = 0;
             reset_pending = 0;
             puts_("hard reset\n");
+            abort_transfer();          // so the card is back in its transfer state
+            if (sd_check()) {          // swapped, or missing at power-on
+                set_disk(card_restart());
+                logline("drive blocks ", disk_size);
+            }
             esdi_reset();
             continue;
         }

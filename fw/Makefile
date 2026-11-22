@@ -14,7 +14,7 @@ CFLAGS = -march=rv32ic -mabi=ilp32 -Os -ffreestanding -fno-builtin -nostdlib \
          -ffunction-sections -fdata-sections -Wall -Wextra -std=c11
 LDFLAGS = -Wl,-T,link.ld -Wl,--gc-sections -Wl,--no-warn-rwx-segments -nostartfiles -lgcc
 SRCS = start.S main.c uart.c sd.c fat.c esdi.c
-RAM_WORDS = 2048
+RAM_WORDS = 2560
 
 all: ../verilog/fw.hex
 

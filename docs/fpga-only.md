@@ -150,7 +150,7 @@ cases; they stay as a second line of defence.
 `verilog/soc.v` puts a PicoRV32 (RV32IC, from oss-cad-suite's examples;
 ISC licence) in the Teensy's place. Toward `mcabus.v` and the sector buffer
 it has the same ports as `teensy.v`, so the bus side is unchanged. Inside:
-8 KB of RAM loaded with the firmware at power-up, the Teensy's mailbox
+10 KB of RAM loaded with the firmware at power-up, the Teensy's mailbox
 registers (numbered as before, with the strobes `mcabus.v` expects),
 `sdhost` and the bridge, a 512-byte buffer for blocks the processor reads
 itself, a 1 Mbaud serial port for its log, a microsecond timer and the
@@ -167,9 +167,10 @@ clock enables took the last of the FPGA's 8 global buffers, and `ARB/-GNT`
 and `-TC`, which clock parts of `mcabus.v`, were left on ordinary routing.
 `tools/timing_budget.py --pos --cpu` checks the bus timing of this build:
 everything passes, the tightest being T54 (`-BURST` released after `-TC`)
-at 0.9 ns on stacked worst cases (0.8 ns in the normal build). T54 depends
-on placement: of nextpnr seeds 1-9, four fail by up to 0.1 ns, so the
-processor build uses seed 3 (`PNR_SEED` in the Makefile). Check it again
+at 1.3 ns on stacked worst cases (0.8 ns in the normal build). T54 depends
+on placement: with 10 KB of RAM, 4 of seeds 1-12 fail by up to 0.5 ns, so
+the processor build uses seed 10 (`PNR_SEED` in the Makefile; it was 3,
+then 1, as the design changed). Check it again
 after any change to the design. Shortening that path (the `-TC` latch next
 to the `-BURST` pin) would make it robust.
 
@@ -230,7 +231,11 @@ and watches the bridge. Differences from the Teensy firmware:
   too (CHANGELOG, Unreleased). It wasn't seen on hardware.
 - The log goes through a buffer, so it doesn't hold up the host.
 
-The firmware is 5.8 KB of code and 1.2 KB of data, in 8 KB of RAM.
+The firmware is 6.9 KB of code and 0.7 KB of data, in 10 KB of RAM (it
+was 8 KB until the firmware left itself 92 bytes of stack and overwrote
+its own data in simulation). `fw/link.ld` now refuses to link with less
+than 1 KB left for the stack. The attachment buffer lives in the
+processor's block buffer (cbuf), which is idle once the card is up.
 
 ### Simulation with the bus
 
@@ -251,7 +256,7 @@ DMA runs at 0.54 us per word for 8 sectors at the Model 70's cycle, as
 with the Teensy build's burst DMA (0.57): the bus is still the limit.
 
 The normal build's matrix (`./run_sim72.sh quick`) is unchanged, and
-`tools/timing_budget.py --pos --cpu` passes (T54 0.9 ns on stacked worst
+`tools/timing_budget.py --pos --cpu` passes (T54 1.3 ns on stacked worst
 cases).
 
 On a P2 board on the bench (21 November) it started first time: card up
@@ -282,6 +287,30 @@ reached the buffer in between, the stale flag said idle and the command
 ended, switching the buffer off under the PS/2's DMA. Both now come from
 the one BR_STATUS read (bit 17 and the count change on the same clock).
 The simulations never hit the window.
+
+With that fixed, boot4 had 0 mismatches in 207 reads, all of which match
+the image. A copy test (the part of the log the serial monitor kept:
+8,590 reads, 176 writes) had none either; every write nothing later
+overwrote is on the card as sent (`blocksum.py --writes`), and
+`copytest.py check` found every finished copy correct.
+
+A card taken out and put back while the board stays powered (on the
+bench the Teensy's USB keeps it running) has forgotten its set-up: the
+first read hung, waiting for data that never came, until the PS/2 reset
+the channel. Now:
+- a failed read or write command checks the card with CMD13; if it doesn't
+  answer, the firmware starts it again, finds disk0.img again and tries
+  once more, else a device error;
+- a transfer that ends short (sdhost gives up after 0.67 s without data)
+  is retried from where it stopped, like a CRC error;
+- a hard reset checks the card the same way.
+The card model has a `power_cycle` hook for this, and the processor-mode
+bus tests swap the card twice (once before a read, once before a channel
+reset).
+
+The firmware only sees a channel reset while it lasts: while its log is
+full it can be away for milliseconds. A PS/2's resets are much longer, but
+a latched "hard reset seen" bit would make that certain.
 
 ## Next
 

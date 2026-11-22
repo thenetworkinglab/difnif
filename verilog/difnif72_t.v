@@ -1858,6 +1858,24 @@ module difnif72_t;
         test_cpu_attach;
         test_cpu_reset("soft reset", 1);
         test_cpu_rw(0, 2040, 8, "read the last 8 sectors after the reset");
+        // The card taken out and put back while the board stays powered (on
+        // the bench the Teensy's USB keeps it running): the firmware has to
+        // notice and start the card again
+        card.power_cycle;
+        test_cpu_rw(0, 16, 8, "card swapped: a read starts it again");
+        test_cpu_rw(1, 48, 4, "card swapped: a write after that");
+        test_cpu_rw(0, 48, 4, "card swapped: read back the write");
+        card.power_cycle;
+        // (the firmware polls for the reset, and while its log is full it can
+        // be away for milliseconds; a PS/2's channel reset is far longer)
+        h_chreset = 1'b1;
+        #100000 h_chreset = 1'b0;
+        #1000;                          // as after power-on: mcabus leaves reset a few clocks later
+        pos_out(2, 8'b0_1_0011_0_1);    // the channel reset cleared POS
+        #2000;                          // (a BIOS leaves setup mode before it addresses the card)
+        test_cpu_reset("card swapped: hard reset starts it again", 0);
+        test_cpu_rw(0, 2040, 8, "card swapped: read after the hard reset");
+        #10000000;                      // let the firmware's log drain
         begin_test("SD card model reports no errors");
         if (card.errors) fail($sformatf("%0d errors from the card model", card.errors));
         end_test;

@@ -23,7 +23,10 @@
 //
 // Test hooks: corrupt_read (set it, and the next read block has a bad CRC
 // on one lane), reject_write (the next written block gets "CRC error" in its
-// CRC status token and isn't stored), busy_clks (write busy time in clocks).
+// CRC status token and isn't stored), busy_clks (write busy time in clocks),
+// power_cycle (task: the card was taken out and put back; it's idle with no
+// address, and until the host's CMD0 a fast clock isn't counted as an error,
+// since the host can't know yet).
 //
 // This file is part of a fork of DifNif; CERN-OHL-S-2.0.
 
@@ -116,11 +119,23 @@ module sdcard_model #(
                S_DATA = 5, S_RCV = 6, S_PRG = 7;
 
     integer   state = S_IDLE;
+    reg       swapped = 0;      // power_cycle: until CMD0
     reg       app = 0;
     integer   acmd41_count = 0;
     reg [15:0] rca = 16'h4D2A;
     reg       bus4 = 0;
     reg [31:0] errbits = 0;     // card status error bits, cleared when sent
+
+    task power_cycle;
+        begin
+            state = S_IDLE;
+            app = 0;
+            acmd41_count = 0;
+            bus4 = 0;
+            errbits = 0;
+            swapped = 1;
+        end
+    endtask
 
     function [31:0] card_status;
         input dummy;
@@ -140,7 +155,7 @@ module sdcard_model #(
     always @(sd_clk) begin
         if (last_clk_val === 1'bx || sd_clk === 1'bx) begin
             // reset: not a real edge
-        end else if (state < S_STBY) begin
+        end else if (state < S_STBY && !swapped) begin
             if ($realtime - last_edge < 1249.0)
                 fail("clock faster than 400 kHz before CMD3");
         end else if ($realtime - last_edge < 19.9) begin
@@ -352,6 +367,7 @@ module sdcard_model #(
                         state = S_IDLE;
                         acmd41_count = 0;
                         bus4 = 0;
+                        swapped = 0;
                     end
                     6'd8: if (state == S_IDLE) begin
                         f = {2'b00, 6'd8, 20'd0, a[11:0]};
