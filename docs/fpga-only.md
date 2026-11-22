@@ -312,6 +312,14 @@ The firmware only sees a channel reset while it lasts: while its log is
 full it can be away for milliseconds. A PS/2's resets are much longer, but
 a latched "hard reset seen" bit would make that certain.
 
+On the Model 70 (22 November) both work: a card taken out to the Mac and
+put back, with the board kept powered by USB, was started again at the
+first hard reset ("SD card not answering: starting it again") and DOS
+booted. A 1 MB COPY to C:\W.BIN with the power switched off 1-2 s
+afterwards was complete on the image (SHA-256 identical to the source,
+size in the directory entry): a write's completion interrupt only comes
+after the card has finished programming, so there's nothing to lose.
+
 ## Next
 
 - Then in a PS/2: DOS, the copy test, DiskMeter.

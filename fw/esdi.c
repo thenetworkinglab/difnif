@@ -82,6 +82,8 @@ static void set_disk(uint32_t blocks)
 // in microseconds. On at start-up; 'v' in the serial monitor turns it off
 // and on (it slows the log down once the drive is busy).
 static int trace = 1;
+static uint32_t key_time;           // MICROS at the last key from the serial monitor
+static int      keyed;              // ...if there has been one
 
 static void stamp(void)
 {
@@ -564,13 +566,23 @@ void esdi_run(uint32_t blocks)
     for (;;) {
         uart_poll();
         if (UART_STAT & UART_RXHAVE) {     // a key from the serial monitor
-            if ((UART & 0xFF) == 'v') {
+            uint8_t k = (uint8_t)UART;
+            // The Arduino serial monitor sends a line with its line ending:
+            // "x" and Enter is 'x', '\n'. A line ending within 50 ms of
+            // another key is part of the same line; on its own (just Enter)
+            // it still prints the summary.
+            int eol = (k == '\r' || k == '\n');
+            if (eol && keyed && MICROS - key_time < 50000) {
+                ;
+            } else if (k == 'v') {
                 trace = !trace;
                 puts_(trace ? "trace on\n" : "trace off\n");
             } else {
                 show_status();
                 logline("drive blocks ", disk_size);
             }
+            key_time = MICROS;
+            keyed = 1;
         }
         f = flags_read();
 

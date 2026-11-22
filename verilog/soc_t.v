@@ -132,6 +132,14 @@ module soc_t;
             $display("FAIL: no summary after a key on the serial port");
             errors = errors + 1;
         end
+        // "x" and Enter, as the Arduino serial monitor sends it: one summary
+        send_byte("x");
+        send_byte(8'h0A);
+        #5_000_000;
+        if (n_running != 3) begin
+            $display("FAIL: \"x\" and a line ending gave %0d summaries, expected 1", n_running - 2);
+            errors = errors + 1;
+        end
         if (soc.trap) begin
             $display("FAIL: the processor trapped");
             errors = errors + 1;
