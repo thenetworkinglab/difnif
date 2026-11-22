@@ -70,6 +70,24 @@ static uint16_t flags_stored;
 static const uint16_t ctrl_bits = 0x0005;   // burst DMA, and DMA waits for the interrupt
 
 static uint32_t disk_size, psu_rba_max;
+
+// Bring-up trace: each attention request and reset interrupt, with the time
+// in microseconds. On at start-up; 'v' in the serial monitor turns it off
+// and on (it slows the log down once the drive is busy).
+static int trace = 1;
+
+static void stamp(void)
+{
+    puts_(" @");
+    puthex(MICROS, 8);
+    putch('\n');
+}
+
+static void delay_us(uint32_t us)
+{
+    uint32_t t0 = MICROS;
+    while (MICROS - t0 < us) uart_poll();
+}
 static uint32_t current_rba;
 
 // The disk transfer in progress
@@ -298,14 +316,23 @@ static void esdi_reset(void)          // page 22
 {
     abort_transfer();
     flags_stored &= ~F_BUF_MODE;
+    // difnift.ino holds the clear for 10 us, and its two log lines then put
+    // the reset's interrupt some tens of microseconds after the request.
+    // The processor would answer in about one, and on a Model 70 the BIOS
+    // then sent a second soft reset and never asked for the drive's
+    // configuration, as if it had missed the first interrupt. So the same
+    // timing as the Teensy's.
     set_flag(F_CLEAR_ALL);
+    delay_us(10);
     clear_flag(F_CLEAR_ALL);
+    delay_us(30);
     clear_flag(F_CMD_PROG);
     expect_cb = 0;
     start_status(1, DEV_CONTROLLER);
     load_status();
     do_isr(ISR_RESET_OK);
     int_pending = PEND_INT_RESET;
+    if (trace) { puts_("I EA reset complete"); stamp(); }
 }
 
 static int cmd_len(void)
@@ -329,7 +356,8 @@ static void process_cmd(void)
         puthex(cmd_block[3], 4);
         puthex(cmd_block[2], 4);
     }
-    putch('\n');
+    if (trace) stamp();
+    else putch('\n');
 
     // Devices 1-6 are reserved (Figures 2 and 21): command error 13h
     if (dev != DEV_DRIVE && dev != DEV_CONTROLLER) {
@@ -476,9 +504,13 @@ void esdi_run(uint32_t blocks)
     for (;;) {
         uart_poll();
         if (UART_STAT & UART_RXHAVE) {     // a key from the serial monitor
-            (void)UART;
-            show_status();
-            logline("drive blocks ", disk_size);
+            if ((UART & 0xFF) == 'v') {
+                trace = !trace;
+                puts_(trace ? "trace on\n" : "trace off\n");
+            } else {
+                show_status();
+                logline("drive blocks ", disk_size);
+            }
         }
         f = flags_read();
 
@@ -523,6 +555,15 @@ void esdi_run(uint32_t blocks)
         // Attention requests
         if (f & F_ATN_FULL) {
             atn = (uint8_t)MBOX(MB_ATN);
+            if (trace) {
+                putch('A');
+                puthex(atn, 2);
+                if ((atn & ATN_CMD_MASK) == ATN_EOI) {
+                    puts_(" EOI, pending ");
+                    puthex((uint32_t)int_pending, 1);
+                }
+                stamp();
+            }
             switch (atn & ATN_CMD_MASK) {
             case ATN_EOI:
                 eoi(f);
