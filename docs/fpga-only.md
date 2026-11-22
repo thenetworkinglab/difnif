@@ -272,6 +272,17 @@ disk0.img LOG` checks each read in a saved log against the image: a host
 sum that differs from the card's points between the buffer and the bus,
 both agreeing but differing from the image points at the card side.
 
+The next boot reached the DOS prompt (DiskMeter 2113.6 / 2119.2 / 2119.2
+KB/s, against 1941.7 / 2035.6 / 2010.0 for the Teensy build; CHKDSK
+clean), but the trace showed 8 of about 45 reads with `MISMATCH`: the host
+had taken 3-6 words of the last sector when the command ended. The
+firmware took "the host side is idle" from the flags read at the top of
+its loop and the block count from BR_STATUS later; when the last block
+reached the buffer in between, the stale flag said idle and the command
+ended, switching the buffer off under the PS/2's DMA. Both now come from
+the one BR_STATUS read (bit 17 and the count change on the same clock).
+The simulations never hit the window.
+
 ## Next
 
 - Then in a PS/2: DOS, the copy test, DiskMeter.

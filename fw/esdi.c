@@ -262,7 +262,13 @@ static void disk_progress(uint16_t f)
         if (x_count > 1) sd_stop(1);
         x_stopped = 1;
     }
-    if (x_stopped && (write || (f & F_BUF_IDLE))) {
+    // For a read, the host has had every word once the buffer's host side is
+    // idle. That has to come from the same read of BR_STATUS as the block
+    // count: f is from the top of the loop, and when the last block reached
+    // the buffer in between, f still said idle and the command ended with
+    // the host 3-6 words into its last sector (seen on a Model 70).
+    (void)f;
+    if (x_stopped && (write || (br & (1u << 17)))) {
         if (trace) {
             // What went through the sector buffer on each side; reset by the
             // bridge's restart at the start of the command
