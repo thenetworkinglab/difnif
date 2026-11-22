@@ -18,6 +18,15 @@ it, or from this fork before v2026.11.18-1, is reported as "has no version".
 
 ## Firmware
 
+### Unreleased
+
+- **End-of-interrupt empties the command interface before clearing busy,**
+  instead of after. Once busy clears, the host may write its next command's
+  first word straight away; the read that came after it, with a log line in
+  between, could throw that word away. Found in simulation of the FPGA-only
+  build (`fpga-only` branch) at the Model 70's limit timing; not seen on
+  hardware. Unread status is dropped before busy clears too.
+
 ### v2026.11.21-5
 
 Faster small writes, and the spec's answer to OS/2's probe for a second
