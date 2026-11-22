@@ -83,7 +83,10 @@ static void set_disk(uint32_t blocks)
 // start-up: it's about 115 characters a command, 1.15 ms at 1 Mbaud, and the
 // firmware waits for the log, listened to or not, so it slows small
 // transfers by about half. 'v' in the serial monitor turns it on and off.
-static int trace = 0;
+#ifndef TRACE_AT_START
+#define TRACE_AT_START 0
+#endif
+static int trace = TRACE_AT_START;
 
 static void show_trace(void)
 {
@@ -111,6 +114,9 @@ static int      state = TS_IDLE;
 static uint32_t x_first, x_count;    // drive blocks
 static int      x_stopped;           // the card's transfer ended (CMD12 sent)
 static int      x_retries;
+// Trace timing, microseconds from the command: the card's first block
+// through the bridge, the host's first word, the card side finished
+static uint32_t x_t0, x_t_card, x_t_host, x_t_done;
 
 // Transfers through DREG a word at a time: the attachment buffer and the
 // manufacturing header
@@ -253,6 +259,8 @@ static void fail_range(void)
 
 static void start_disk(int write)
 {
+    x_t0 = MICROS;
+    x_t_card = x_t_host = x_t_done = 0;
     current_rba = cmd_block[2] | ((uint32_t)cmd_block[3] << 16);
     x_first = current_rba;
     x_count = cmd_block[1];
@@ -294,6 +302,10 @@ static void disk_progress(uint16_t f)
     int write = (state == TS_WRITE);
     uint32_t br = BR_STATUS;
 
+    if (trace) {
+        if (!x_t_card && (br & 0xFFFF)) x_t_card = MICROS - x_t0;
+        if (!x_t_host && (BR_CK_COUNT >> 16)) x_t_host = MICROS - x_t0;
+    }
     if (br & (1u << 16)) {                  // bridge failed
         retry(write);
         return;
@@ -312,6 +324,7 @@ static void disk_progress(uint16_t f)
         // CMD12's busy (or a single block's) means it's programmed.
         if (x_count > 1) sd_stop(1);
         x_stopped = 1;
+        x_t_done = MICROS - x_t0;
     }
     // For a read, the host has had every word once the buffer's host side is
     // idle. That has to come from the same read of BR_STATUS as the block
@@ -332,7 +345,18 @@ static void disk_progress(uint16_t f)
             puthex(cn & 0xFFFF, 4);
             putch('/');
             puthex(cn >> 16, 4);
-            puts_(cs != ch || (cn & 0xFFFF) != (cn >> 16) ? " MISMATCH\n" : "\n");
+            puts_(cs != ch || (cn & 0xFFFF) != (cn >> 16) ? " MISMATCH" : "");
+            // us from the command: card's first block, host's first word,
+            // card side done, command done
+            puts_("\n T card ");
+            putdec(x_t_card);
+            puts_(" host ");
+            putdec(x_t_host);
+            puts_(" card done ");
+            putdec(x_t_done);
+            puts_(" end ");
+            putdec(MICROS - x_t0);
+            putch('\n');
         }
         buf_end();
         state = TS_IDLE;

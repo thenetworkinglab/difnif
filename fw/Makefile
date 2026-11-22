@@ -12,6 +12,10 @@ OBJCOPY = $(CROSS)objcopy
 SIZE = $(CROSS)size
 CFLAGS = -march=rv32ic -mabi=ilp32 -Os -ffreestanding -fno-builtin -nostdlib \
          -ffunction-sections -fdata-sections -Wall -Wextra -std=c11
+# make TRACE=1: the trace on from start-up (for simulation, or a bench run
+# where you can't type 'v' in time)
+TRACE ?= 0
+CFLAGS += -DTRACE_AT_START=$(TRACE)
 LDFLAGS = -Wl,-T,link.ld -Wl,--gc-sections -Wl,--no-warn-rwx-segments -nostartfiles -lgcc
 SRCS = start.S main.c uart.c sd.c fat.c esdi.c
 RAM_WORDS = 2560
