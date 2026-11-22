@@ -167,16 +167,25 @@ clock enables took the last of the FPGA's 8 global buffers, and `ARB/-GNT`
 and `-TC`, which clock parts of `mcabus.v`, were left on ordinary routing.
 `tools/timing_budget.py --pos --cpu` checks the bus timing of this build:
 everything passes, the tightest being T54 (`-BURST` released after `-TC`)
-at 0.8 ns on stacked worst cases, as in the normal build. T54 depends on
-placement: of nextpnr seeds 1-6, three fail by up to 0.4 ns, so the
-processor build uses seed 1 (`PNR_SEED` in the Makefile). Check it again
+at 0.9 ns on stacked worst cases (0.8 ns in the normal build). T54 depends
+on placement: of nextpnr seeds 1-9, four fail by up to 0.1 ns, so the
+processor build uses seed 3 (`PNR_SEED` in the Makefile). Check it again
 after any change to the design. Shortening that path (the `-TC` latch next
 to the `-BURST` pin) would make it robust.
 
 The log goes out on Teensy data line 7 (FPGA pin 25), which is the
 Teensy's pin 16, its Serial4 input; Teensy pin 17 (Serial4 output) comes
 back on line 6. A Teensy running a few lines that copy Serial4 to USB
-serves as the log's USB port. Without a Teensy, the LEDs show where
+serves as the log's USB port (`fw/teensy_log`).
+
+These lines have explicit `SB_IO` pads in `difnif_top.v`: line 7 an
+output, the other 15 inputs with pull-ups. The first version wrote
+`assign tn_d = {8'bz, uart_tx, 7'bz}`, and yosys turned the constant `z`
+bits into constant 0, so the FPGA drove 15 lines low, against the
+Teensy's serial output on line 6. Simulation can't show that (the pins
+really are undriven there), so the Makefile now runs
+`tools/check_inouts.py` on the synthesized netlist, which fails the
+build if any bidirectional pin is tied to a constant. Without a Teensy, the LEDs show where
 bring-up stopped.
 
 The firmware is in `fw/` (`make` there builds `verilog/fw.hex`). So far it
@@ -242,13 +251,14 @@ DMA runs at 0.54 us per word for 8 sectors at the Model 70's cycle, as
 with the Teensy build's burst DMA (0.57): the bus is still the limit.
 
 The normal build's matrix (`./run_sim72.sh quick`) is unchanged, and
-`tools/timing_budget.py --pos --cpu` passes (T54 0.3 ns on stacked worst
+`tools/timing_budget.py --pos --cpu` passes (T54 0.9 ns on stacked worst
 cases).
 
 On a P2 board on the bench (21 November) it started first time: card up
 on the 4-bit bus at 25 MHz, FAT32 in a partition at block 8192, disk0.img
 at block 0xA0FC0, contiguous, 311,296 blocks (Tim's 152 MB image). The
-summary prints again on any key in the serial monitor.
+serial input (any key reprints the summary) didn't work in that image,
+because of the driven Teensy lines above; fixed since.
 
 ## Next
 

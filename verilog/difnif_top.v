@@ -242,14 +242,33 @@ module difnif_top(
             assign sd_d[sdi] = sd_dat_oe[sdi] ? sd_dat_out[sdi] : 1'bz;
         end
     endgenerate
-    assign tn_d = {8'bzzzzzzzz, uart_tx, 7'bzzzzzzz};
+    // The Teensy data lines: line 7 is the log's output, line 6 its input
+    // (keys from the serial monitor), the rest inputs nobody reads. Explicit
+    // pads, because yosys turns "assign tn_d = 1'bz" into a constant 0 and the
+    // pins then drive low, against the Teensy's serial output on line 6.
+    // Pull-ups keep line 6 idle (high) when nothing is plugged in.
+    wire [15:0] tn_din;
+    genvar tni;
+    generate
+        for (tni = 0; tni < 16; tni = tni + 1) begin : tn_pad
+            SB_IO #(
+                .PIN_TYPE(6'b1010_01),          // tristate output, plain input
+                .PULLUP(tni == 7 ? 1'b0 : 1'b1)
+            ) pad (
+                .PACKAGE_PIN(tn_d[tni]),
+                .OUTPUT_ENABLE(tni == 7 ? 1'b1 : 1'b0),
+                .D_OUT_0(uart_tx),
+                .D_IN_0(tn_din[tni])
+            );
+        end
+    endgenerate
     assign tn_int = 1'b0;
 
     soc cpu1 (
         .clk(clk),
         .rst(soc_rst),
         .uart_tx(uart_tx),
-        .uart_rx(tn_d[6]),
+        .uart_rx(tn_din[6]),
         .leds(soc_leds),
         .sd_clk(sd_clk_w),
         .sd_cmd_in(sd_cmd),

@@ -37,9 +37,9 @@ DEFINES += -DDIFNIF_CPU
 # and ARB/-GNT and -TC (clocks for mcabus.v) go on ordinary routing
 PNR_FLAGS += --no-promote-ce
 # T54 (-BURST released after -TC, tools/timing_budget.py --pos --cpu) passes
-# for some placements and not others; seed 1 gives 0.8 ns, as the normal
-# build. Check it again after changing the design: make PNR_SEED=n to try others.
-PNR_SEED ?= 1
+# for some placements and not others; seed 3 gives 0.9 ns (the normal build
+# has 0.8). Check it again after changing the design: make PNR_SEED=n to try others.
+PNR_SEED ?= 3
 PNR_FLAGS += --seed $(PNR_SEED)
 SOURCES += soc.v picorv32.v sdhost.v sdbridge.v
 INCLUDES += fw.hex
@@ -56,6 +56,8 @@ $(ODIR)/%.json: $(SOURCES) $(INCLUDES) | $(ODIR)
 	echo $@
 
 $(ODIR)/%.asc: $(ODIR)/%.json $(PIN_DEF)
+# fails if yosys tied a bidirectional pin to a constant, which would drive it
+	python3 ../tools/check_inouts.py $<
 # add -q to quiet lots of messages
 	nextpnr-ice40 --$(DEVICE) --pcf $(PIN_DEF) --json $< --asc $@ --package tq144:4k $(PNR_FLAGS)
 #	@echo nextpnr $< $@
