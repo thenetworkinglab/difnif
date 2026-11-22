@@ -104,6 +104,9 @@ module difnif_top(
     wire buf_mode, buf_dir;
     wire burst_en;
     wire isr_gate;
+`ifdef DIFNIF_CPU
+    wire [2:0] hold_ovr;        // bus release time override (soc.v to mcabus.v)
+`endif
     wire t_sifr_clear;
     wire t_buf_wr, t_buf_rd, t_buf_go, t_buf_done;
     wire [15:0] t_buf_wdata, t_buf_rdata;
@@ -133,7 +136,14 @@ module difnif_top(
     assign addr_sel_l = fulladdr2_l ? addr_sel_in_l : ~(bus_a[15:3] == {12'h351, alt_addr});
     wire [3:0] reg_sel = fulladdr2_l ? bus_a[3:0] : {1'b0, bus_a[2:0]};
 
+    // The processor build honours POS 4's bus release time (and the
+    // firmware's override); the Teensy build is left exactly as released (a
+    // parameter on the instance would rename its cells and move the placement)
+`ifdef DIFNIF_CPU
+    mcabus #(.PREEMPT_HOLD(1)) mca1 (
+`else
     mcabus mca1 (
+`endif
         .clk(clk),
         .chreset(chreset),
         .chreset_l(chreset_l),
@@ -208,6 +218,9 @@ module difnif_top(
         .burst_en(burst_en),
         .isr_gate(isr_gate),
         .t_sifr_clear(t_sifr_clear)
+`ifdef DIFNIF_CPU
+        , .hold_ovr(hold_ovr)
+`endif
     );
 
 `ifdef DIFNIF_CPU
@@ -299,6 +312,7 @@ module difnif_top(
         .buf_clear(buf_clear),
         .buf_h_ev(buf_h_ev),
         .buf_h_rdata(buf_h_rdata),
+        .hold_ovr(hold_ovr),
 `else
     wire buf_clear = 1'b0;
 

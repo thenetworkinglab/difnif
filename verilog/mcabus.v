@@ -12,7 +12,11 @@
 `define MCA_NO_POS
 `endif
 
-module mcabus(
+module mcabus #(
+    // (fork) 1: honour POS 4's bus release time after another device's
+    // -PREEMPT (the processor build). 0: let go at once, as before.
+    parameter PREEMPT_HOLD = 0
+) (
     input clk,
     input chreset,
 
@@ -94,6 +98,11 @@ module mcabus(
     // Burst DMA (fork, stage 2)
     input burst_en,           // Teensy register 15 bit 0, synchronized
     input isr_gate            // Teensy register 15 bit 2, synchronized
+`ifdef DIFNIF_CPU
+    // PREEMPT_HOLD: bit 2 set overrides POS 4's release time with bits 1:0.
+    // Processor build only, so the Teensy build stays bit-identical.
+    , input [2:0] hold_ovr
+`endif
     );
 
     // Declared early: used before their definitions below
@@ -525,6 +534,27 @@ module mcabus(
         pend_q <= treq_pending;
     end
     wire other_pre = s_pre[1] & ~|own_pre;
+
+    // (fork) Bus release time (IBM DASD interface spec 3.4.3.3, POS 4 bits
+    // 2:1): 00 let go of -BURST at once after another device's -PREEMPT, 01
+    // carry on for 3 us, 1x for 6 us, "to reduce the total bus arbitration
+    // cycle". The burst then stops after the transfer in progress, well
+    // inside T40 (7.8 us). On a Model 70 the system board preempts about
+    // 1.3 us into every grant, so letting go at once costs about a quarter
+    // of the bus time in arbitration. Only with PREEMPT_HOLD (processor build).
+`ifdef DIFNIF_CPU
+    wire [1:0] hold_sel = hold_ovr[2] ? hold_ovr[1:0] : reg_pos4[2:1];
+    wire [8:0] hold_clks = (hold_sel == 2'b00) ? 9'd0 : (hold_sel == 2'b01) ? 9'd150 : 9'd300;
+    reg  [8:0] pre_cnt = 9'd0;      // 50 MHz clocks since another device's -PREEMPT
+    always @ (posedge clk) begin
+        if (s_gnt[1] || !other_pre) pre_cnt <= 9'd0;
+        else if (pre_cnt != 9'd511) pre_cnt <= pre_cnt + 9'd1;
+    end
+    wire pre_due = (PREEMPT_HOLD == 0) ? other_pre : (other_pre && pre_cnt >= hold_clks);
+`define MCA_PRE_STOP pre_due
+`else
+`define MCA_PRE_STOP other_pre
+`endif
     wire absorbed = pend_q & ~treq_pending;     // a transfer just went through the buffer
 
     reg burst_ok = 1'b0;            // a burst could start now
@@ -538,7 +568,7 @@ module mcabus(
             burst_n <= 7'd0;
         end else begin
             if (absorbed) burst_n <= burst_n + 7'd1;
-            if (s_tc[1] | (absorbed & (~buf_h_more | other_pre | ~buf_mode |
+            if (s_tc[1] | (absorbed & (~buf_h_more | `MCA_PRE_STOP | ~buf_mode |
                                        (burst_n == BURST_MAX - 7'd2))))
                 burst_stop <= 1'b1;
         end

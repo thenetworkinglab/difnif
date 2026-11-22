@@ -167,10 +167,10 @@ clock enables took the last of the FPGA's 8 global buffers, and `ARB/-GNT`
 and `-TC`, which clock parts of `mcabus.v`, were left on ordinary routing.
 `tools/timing_budget.py --pos --cpu` checks the bus timing of this build:
 everything passes, the tightest being T54 (`-BURST` released after `-TC`)
-at 0.7 ns on stacked worst cases (0.8 ns in the normal build). T54 depends
-on placement: with read-ahead's bridge change, 7 of seeds 1-15 fail by up to
-0.7 ns, so the processor build uses seed 7 (`PNR_SEED` in the Makefile; it
-was 1, 3 and 10 as the design changed). That's fragile: the -TC to -BURST
+at 1.0 ns on stacked worst cases (0.8 ns in the normal build). T54 depends
+on placement: with the bus release time logic, about half of seeds 1-16
+fail by up to 0.7 ns, so the processor build uses seed 14 (`PNR_SEED` in the
+Makefile; it was 1, 3, 10 and 7 as the design changed). That's fragile: the -TC to -BURST
 path wants shortening before a release. Check it again
 after any change to the design. Shortening that path (the `-TC` latch next
 to the `-BURST` pin) would make it robust.
@@ -257,7 +257,7 @@ DMA runs at 0.54 us per word for 8 sectors at the Model 70's cycle, as
 with the Teensy build's burst DMA (0.57): the bus is still the limit.
 
 The normal build's matrix (`./run_sim72.sh quick`) is unchanged, and
-`tools/timing_budget.py --pos --cpu` passes (T54 0.7 ns on stacked worst
+`tools/timing_budget.py --pos --cpu` passes (T54 1.0 ns on stacked worst
 cases).
 
 On a P2 board on the bench (21 November) it started first time: card up
@@ -320,6 +320,43 @@ booted. A 1 MB COPY to C:\W.BIN with the power switched off 1-2 s
 afterwards was complete on the image (SHA-256 identical to the source,
 size in the directory entry): a write's completion interrupt only comes
 after the card has finished programming, so there's nothing to lose.
+
+### Bus release time after -PREEMPT
+
+Scope captures of the processor build on the Model 70 (22 November, probe
+image `make CPU=1 PROBES=1`, signals on spare Teensy lines) showed the
+system board preempting about 1.3 us into every grant, for one CPU bus
+cycle during the next arbitration. The card let go at once, as the Teensy
+build does, so each 2.6 us grant carried 3 words (a word every 0.5 us
+inside it) and about a quarter of the time went on arbitration: 0.91 us a
+word on average, about 2.2 MB/s.
+
+IBM's DASD interface spec (3.4.3.3) has POS 4 bits 2:1 for this: 00 let go
+at once, 01 carry on for 3 us, 1x for 6 us. The processor build now honours
+it (`mcabus.v`, `PREEMPT_HOLD`), stopping after the transfer in progress,
+well inside T40's 7.8 us; `p` in the serial monitor overrides it (POS 4,
+at once, 3 us, 6 us). The Model 70's BIOS sets POS 4 to 00 and the
+configuration utility doesn't offer it. DiskMeter on the 70:
+
+| Release | Transfer rates (KB/s) | Last three fields |
+|---|---|---|
+| at once | 2159.2 / 2173.9 / 2176.8 | .1 / .1 / .1 |
+| 3 us | 3007.5 / 3041.8 / 2519.6 | .53 / .53 / .53 |
+| 6 us | 3555.5 / 3206.4 / 3212.8 | .53 / .53 / .53 |
+
+The McIDE in the same machine gives 2476.7. The last three fields (seek
+times?) follow the setting, but sunbench's raw sweep (`--rewrite`) shows 6
+us faster at every size, so they're DiskMeter's own artifact:
+
+| Block | seqR at once / 6 us | randR | seqW |
+|---|---|---|---|
+| 1 KB | 1.11 / 1.36 | 0.80 / 0.92 | 0.49 / 0.51 |
+| 4 KB | 1.73 / 2.40 | 1.50 / 1.99 | 1.31 / 1.59 |
+| 64 KB | 2.01 / 2.99 | 1.99 / 2.95 | 1.82 / 2.51 |
+
+So the firmware's default is 6 us whatever POS 4 says (`p` cycles 6 us,
+POS 4, at once, 3 us). Still to check with it: OS/2 on the 70, and the 55SX. The Teensy build is unchanged
+(bit-identical to v2026.11.21-1).
 
 ## Next
 

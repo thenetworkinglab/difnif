@@ -216,6 +216,24 @@ module difnif72_t;
     reg [3:0] tn_addr;
     reg [15:0] tn_dout;
     wire [15:0] tn_d = tn_drive ? tn_dout : 16'bz;
+`ifdef DIFNIF_CPU
+    // Keys for the processor's serial monitor, on line 6 (1 Mbaud, 8N1)
+    reg cpu_rx = 1'b1;
+    assign tn_d[6] = cpu_rx;
+    task automatic cpu_key(input [7:0] k);
+        integer i;
+        begin
+            cpu_rx = 1'b0;
+            #1000;
+            for (i = 0; i < 8; i = i + 1) begin
+                cpu_rx = k[i];
+                #1000;
+            end
+            cpu_rx = 1'b1;
+            #100000;                    // the firmware takes it and answers
+        end
+    endtask
+`endif
     wire tn_int, tn_clk;
 
     // ------------------------------------------------------------------
@@ -1083,6 +1101,9 @@ module difnif72_t;
     // the same step as the request, so the T40 check never sees a new
     // request with an old time.
     realtime t_pre_other = 0;
+    // Longest the card went on bursting after another device's -PREEMPT
+    // (the bus release time test)
+    realtime max_release = 0;
 
     reg refresh_on = 1'b0, refresh_want = 1'b0;
     initial forever begin
@@ -1233,6 +1254,10 @@ module difnif72_t;
                                 end
                                 // The competitor asks for the bus in the middle of a burst
                                 if (more && compete && dma_done % 97 == 50) comp_ask;
+                            end
+                            if (comp_want || refresh_want) begin
+                                t_ref = t_pre_other > t_grant ? t_pre_other : t_grant;
+                                if ($realtime - t_ref > max_release) max_release = $realtime - t_ref;
                             end
                             if (blen > 1) begin
                                 n_bursts = n_bursts + 1;
@@ -1756,6 +1781,40 @@ module difnif72_t;
         end
     endtask
 
+    // Bus release time (POS 4 bits 2:1, processor build): with 6 us the card
+    // carries on past the refresh's -PREEMPT (still inside T40, which the
+    // DMA model checks); at once (00) it lets go within about a transfer
+    // The firmware's default is 6 us whatever POS 4 says; 'p' then cycles
+    // POS 4's setting, at once, 3 us and back to 6 us
+    task automatic release_check(input integer rba, input string what, input held);
+        begin
+            max_release = 0;
+            test_cpu_rw(0, rba, 16, {"bus release ", what, ": read 16 sectors"});
+            begin_test({"bus release ", what, held ? ": the card kept bursting after -PREEMPT"
+                                                   : ": the card let go promptly"});
+            if (held ? max_release < 3000 : max_release > 2000)
+                fail($sformatf("longest burst after -PREEMPT %0.1f us", max_release / 1000.0));
+            end_test;
+        end
+    endtask
+
+    task automatic test_cpu_release;
+        begin
+            pos_out(4, 8'h00);
+            release_check(400, "6 us (default, POS 4 00)", 1);
+            cpu_key("p");
+            release_check(416, "as POS 4, 00", 0);
+            pos_out(4, 8'h04);
+            release_check(432, "as POS 4, 6 us", 1);
+            cpu_key("p");
+            pos_out(4, 8'h00);
+            release_check(448, "at once ('p')", 0);
+            cpu_key("p");
+            cpu_key("p");                       // back to the default
+            release_check(464, "6 us again", 1);
+        end
+    endtask
+
     task automatic test_cpu_range;
         begin
             begin_test("read past the end of the image: command failed, RBA out of range");
@@ -1879,6 +1938,7 @@ module difnif72_t;
         test_cpu_reset("soft reset", 1);
         test_cpu_rw(0, 2040, 8, "read the last 8 sectors after the reset");
         test_cpu_readahead;
+        test_cpu_release;
         // The card taken out and put back while the board stays powered (on
         // the bench the Teensy's USB keeps it running): the firmware has to
         // notice and start the card again

@@ -70,7 +70,7 @@ module soc_t;
         .t_buf_go(t_buf_go), .t_buf_done(t_buf_done), .t_buf_rdata(t_buf_rdata),
         .t_buf_ready(t_buf_ready), .t_buf_can_arm(t_buf_can_arm), .t_buf_h_idle(t_buf_h_idle),
         .buf_clear(buf_clear),
-        .buf_h_ev(1'b0), .buf_h_rdata(16'h0000)
+        .buf_h_ev(1'b0), .buf_h_rdata(16'h0000), .hold_ovr()
     );
 
     sectorbuf sb (
@@ -127,7 +127,8 @@ module soc_t;
         repeat (1000) @(posedge clk);
         // A key on the serial port prints the summary again
         send_byte(8'h0D);
-        #5_000_000;
+        // (the summary is a few ms of log at 1 Mbaud: wait for it, up to 20 ms)
+        for (k = 0; k < 200 && n_running < 2; k = k + 1) #100_000;
         if (n_running != 2) begin
             $display("FAIL: no summary after a key on the serial port");
             errors = errors + 1;
@@ -135,7 +136,8 @@ module soc_t;
         // "x" and Enter, as the Arduino serial monitor sends it: one summary
         send_byte("x");
         send_byte(8'h0A);
-        #5_000_000;
+        for (k = 0; k < 200 && n_running < 3; k = k + 1) #100_000;
+        #10_000_000;                    // and no second one for the line ending
         if (n_running != 3) begin
             $display("FAIL: \"x\" and a line ending gave %0d summaries, expected 1", n_running - 2);
             errors = errors + 1;

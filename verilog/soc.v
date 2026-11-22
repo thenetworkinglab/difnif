@@ -86,6 +86,7 @@ module soc #(
     output wire        buf_dir,
     output wire        burst_en,
     output wire        isr_gate,
+    output wire [2:0]  hold_ovr,        // mcabus: bus release time override (CTRL bits 5:3)
     output wire        t_sifr_clear,
     output wire        t_buf_wr,
     output wire [15:0] t_buf_wdata,
@@ -191,6 +192,7 @@ module soc #(
     reg [15:0] t_dreg = 16'h0000;
     reg        ctrl_in = 1'b0;
     reg        gate_in = 1'b0;
+    reg  [2:0] hold_in = 3'd0;
     reg [3:0]  strobe = 4'd0;      // which strobes: atn_read, cifr_read, isr, sifr
     reg        s_busy_clear = 1'b0, s_treq_set = 1'b0, s_sifr_clear = 1'b0;
     reg [3:0]  scount = 4'd0;      // 8 clocks: two high, six low
@@ -211,6 +213,7 @@ module soc #(
     assign t_sifr_clear = s_high & s_sifr_clear;
     assign burst_en = ctrl_in;
     assign isr_gate = gate_in;
+    assign hold_ovr = hold_in;
 
     wire [4:0] buf_flags = buf_mode ? {t_buf_h_idle, t_buf_can_arm, t_buf_ready, buf_dir, 1'b1} : 5'h00;
     wire [15:0] flags_out = {buf_flags, t_clear_all, t_treq_16, t_treq,
@@ -253,6 +256,7 @@ module soc #(
             flags_in <= 16'h0000;
             ctrl_in <= 1'b0;
             gate_in <= 1'b0;
+            hold_in <= 3'd0;
         end else if (scount != 4'd0) begin
             scount <= scount - 4'd1;
             if (scount == 4'd1) mbox_done <= 1'b1;
@@ -275,6 +279,7 @@ module soc #(
                     4'd15: begin
                         ctrl_in <= mem_wdata[0];
                         gate_in <= mem_wdata[2];
+                        hold_in <= mem_wdata[5:3];
                         s_sifr_clear <= mem_wdata[1];
                     end
                     default: ;

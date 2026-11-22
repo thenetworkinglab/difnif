@@ -67,7 +67,30 @@ static int      expect_cb;
 static int      int_pending;
 static uint8_t  sb_cmd_status, sb_cmd_error, sb_dev_status = 0x19, sb_dev_error;
 static uint16_t flags_stored;
-static const uint16_t ctrl_bits = 0x0005;   // burst DMA, and DMA waits for the interrupt
+// MB_CTRL: bit 0 burst DMA, bit 2 DMA waits for the interrupt, bits 5:3 the
+// bus release time after another device's -PREEMPT (mcabus.v): 000 as POS 4
+// says, else 1 and the time: 00 at once, 01 3 us, 10 6 us.
+// The default is 6 us whatever POS 4 says: PS/2 BIOSes write 00 there and
+// their configuration utilities don't offer it, and on a Model 70 6 us gave
+// 3.0 MB/s against 2.0 (sunbench raw 64 KB reads), faster at every size.
+// 'p' cycles 6 us, POS 4's setting, at once, 3 us.
+static uint16_t ctrl_bits = 0x0035;
+static int      hold_mode = 3;        // 0 POS 4, 1 at once, 2 3 us, 3 6 us
+static const uint16_t hold_ctrl[4] = { 0x0000, 0x0020, 0x0028, 0x0030 };
+
+static void show_hold(void)
+{
+    static const char *const t[4] = { "at once", "3 us", "6 us", "6 us" };
+    puts_("bus release after -PREEMPT: ");
+    if (hold_mode == 0) {
+        puts_(t[(MBOX(MB_POS4) >> 1) & 3]);
+        puts_(" (POS 4)");
+    } else {
+        puts_(t[hold_mode - 1]);
+        puts_(hold_mode == 3 ? " (default; 'p' changes it)" : " (set with 'p')");
+    }
+    putch('\n');
+}
 
 static uint32_t disk_size, psu_rba_max;
 
@@ -142,8 +165,21 @@ static uint32_t x_t0, x_t_card, x_t_host, x_t_done;
 #define PROF_MIN  64
 #endif
 #define PROF_MAX  400
-static uint8_t  prof[PROF_MAX];
+// Two slices to a word of cbuf (idle during disk transfers; the attachment
+// buffer's contents don't survive a profiled read, which only matters with
+// the trace on)
 static int      prof_n;
+static uint32_t prof_lo;
+static void prof_put(int i, uint32_t v)
+{
+    if (i & 1) CBUF(i >> 1) = prof_lo | (v << 8);
+    else prof_lo = v;
+}
+static uint32_t prof_get(int i)
+{
+    if ((i & 1) == 0 && i == prof_n - 1) return prof_lo;   // the last, unpaired
+    return (CBUF(i >> 1) >> ((i & 1) * 8)) & 0xFF;
+}
 static uint32_t prof_t;
 static uint16_t prof_words;
 
@@ -371,7 +407,7 @@ static void disk_progress(uint16_t f)
         if (!write && x_count >= PROF_MIN && prof_n < PROF_MAX && MICROS - prof_t >= 100) {
             uint16_t w = (uint16_t)(BR_CK_COUNT >> 16);
             uint16_t d = (uint16_t)(w - prof_words);
-            prof[prof_n++] = d > 255 ? 255 : (uint8_t)d;
+            prof_put(prof_n++, d > 255 ? 255 : d);
             prof_words = w;
             prof_t += 100;
         }
@@ -447,7 +483,7 @@ static void disk_progress(uint16_t f)
                 int i;
                 for (i = 0; i < prof_n; i++) {
                     puts_(i % 20 ? " " : (i ? "\n P " : " P "));
-                    putdec(prof[i]);
+                    putdec(prof_get(i));
                 }
                 putch('\n');
             }
@@ -690,6 +726,7 @@ void esdi_run(uint32_t blocks)
     set_disk(blocks);
     logline("drive blocks ", disk_size);
     show_trace();
+    show_hold();
 
     MBOX(MB_CTRL) = ctrl_bits;
     esdi_reset();
@@ -708,10 +745,17 @@ void esdi_run(uint32_t blocks)
             } else if (k == 'v') {
                 trace = !trace;
                 show_trace();
+            } else if (k == 'p') {
+                // 6 us, then POS 4's setting, at once, 3 us, and round again
+                hold_mode = (hold_mode + 1) & 3;
+                ctrl_bits = (uint16_t)((ctrl_bits & ~0x0038) | hold_ctrl[hold_mode]);
+                MBOX(MB_CTRL) = ctrl_bits;
+                show_hold();
             } else {
                 show_status();
                 logline("drive blocks ", disk_size);
                 show_trace();
+                show_hold();
             }
             key_time = MICROS;
             keyed = 1;
