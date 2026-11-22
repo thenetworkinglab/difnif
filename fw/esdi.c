@@ -136,6 +136,16 @@ static void ra_cancel(void)
 // Trace timing, microseconds from the command: the card's first block
 // through the bridge, the host's first word, the card side finished
 static uint32_t x_t0, x_t_card, x_t_host, x_t_done;
+// Trace, reads of PROF_MIN blocks or more: the words the host took in each
+// 100 us of the command, to see how steady the DMA is
+#ifndef PROF_MIN
+#define PROF_MIN  64
+#endif
+#define PROF_MAX  400
+static uint8_t  prof[PROF_MAX];
+static int      prof_n;
+static uint32_t prof_t;
+static uint16_t prof_words;
 
 // Transfers through DREG a word at a time: the attachment buffer and the
 // manufacturing header
@@ -299,6 +309,9 @@ static void start_disk(int write)
 {
     x_t0 = MICROS;
     x_t_card = x_t_host = x_t_done = 0;
+    prof_n = 0;
+    prof_t = x_t0;
+    prof_words = 0;
     current_rba = cmd_block[2] | ((uint32_t)cmd_block[3] << 16);
     x_first = current_rba;
     x_count = cmd_block[1];
@@ -355,6 +368,13 @@ static void disk_progress(uint16_t f)
     if (trace) {
         if (!x_t_card && (br & 0xFFFF)) x_t_card = MICROS - x_t0;
         if (!x_t_host && (BR_CK_COUNT >> 16)) x_t_host = MICROS - x_t0;
+        if (!write && x_count >= PROF_MIN && prof_n < PROF_MAX && MICROS - prof_t >= 100) {
+            uint16_t w = (uint16_t)(BR_CK_COUNT >> 16);
+            uint16_t d = (uint16_t)(w - prof_words);
+            prof[prof_n++] = d > 255 ? 255 : (uint8_t)d;
+            prof_words = w;
+            prof_t += 100;
+        }
     }
     if (br & (1u << 16)) {                  // bridge failed
         retry(write);
@@ -422,6 +442,15 @@ static void disk_progress(uint16_t f)
             puts_(" end ");
             putdec(MICROS - x_t0);
             putch('\n');
+            if (prof_n) {
+                // words per 100 us through the command, 20 to a line
+                int i;
+                for (i = 0; i < prof_n; i++) {
+                    puts_(i % 20 ? " " : (i ? "\n P " : " P "));
+                    putdec(prof[i]);
+                }
+                putch('\n');
+            }
         }
         buf_end();                     // the bridge still holds the card
         state = TS_IDLE;

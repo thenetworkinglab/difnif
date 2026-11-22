@@ -24,6 +24,17 @@ void show_status(void)
     putch('-');
     putdec(MBOX(MB_VER_COUNT));
     putch('\n');
+    {
+        // As the BIOS set them (0 until POST has run: press Enter after boot)
+        uint32_t p23 = MBOX(MB_POS23);
+        puts_("POS 2 ");
+        puthex(p23 & 0xFF, 2);
+        puts_(", 3 ");
+        puthex(p23 >> 8, 2);
+        puts_(", 4 ");
+        puthex(MBOX(MB_POS4), 2);
+        putch('\n');
+    }
     if (sd_err) {
         logline("SD card start-up failed at step ", sd_err);
         logline("  status ", sd_status);

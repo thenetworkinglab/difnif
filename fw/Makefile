@@ -16,6 +16,8 @@ CFLAGS = -march=rv32ic -mabi=ilp32 -Os -ffreestanding -fno-builtin -nostdlib \
 # where you can't type 'v' in time)
 TRACE ?= 0
 CFLAGS += -DTRACE_AT_START=$(TRACE)
+# make EXTRA=-D...: more defines for a test build
+CFLAGS += $(EXTRA)
 LDFLAGS = -Wl,-T,link.ld -Wl,--gc-sections -Wl,--no-warn-rwx-segments -nostartfiles -lgcc
 SRCS = start.S main.c uart.c sd.c fat.c esdi.c
 RAM_WORDS = 2560
