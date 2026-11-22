@@ -139,6 +139,17 @@ def norm_event(e):
     return "%s %s" % (edge, name)
 
 
+def find_gbufs(sdf):
+    """The global buffer each bus clock's input pin feeds, named by nextpnr
+    after some net it drives (in a probe build, a probe output): look it up
+    from the pin rather than guessing the name."""
+    s = open(sdf).read()
+    for clock in list(GBUF):
+        m = re.search(r"INTERCONNECT %s\\\$sb_io/D_IN_0 \\\$gbuf_(\w+)" % re.escape(clock), s)
+        if m:
+            GBUF[clock] = m.group(1)
+
+
 def clock_insertion(sdf, clock):
     """Pin-buffer output to flip-flop clock pin, worst case, in ns."""
     s = open(sdf).read()
@@ -171,6 +182,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         seed = args.seed if args.seed is not None else (7 if args.cpu else None)   # Makefile's PNR_SEED
         report, sdf = build(tmp, args.pos, args.probes, args.cpu, seed)
+        find_gbufs(sdf)
         w = path_classes(report)
         ins_cmd = clock_insertion(sdf, "cmd_l")
         ins_gnt = clock_insertion(sdf, "arb_gnt_l")

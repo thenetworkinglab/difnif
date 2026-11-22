@@ -44,7 +44,7 @@ PNR_SEED ?= 7
 PNR_FLAGS += --seed $(PNR_SEED)
 SOURCES += soc.v picorv32.v sdhost.v sdbridge.v
 INCLUDES += fw.hex
-ODIR = build/$(BOARD)-cpu
+ODIR = build/$(BOARD)-cpu$(if $(filter 1,$(PROBES)),-probes,)
 endif
 DEPS = $(addprefix $(ODIR)/,$(addsuffix .d,$(IMAGES)))
 

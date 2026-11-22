@@ -114,6 +114,8 @@ module difnif_top(
 
     wire addr_sel_l;
     wire fulladdr2_l;
+    wire pr_cmd, pr_gnt;        // processor build's probes (mcabus test outputs)
+    wire [3:0] pr_bus;
 
     // Use pullup on fulladdr_l signal.
     SB_IO #(
@@ -161,9 +163,10 @@ module difnif_top(
         .burst_o_l(burst_o_l),
         .preempt_o_l(preempt_o_l),
 `ifdef DIFNIF_CPU
-        .test1(),
-        .test2(),
-        .tbus(),
+        // make CPU=1 PROBES=1: to spare Teensy lines (below); otherwise unused
+        .test1(pr_cmd),
+        .test2(pr_gnt),
+        .tbus(pr_bus),
 `else
         .test1(sd_clk), // FIXME testing
         .test2(sd_cmd),
@@ -247,17 +250,32 @@ module difnif_top(
     // pads, because yosys turns "assign tn_d = 1'bz" into a constant 0 and the
     // pins then drive low, against the Teensy's serial output on line 6.
     // Pull-ups keep line 6 idle (high) when nothing is plugged in.
+    //
+    // make CPU=1 PROBES=1 (debug only, not for releases) also puts bus
+    // signals for a scope on lines the Teensy's teensy_log sketch leaves as
+    // inputs, by Teensy pin number: 19 -CMD, 18 ARB/-GNT, 14 a DMA cycle to
+    // the card, 15 -PREEMPT on the bus, 22 the card wants the bus or has the
+    // next word, 23 the card drives -PREEMPT, 20 the card drives -BURST (high
+    // = bursting). Don't run any other Teensy sketch with that image.
     wire [15:0] tn_din;
+`ifdef DIFNIF_PROBES
+    localparam [15:0] TN_OE = 16'h078F;
+    wire [15:0] tn_out = {5'd0, ~burst_o_l, pr_bus[1], pr_bus[3], uart_tx, 3'd0,
+                          pr_bus[0], pr_bus[2], pr_gnt, pr_cmd};
+`else
+    localparam [15:0] TN_OE = 16'h0080;
+    wire [15:0] tn_out = {8'd0, uart_tx, 7'd0};
+`endif
     genvar tni;
     generate
         for (tni = 0; tni < 16; tni = tni + 1) begin : tn_pad
             SB_IO #(
                 .PIN_TYPE(6'b1010_01),          // tristate output, plain input
-                .PULLUP(tni == 7 ? 1'b0 : 1'b1)
+                .PULLUP(TN_OE[tni] ? 1'b0 : 1'b1)
             ) pad (
                 .PACKAGE_PIN(tn_d[tni]),
-                .OUTPUT_ENABLE(tni == 7 ? 1'b1 : 1'b0),
-                .D_OUT_0(uart_tx),
+                .OUTPUT_ENABLE(TN_OE[tni]),
+                .D_OUT_0(tn_out[tni]),
                 .D_IN_0(tn_din[tni])
             );
         end
