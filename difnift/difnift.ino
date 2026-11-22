@@ -2,7 +2,7 @@
 
 // Firmware version: the release date plus a count of releases that day.
 // Change it for each release and note the change in CHANGELOG.md.
-#define FW_VERSION "v2026.11.21-5"
+#define FW_VERSION "v2026.11.21-6"
 
 
 // Pin definitions
@@ -1557,19 +1557,27 @@ void mainLoop() {
           // from both the controller and the drive at the same time.
           // Check if we have a pending interrupt
           digitalWriteFast(DEBUG_PIN, 0); // End of the command marker (fork)
+          // (fork) Before clearing busy: empty the command interface (Eric's
+          // read, which used to come last) and drop unread status. Once busy
+          // clears, the host can write its next command's first word at once,
+          // and a read after that threw the word away. Found in simulation of
+          // the FPGA-only build at the Model 70's limit timing; here the log
+          // line before the read made the window several microseconds.
+          portRead(REG_CIFR); // Ensure interface is empty
+          if (int_pending != 0) {
+            dropStatus(flags);
+          }
           if (int_pending == PEND_INT_RESET) {
             int_pending = 0;
             // Reset interrupt clears the busy flag (Page 23)
             clearFlag(_BV(FLAG_CMD_PROG));
             clearFlag(_BV(FLAG_BUSY));
             Serial.println("Cleared pending reset int.");
-            dropStatus(flags);
           } else if (int_pending != 0) {
             int_pending = 0;
             clearFlag(_BV(FLAG_CMD_PROG));
             clearFlag(_BV(FLAG_BUSY)); // FIXME: may not want to clear busy flag here?
             Serial.println("Cleared some other int.");
-            dropStatus(flags);
           } else {
             // FIXME: Sometimes we get an extra EOI. Mailbox problem?
             // ES testing (off: the pins are timing markers now)
@@ -1582,8 +1590,6 @@ void mainLoop() {
             clearFlag(_BV(FLAG_CMD_PROG));
             clearFlag(_BV(FLAG_BUSY));
           }
-          // ES testing
-          portRead(REG_CIFR); // Ensure interface is empty
           break;
         case ATN_RESET:
           if ((atn_cmd & ATN_DEV_MASK) == 0xE0) {
