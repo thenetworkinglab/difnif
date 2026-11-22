@@ -263,6 +263,20 @@ static void disk_progress(uint16_t f)
         x_stopped = 1;
     }
     if (x_stopped && (write || (f & F_BUF_IDLE))) {
+        if (trace) {
+            // What went through the sector buffer on each side; reset by the
+            // bridge's restart at the start of the command
+            uint32_t cs = BR_CK_SD, ch = BR_CK_HOST, cn = BR_CK_COUNT;
+            puts_(" D card ");
+            puthex(cs, 8);
+            puts_(" host ");
+            puthex(ch, 8);
+            puts_(" words ");
+            puthex(cn & 0xFFFF, 4);
+            putch('/');
+            puthex(cn >> 16, 4);
+            puts_(cs != ch || (cn & 0xFFFF) != (cn >> 16) ? " MISMATCH\n" : "\n");
+        }
         buf_end();
         state = TS_IDLE;
         current_rba = x_first + x_count - 1;

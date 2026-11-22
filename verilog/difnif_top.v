@@ -279,6 +279,8 @@ module difnif_top(
         .sd_dat_oe(sd_dat_oe),
         .sd_detect(sd_switch),
         .buf_clear(buf_clear),
+        .buf_h_ev(buf_h_ev),
+        .buf_h_rdata(buf_h_rdata),
 `else
     wire buf_clear = 1'b0;
 

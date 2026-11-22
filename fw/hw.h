@@ -62,6 +62,9 @@
 #define BR_CTRL      REG32(0x10000200u)
 #define BR_ARM       REG32(0x10000204u)
 #define BR_STATUS    REG32(0x10000208u)
+#define BR_CK_SD     REG32(0x1000020Cu)   // checksum, card side (Fletcher: B<<16 | A)
+#define BR_CK_HOST   REG32(0x10000210u)   // checksum, host side
+#define BR_CK_COUNT  REG32(0x10000214u)   // words: host << 16 | card side
 #define BRC_WRITE    (1u << 0)
 #define BRC_RESTART  (1u << 1)
 #define BRC_CLRFAIL  (1u << 2)

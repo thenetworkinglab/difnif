@@ -260,6 +260,18 @@ at block 0xA0FC0, contiguous, 311,296 blocks (Tim's 152 MB image). The
 serial input (any key reprints the summary) didn't work in that image,
 because of the driven Teensy lines above; fixed since.
 
+In a Model 70 (21 November) POST passed and the boot got as far as
+"Starting MS-DOS...", then hung; an earlier boot had followed a FAT chain
+to a cluster that doesn't exist (block 0x40219), as if a read had handed
+the PS/2 wrong data, with no SD errors logged. For that the firmware has a
+trace, on at start-up ('v' in the serial monitor toggles it): every
+attention request and reset interrupt with a microsecond time, and after
+each disk transfer a Fletcher checksum of the words on each side of the
+sector buffer (registers at 0x1000_020C-0214 in soc.v). `tools/blocksum.py
+disk0.img LOG` checks each read in a saved log against the image: a host
+sum that differs from the card's points between the buffer and the bus,
+both agreeing but differing from the image points at the card side.
+
 ## Next
 
 - Then in a PS/2: DOS, the copy test, DiskMeter.

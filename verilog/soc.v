@@ -96,7 +96,10 @@ module soc #(
     input  wire        t_buf_ready,
     input  wire        t_buf_can_arm,
     input  wire        t_buf_h_idle,
-    output wire        buf_clear        // the bridge empties the sector buffer
+    output wire        buf_clear,       // the bridge empties the sector buffer
+    // The sector buffer's host side, for the bring-up checksums
+    input  wire        buf_h_ev,
+    input  wire [15:0] buf_h_rdata
 );
 
 `include "version.vh"
@@ -369,6 +372,34 @@ module soc #(
         end
     end
 
+    // Bring-up checksums (0x1000_020C-0214): a Fletcher sum of the words on
+    // each side of the sector buffer since the bridge's last restart, so the
+    // firmware can log whether what the host got (or sent) matches what went
+    // to (or came from) the card. Low half A = sum of words, high half
+    // B = sum of the A's.
+    reg [15:0] ck_sa = 0, ck_sb = 0, ck_ha = 0, ck_hb = 0;
+    reg [15:0] ck_sn = 0, ck_hn = 0;
+    wire        ck_s_ev = br_dir ? t_buf_rd : t_buf_wr;
+    wire [15:0] ck_s_w  = br_dir ? t_buf_rdata : t_buf_wdata;
+    wire [15:0] ck_h_w  = br_dir ? t_dreg_out : buf_h_rdata;
+    always @(posedge clk) begin
+        if (rst || br_restart) begin
+            ck_sa <= 0; ck_sb <= 0; ck_sn <= 0;
+            ck_ha <= 0; ck_hb <= 0; ck_hn <= 0;
+        end else begin
+            if (ck_s_ev) begin
+                ck_sa <= ck_sa + ck_s_w;
+                ck_sb <= ck_sb + ck_sa + ck_s_w;
+                ck_sn <= ck_sn + 1'b1;
+            end
+            if (buf_h_ev && buf_mode) begin
+                ck_ha <= ck_ha + ck_h_w;
+                ck_hb <= ck_hb + ck_ha + ck_h_w;
+                ck_hn <= ck_hn + 1'b1;
+            end
+        end
+    end
+
     // ------------------------------------------------------------------
     // Serial port, 8N1
 
@@ -465,7 +496,14 @@ module soc #(
             end else begin
                 mem_ready <= 1'b1;
                 if (is_sd) per_rdata <= sd_rdata;
-                else if (is_br) per_rdata <= {14'd0, t_buf_h_idle, br_failed, br_blocks};
+                else if (is_br) begin
+                    case (rn)
+                        4'd3: per_rdata <= {ck_sb, ck_sa};
+                        4'd4: per_rdata <= {ck_hb, ck_ha};
+                        4'd5: per_rdata <= {ck_hn, ck_sn};
+                        default: per_rdata <= {14'd0, t_buf_h_idle, br_failed, br_blocks};
+                    endcase
+                end
                 else if (is_misc) begin
                     case (rn)
                         4'd0: per_rdata <= {22'd0, rx_have, tx_ready, rx_byte};
