@@ -9,11 +9,12 @@
 
 #include "fw.h"
 
-int main(void)
-{
-    int e;
-    uint32_t blocks = 0;
+static int sd_err, img_err;
 
+// The start-up summary: printed at start-up, and again whenever a byte
+// arrives on the serial port (press Enter in the serial monitor)
+void show_status(void)
+{
     puts_("\nDifNif FPGA-only firmware " FW_VERSION ", FPGA v");
     puthex(MBOX(MB_VER_YEAR), 4);
     putch('.');
@@ -23,22 +24,37 @@ int main(void)
     putch('-');
     putdec(MBOX(MB_VER_COUNT));
     putch('\n');
-
-    e = sd_init();
-    if (e) {
-        logline("SD card start-up failed at step ", e);
+    if (sd_err) {
+        logline("SD card start-up failed at step ", sd_err);
         logline("  status ", sd_status);
-        LEDS = 1;
     } else {
         puts_(sd_high_capacity ? "SD card ready (high capacity)\n" : "SD card ready\n");
-        e = find_image();
-        if (e) {
-            logline("disk0.img not usable, reason ", e);
+        if (img_err) {
+            logline("disk0.img not usable, reason ", img_err);
+        } else {
+            puts_(img_exfat ? "exFAT, " : "FAT32, ");
+            logline("disk0.img at block ", img_lba);
+            logline("blocks ", img_blocks);
+        }
+    }
+}
+
+int main(void)
+{
+    uint32_t blocks = 0;
+
+    sd_err = sd_init();
+    if (sd_err) {
+        LEDS = 1;
+    } else {
+        img_err = find_image();
+        if (img_err) {
             LEDS = 2;
         } else {
             blocks = img_blocks;
             LEDS = 3;
         }
     }
+    show_status();
     esdi_run(blocks);
 }

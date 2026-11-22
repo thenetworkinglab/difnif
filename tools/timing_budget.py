@@ -85,7 +85,7 @@ IBM = {
 }
 
 
-def build(tmp, pos, probes=False, cpu=False):
+def build(tmp, pos, probes=False, cpu=False, seed=None):
     files = ["difnif_top.v", "mcabus.v", "teensy.v", "sectorbuf.v"]
     if cpu:
         files += ["soc.v", "picorv32.v", "sdhost.v", "sdbridge.v"]
@@ -101,7 +101,8 @@ def build(tmp, pos, probes=False, cpu=False):
     run(["nextpnr-ice40", "--hx8k", "--package", "tq144:4k", "-q",
          "--pcf", os.path.join(VERILOG, "difnif.pcf"), "--json", json_path,
          "--asc", os.path.join(tmp, "difnif.asc"), "--report", report, "--sdf", sdf] +
-        (["--no-promote-ce"] if cpu else []))   # as the Makefile, CPU=1
+        (["--no-promote-ce"] if cpu else []) +   # as the Makefile, CPU=1
+        (["--seed", str(seed)] if seed is not None else []))
     return report, sdf
 
 
@@ -162,12 +163,14 @@ def main():
                     help="build with -DDIFNIF_PROBES (make PROBES=1, scope debug build)")
     ap.add_argument("--cpu", action="store_true",
                     help="build with -DDIFNIF_CPU (make CPU=1, the FPGA-only build; needs verilog/fw.hex)")
+    ap.add_argument("--seed", type=int, help="nextpnr placement seed (as make PNR_SEED=)")
     args = ap.parse_args()
     if args.probes:
         GBUF.update(PROBE_GBUF)
 
     with tempfile.TemporaryDirectory() as tmp:
-        report, sdf = build(tmp, args.pos, args.probes, args.cpu)
+        seed = args.seed if args.seed is not None else (1 if args.cpu else None)   # Makefile's PNR_SEED
+        report, sdf = build(tmp, args.pos, args.probes, args.cpu, seed)
         w = path_classes(report)
         ins_cmd = clock_insertion(sdf, "cmd_l")
         ins_gnt = clock_insertion(sdf, "arb_gnt_l")

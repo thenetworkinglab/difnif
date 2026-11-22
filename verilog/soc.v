@@ -25,6 +25,7 @@
 //   1000_0300  +0 serial: write sends a byte; read bit 8 ready to send,
 //              bit 9 a byte received, 7:0 that byte (reading takes it).
 //              +4 LEDs (bits 1:0). +8 microseconds since power-up.
+//              +C serial status, as +0 but reading takes nothing.
 //   2000_0000  the processor's sector buffer: 256 words of 16 bits, 4 bytes
 //              apart, byte 0 of the block in bits 7:0
 //
@@ -470,6 +471,7 @@ module soc #(
                         4'd0: per_rdata <= {22'd0, rx_have, tx_ready, rx_byte};
                         4'd1: per_rdata <= {30'd0, leds};
                         4'd2: per_rdata <= us;
+                        4'd3: per_rdata <= {22'd0, rx_have, tx_ready, rx_byte};
                         default: per_rdata <= 32'd0;
                     endcase
                 end else per_rdata <= 32'd0;   // cbuf comes from block RAM below

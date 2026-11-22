@@ -18,6 +18,22 @@ module soc_t;
     reg rst = 1;
 
     wire        uart_tx;
+    reg         uart_rx = 1'b1;
+
+    task send_byte;   // 1 Mbaud, 8N1
+        input [7:0] b;
+        integer i;
+        begin
+            uart_rx = 1'b0;
+            #1000;
+            for (i = 0; i < 8; i = i + 1) begin
+                uart_rx = b[i];
+                #1000;
+            end
+            uart_rx = 1'b1;
+            #1000;
+        end
+    endtask
     wire [1:0]  leds;
     wire        sd_clk, sd_cmd_out, sd_cmd_oe;
     wire [3:0]  sd_dat_out, sd_dat_oe;
@@ -39,7 +55,7 @@ module soc_t;
 
     soc #(.FIRMWARE("fw.hex")) soc (
         .clk(clk), .rst(rst),
-        .uart_tx(uart_tx), .uart_rx(1'b1), .leds(leds),
+        .uart_tx(uart_tx), .uart_rx(uart_rx), .leds(leds),
         .sd_clk(sd_clk), .sd_cmd_in(cmd), .sd_cmd_out(sd_cmd_out), .sd_cmd_oe(sd_cmd_oe),
         .sd_dat_in(dat), .sd_dat_out(sd_dat_out), .sd_dat_oe(sd_dat_oe), .sd_detect(1'b0),
         .t_atn(8'h00), .t_atn_full(1'b0), .t_atn_read(),
@@ -71,6 +87,7 @@ module soc_t;
     reg [8*200-1:0] line = 0;
     integer         nlines = 0;
     reg             done = 0, failed = 0;
+    integer         n_running = 0;     // "drive blocks" lines seen
     integer         errors = 0;
 
     initial begin : rx
@@ -87,7 +104,10 @@ module soc_t;
             if (c == 8'h0A) begin
                 $display("%t  log: %0s", $realtime, line);
                 // "drive blocks " and 8 hex digits: the drive is running
-                if (line[8*21-1:8*9] == "drive blocks") done = 1;
+                if (line[8*21-1:8*9] == "drive blocks") begin
+                    done = 1;
+                    n_running = n_running + 1;
+                end
                 if (line[8*6-1:0] == "failed" || line[8*6-1:0] == "usable") failed = 1;
                 line = 0;
                 nlines = nlines + 1;
@@ -104,6 +124,13 @@ module soc_t;
         rst = 0;
         wait (done || failed || soc.trap);
         repeat (1000) @(posedge clk);
+        // A key on the serial port prints the summary again
+        send_byte(8'h0D);
+        #5_000_000;
+        if (n_running != 2) begin
+            $display("FAIL: no summary after a key on the serial port");
+            errors = errors + 1;
+        end
         if (soc.trap) begin
             $display("FAIL: the processor trapped");
             errors = errors + 1;

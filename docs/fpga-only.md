@@ -166,8 +166,12 @@ It places with nextpnr's `--no-promote-ce`. Without it, the processor's
 clock enables took the last of the FPGA's 8 global buffers, and `ARB/-GNT`
 and `-TC`, which clock parts of `mcabus.v`, were left on ordinary routing.
 `tools/timing_budget.py --pos --cpu` checks the bus timing of this build:
-everything passes, the tightest being T54 at 0.2 ns on stacked worst cases
-(0.8 ns in the normal build).
+everything passes, the tightest being T54 (`-BURST` released after `-TC`)
+at 0.8 ns on stacked worst cases, as in the normal build. T54 depends on
+placement: of nextpnr seeds 1-6, three fail by up to 0.4 ns, so the
+processor build uses seed 1 (`PNR_SEED` in the Makefile). Check it again
+after any change to the design. Shortening that path (the `-TC` latch next
+to the `-BURST` pin) would make it robust.
 
 The log goes out on Teensy data line 7 (FPGA pin 25), which is the
 Teensy's pin 16, its Serial4 input; Teensy pin 17 (Serial4 output) comes
@@ -212,8 +216,9 @@ and watches the bridge. Differences from the Teensy firmware:
 - At EOI it empties the command interface before clearing busy, not
   after. In simulation at the Model 70's limit timing the host started its
   next command as soon as busy cleared, and the Teensy order threw away
-  that command's first word. The Teensy firmware may have the same race;
-  it hasn't been seen on hardware.
+  that command's first word. The Teensy firmware had the same race,
+  with a log line making its window several microseconds; it's fixed there
+  too (CHANGELOG, Unreleased). It wasn't seen on hardware.
 - The log goes through a buffer, so it doesn't hold up the host.
 
 The firmware is 5.8 KB of code and 1.2 KB of data, in 8 KB of RAM.
@@ -240,9 +245,13 @@ The normal build's matrix (`./run_sim72.sh quick`) is unchanged, and
 `tools/timing_budget.py --pos --cpu` passes (T54 0.3 ns on stacked worst
 cases).
 
+On a P2 board on the bench (21 November) it started first time: card up
+on the 4-bit bus at 25 MHz, FAT32 in a partition at block 8192, disk0.img
+at block 0xA0FC0, contiguous, 311,296 blocks (Tim's 152 MB image). The
+summary prints again on any key in the serial monitor.
+
 ## Next
 
-- On a P2 board, on the bench: the start-up log (`fw/teensy_log`).
 - Then in a PS/2: DOS, the copy test, DiskMeter.
 - Moving CMD12 after the write's interrupt, like v2026.11.21-5's sync.
 - The pacing bits in POS register 3 (see below).

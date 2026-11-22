@@ -36,6 +36,11 @@ DEFINES += -DDIFNIF_CPU
 # Without this the processor's clock enables take the last global buffers,
 # and ARB/-GNT and -TC (clocks for mcabus.v) go on ordinary routing
 PNR_FLAGS += --no-promote-ce
+# T54 (-BURST released after -TC, tools/timing_budget.py --pos --cpu) passes
+# for some placements and not others; seed 1 gives 0.8 ns, as the normal
+# build. Check it again after changing the design: make PNR_SEED=n to try others.
+PNR_SEED ?= 1
+PNR_FLAGS += --seed $(PNR_SEED)
 SOURCES += soc.v picorv32.v sdhost.v sdbridge.v
 INCLUDES += fw.hex
 ODIR = build/$(BOARD)-cpu

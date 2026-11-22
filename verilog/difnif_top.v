@@ -217,11 +217,21 @@ module difnif_top(
     wire sd_clk_w, sd_cmd_out, sd_cmd_oe;
     wire [3:0] sd_dat_out, sd_dat_oe;
     wire uart_tx;
-    reg [3:0] por = 4'd0;
+    // The processor starts once the PLL has locked and the SD card's supply
+    // has had 2.6 ms to settle (a few clocks in simulation)
+`ifdef SYNTHESIS
+    localparam POR_BITS = 17;
+    wire clk_ok = pll_lock;
+`else
+    localparam POR_BITS = 4;
+    wire clk_ok = 1'b1;
+`endif
+    reg [POR_BITS-1:0] por = 0;
     reg soc_rst = 1'b1;     // registered: it fans out across the processor
     always @ (posedge clk) begin
-        if (por != 4'hF) por <= por + 4'd1;
-        soc_rst <= (por != 4'hF);
+        if (!clk_ok) por <= 0;
+        else if (~&por) por <= por + 1'b1;
+        soc_rst <= ~&por;
     end
 
     assign sd_clk = sd_clk_w;

@@ -475,6 +475,11 @@ void esdi_run(uint32_t blocks)
 
     for (;;) {
         uart_poll();
+        if (UART_STAT & UART_RXHAVE) {     // a key from the serial monitor
+            (void)UART;
+            show_status();
+            logline("drive blocks ", disk_size);
+        }
         f = flags_read();
 
         // While the PS/2 holds the channel reset, do nothing; after it, reset

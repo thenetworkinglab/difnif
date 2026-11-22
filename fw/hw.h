@@ -69,7 +69,8 @@
 #define BRC_REWIND   (1u << 4)
 
 // Serial port, LEDs, timer
-#define UART         REG32(0x10000300u)
+#define UART         REG32(0x10000300u)   // reading takes a received byte
+#define UART_STAT    REG32(0x1000030Cu)   // the same bits, reading takes nothing
 #define UART_TXRDY   (1u << 8)
 #define UART_RXHAVE  (1u << 9)
 #define LEDS         REG32(0x10000304u)

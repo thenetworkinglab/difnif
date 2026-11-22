@@ -18,6 +18,7 @@ static uint32_t fat_lba;      // first block of the FAT
 static uint32_t heap_lba;     // block of cluster 2
 static uint32_t spc_shift;    // blocks per cluster, as a power of 2
 static int      exfat;
+int             img_exfat;
 
 static uint32_t clus_lba(uint32_t c)
 {
@@ -166,13 +167,11 @@ int find_image(void)
         heap_lba = fat_lba + cbuf_byte(16) * cbuf_u32(36);
         root = cbuf_u32(44);
     }
-    logline(exfat ? "exFAT at block " : "FAT32 at block ", part);
 
+    img_exfat = exfat;
     if (search_root(root, &first, &bytes, &nochain)) return 6;
     img_lba = clus_lba(first);
     img_blocks = bytes >> 9;
-    logline("disk0.img at block ", img_lba);
-    logline("blocks ", img_blocks);
     if (!nochain) {
         uint32_t cbytes = 512u << spc_shift;
         if (contiguous(first, (bytes + cbytes - 1) >> (9 + spc_shift))) return 7;

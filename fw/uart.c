@@ -12,7 +12,7 @@ static unsigned head, tail;
 
 void uart_poll(void)
 {
-    if (head != tail && (UART & UART_TXRDY)) {
+    if (head != tail && (UART_STAT & UART_TXRDY)) {
         UART = (uint8_t)ring[tail];
         tail = (tail + 1) % sizeof ring;
     }

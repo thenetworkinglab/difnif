@@ -36,9 +36,11 @@ uint32_t cbuf_u32(int i);
 // fat.c: finding the disk image
 extern uint32_t img_lba;           // first card block of disk0.img
 extern uint32_t img_blocks;        // its length in blocks
+extern int img_exfat;              // on exFAT (1) or FAT32 (0)
 int find_image(void);              // 0 if found and contiguous, else a reason
 
 // esdi.c: the drive
 void esdi_run(uint32_t blocks);    // never returns; blocks 0: no disk image
+void show_status(void);            // main.c: the start-up summary
 
 #endif
