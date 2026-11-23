@@ -41,8 +41,8 @@ the same board:
 
 - **FPGA-only** (recommended): no Teensy; the SD card goes in the board's
   own socket. Release v2026.11.22-1.
-- **With a Teensy 4.1**, as Eric designed it; the SD card goes in the
-  Teensy. Firmware v2026.11.21-5 and FPGA v2026.11.21-1.
+- **With a Teensy 4.1**, Eric's arrangement, with this fork's fixes; the SD
+  card goes in the Teensy. Firmware v2026.11.21-5 and FPGA v2026.11.21-1.
 
 Both work in a PS/2 55SX and a Model 70: they're set up with the Reference
 Diskette, boot DOS 6.22, and pass a copy test that checks every file written.
@@ -141,8 +141,28 @@ steps are for the FPGA-only build; the Teensy build differs in steps 4 to 6
 
 ## The Teensy build
 
-The same board with a Teensy 4.1 in its socket, as Eric designed it. The SD
-card goes in the Teensy's slot instead of J3.
+The same board with a Teensy 4.1 in its socket: Eric's arrangement, with
+the SD card in the Teensy's slot instead of J3. This fork fixed a good deal
+of it along the way ([docs/formfactor-review.md](docs/formfactor-review.md)
+has each finding, [CHANGELOG.md](CHANGELOG.md) each release):
+
+- **The board (Rev P2):** the reset input, which floated and was the likely
+  cause of Eric's Rev P1 board failing in a 50Z; level shifters that had
+  5 V on a pin rated for 4.6 V; the missing key slot in the edge connector;
+  the -CD SFDBK signal, which wasn't driven.
+- **The FPGA design:** write data latched too early to work at IBM's timing
+  limits; the POS
+  registers (the card's adapter ID); 8-bit reads that the Model 70 read
+  wrongly; the PS/2's channel reset, which didn't reset the card; DMA
+  requests that dropped too late; DMA left enabled at terminal count, which
+  hung OS/2 1.1 at its second disk read.
+- **The Teensy firmware:** the last write before the PS/2 is switched off
+  could be lost; status words OS/2 left unread were still waiting at its
+  next command; the answer to OS/2's probe for a second drive.
+- **Speed:** a sector buffer and burst DMA in the FPGA took DiskMeter from
+  about 690-990 KB/s with Eric's design to about 2 MB/s.
+
+To build it:
 
 - Load [difnift/difnift.ino](difnift/difnift.ino) with the Arduino IDE and
   PJRC's Teensy support (Teensy 4.1).
