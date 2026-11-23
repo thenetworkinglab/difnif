@@ -11,8 +11,9 @@ listed in [docs/formfactor-review.md](docs/formfactor-review.md).
 And before you ask: the name 'DifNif' comes from DF9F, 
 the Micro Channel adapter ID that IBM's DBA-ESDI drives report.
 
-**Status:** the Rev P2 PS/2 board works in a PS/2 55SX and Model 70; see "Status" below
-before building anything. Releases are listed in [CHANGELOG.md](CHANGELOG.md).
+**Status:** the Rev P2 PS/2 board works in a PS/2 55SX and Model 70, with or
+without a Teensy, booting DOS 6.22 and OS/2 1.1. Releases are listed in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Background
 
@@ -24,260 +25,161 @@ bus, more like an IDE drive, but with its own register interface.
 
 These drives are becoming rare because many have failed mechanically or
 been damaged by leaking capacitors. MCA SCSI cards are an alternative on some
-machines, but are getting expensive and difficult to find as well and 
+machines, but are getting expensive and difficult to find as well and
 aren't compatible with all PS/2s. Some PS/2s also need an IML (initial microcode load)
 partition on their disk, and can only load it from a DBA-ESDI drive.
 
-DifNif uses a Teensy 4.1 microcontroller and a Lattice iCE40 FPGA to implement the
-DBA-ESDI interface, and stores the disk as an image file on an SD card. 
-
-## Two boards, one design
-
-The boards share the FPGA design (`verilog/`) and the Teensy firmware
-(`difnift/`), and differ in how they connect to the computer.
-
-| | ThinkPad board | PS/2 desktop board |
-|---|---|---|
-| Folder | [pcb_thinkpad](pcb_thinkpad/) | [pcb_formfactor](pcb_formfactor/) |
-| Machines | ThinkPad 700C | PS/2 desktops that take a 72-pin DBA-ESDI drive, such as the 50Z, 55SX and 70 |
-| Connector | 2 mm header, wired to the flex cable taken from a stock 700-series 2.5" drive | 72-pin (2 x 36) card edge, plugging straight into the drive socket |
-| Carrier | [mech/df9f_carrier.STL](mech/df9f_carrier.STL) | [mech/difnif_PS2_drive_sled.STL](mech/difnif_PS2_drive_sled.STL), replacing the IBM drive sled |
-| FPGA build | `make` | `make BOARD=ps2`, or `make BOARD=ps2 CPU=1` with no Teensy |
-
-There are also debugging aids:
-
-- [pcb_finglonger](pcb_finglonger/), the "Fing Longer", for the ThinkPad board.
-  It fits a 3D-printed sled ([mech/finglong.STL](mech/finglong.STL)) held by two
-  clips ([mech/2finglong.STL](mech/2finglong.STL)). One acts as an extender
-  that brings the connector forward, and a second as a breakout for logic
-  analyzer probes on the bus lines.
-- For the 72-pin board, a card in a spare Micro Channel slot gives access to
-  the bus signals; Eric used a spare
-  [Snark Barker MCA](https://github.com/schlae/snark-barker-mca).
+DifNif implements the DBA-ESDI interface in a Lattice iCE40 FPGA and keeps
+the disk as an image file on an SD card. Eric's design pairs the FPGA with a
+Teensy 4.1 microcontroller; this fork adds a build that runs a small RISC-V
+processor inside the FPGA instead, so the board needs no Teensy.
 
 ## Status
 
-- **ThinkPad board:** Eric's board works in a ThinkPad 700C,
-  running Windows 3.1. The FPGA design has since been changed in this fork (see
-  [docs/formfactor-review.md](docs/formfactor-review.md)), and those changes
-  have **not** been tested on a ThinkPad. Eric's original files are on the
-  `main` branch.
-- **PS/2 desktop board, Rev P1** (Eric's): register communication didn't work
-  reliably in a 50Z.
-- **PS/2 desktop board, Rev P2** (this fork): fixes the problems found in a
-  review of Rev P1, including a floating reset input that is the likely cause
-  of the 50Z problem. The fixes were checked in simulation against IBM's bus
-  timing before building. On hardware so far (one board):
-  - It works in a PS/2 55SX: configured with the Reference Diskette, it boots
-    DOS 6.22, from cold and warm. An overnight copy test, about 1 GB of
-    writes, had no errors.
-  - It works in a PS/2 Model 70 with FPGA v2026.11.18-2 or later (finding
-    16): configured with the Reference Diskette, it boots DOS, and passed a
-    20-round copy test.
-  - With firmware and FPGA v2026.11.19-1 (the FPGA's sector buffer and
-    burst DMA), DiskMeter measures 2.1-2.3 MB/s in the 55SX and 2.0-2.1 MB/s
-    in the Model 70. That's up from about 690 and 990 KB/s with Eric's design,
-    and faster than an IDE adapter (McIDE) in the 55SX (docs/formfactor-review.md,
-    "Speed: burst DMA"). Both machines passed the 20-round copy test with it.
-  - Writes run at 1.95 MB/s with 64 KB blocks in the Model 70 (sunbench,
-    through DOS), and small writes are up to 40% faster with firmware
-    v2026.11.21-5 (docs/formfactor-review.md, "Speed: writes").
-  - OS/2 1.1 installs and boots in the 55SX, and boots to its desktop in the
-    Model 70, with firmware and FPGA v2026.11.21-1 (docs/os2.md). Earlier
-    releases hang at OS/2's second disk read.
-  - Use firmware v2026.11.18-2 or later: earlier firmware, including Eric's,
-    can lose the last sector written before the PS/2 is switched off
-    (finding 17).
-  - **Not yet tested in a 50Z.**
-- **PS/2 desktop board, Rev P2, without a Teensy** (FPGA-only build
-  v2026.11.22-1): a RISC-V processor in the FPGA takes the Teensy's place,
-  with the SD card in the board's own socket, J3. It boots DOS 6.22 and
-  OS/2 1.1 in the Model 70 and DOS in the 55SX (on a second board with no
-  Teensy fitted), and passed the copy test in the 55SX. DiskMeter measures
-  3.2-3.6 MB/s in the Model 70 and 2.2-2.4 MB/s in the 55SX, faster than
-  the Teensy build, and in the Model 70 than an IDE adapter (McIDE, 2.5
-  MB/s). See [CHANGELOG.md](CHANGELOG.md) and
-  [docs/fpga-only.md](docs/fpga-only.md). Not yet tested in a 50Z.
-- Both boards' original design powers the 74LVC4245A level shifters the wrong
-  way round, putting 5V on a supply pin rated for 4.6V at most. Rev P2 uses
-  the TI SN74LVC8T245 instead, which accepts 5V on either side and fits the
-  same footprint. The same swap should work on the ThinkPad board but hasn't
-  been tried.
-- Known bugs: Eric saw writes occasionally produce a sector shifted by one
-  byte. The cause hasn't been found, and it hasn't appeared on the Rev P2
-  board, including in the overnight copy test.
+The Rev P2 board for PS/2 desktops (this fork) can be built two ways from
+the same board:
 
-[docs/formfactor-review.md](docs/formfactor-review.md) has the full list of
-findings and changes, and [docs/verify-findings.md](docs/verify-findings.md)
-explains how to check each one against Eric's original files and IBM's
-documents.
+- **FPGA-only** (recommended): no Teensy; the SD card goes in the board's
+  own socket. Release v2026.11.22-1.
+- **With a Teensy 4.1**, as Eric designed it; the SD card goes in the
+  Teensy. Firmware v2026.11.21-5 and FPGA v2026.11.21-1.
+
+Both work in a PS/2 55SX and a Model 70: they're set up with the Reference
+Diskette, boot DOS 6.22, and pass a copy test that checks every file written.
+OS/2 1.1 installs and boots with the Teensy build in both machines, and boots
+with the FPGA-only build in the Model 70 (not yet tried in its 55SX). With
+the FPGA-only build, switching the PS/2 off straight after a write loses
+nothing.
+
+Speed, measured with DiskMeter (KB/s) and sunbench (raw BIOS reads and
+writes, 64 KB blocks, MB/s):
+
+| | Model 70 | 55SX |
+|---|---|---|
+| FPGA-only, DiskMeter | 3555 / 3206 / 3213 | 2222 / 2241 / 2432 |
+| FPGA-only, sunbench read / write | 2.99 / 2.50 | 2.13 / 1.87 |
+| Teensy build, DiskMeter | 1942 / 2036 / 2010 | 2108 / 2266 / 2305 |
+| Eric's original design, DiskMeter | about 990 | about 690 |
+| McIDE (an IDE adapter), DiskMeter | 2477 | |
+
+Not yet tested: the PS/2 50Z, and this fork's FPGA changes on the ThinkPad
+board (Eric's ThinkPad board works with his original design, on the `main`
+branch).
 
 **Data loss:** this is a hobby project with no formal testing. Keep backup
 copies of all disk images.
 
-## Building
+## Making a board
 
-This is an advanced project. It needs surface-mount soldering (or an
-assembly service), two programmable devices to load, and probably debugging
-with an oscilloscope and a logic analyzer.
+This needs surface-mount assembly (an assembly service will do it), a
+computer with the open-source FPGA tools, and an FTDI FT232H adapter. These
+steps are for the FPGA-only build; the Teensy build differs in steps 4 to 6
+(see below).
 
-### Boards
+1. **Order the board.** `pcb_formfactor/fab/` has the Gerber and drill files
+   (`DifNifFormFactor-RevP2.zip`), a parts list and a placement file for an
+   assembly service. Order it 1.6 mm thick, with gold fingers and a bevelled
+   connector edge; [docs/formfactor-review.md](docs/formfactor-review.md),
+   "Fab files", has the details. Fit the 2x4 header J2 yourself (for
+   programming); the Teensy socket is only needed for the Teensy build.
+2. **Print the sled.** [mech/difnif_PS2_drive_sled.STL](mech/difnif_PS2_drive_sled.STL)
+   replaces the IBM drive's sled; the board screws into it.
+3. **Install the tools:** yosys, nextpnr and icestorm (for example
+   [oss-cad-suite](https://github.com/YosysHQ/oss-cad-suite-build)), and a
+   RISC-V C compiler, `riscv64-elf-gcc` (for example from Homebrew).
+4. **Build and program the FPGA.** In `verilog/`:
 
-Each board folder has a `fab/` folder with Gerber and drill files. For the
-Rev P2 PS/2 board, `pcb_formfactor/fab/` also has a parts list
-(`DifNifFormFactor-RevP2-BOM.csv`) and a placement file
-(`DifNifFormFactor-RevP2-positions.csv`) for an assembly service. The
-ordering notes in [docs/formfactor-review.md](docs/formfactor-review.md)
-cover board thickness, gold fingers and the bevelled edge.
+       make BOARD=ps2 CPU=1          # firmware and FPGA, into build/ps2-cpu/
+       make prog BOARD=ps2 CPU=1     # writes the FPGA's flash through J2
 
-The Teensy 4.1 plugs into two 24-pin female header strips (2.54 mm pitch, rows
-15.24 mm apart). The SD card goes in the Teensy's own card slot.
+   Wire the FT232H to J2:
 
-### Teensy firmware
+   | J2 pin | Signal | FT232H pin |
+   |---|---|---|
+   | 1 | Flash chip select | AD4 |
+   | 2 | CDONE | AD6 |
+   | 3 | SCK | AD0 |
+   | 4 | CRESET | AD7 |
+   | 5 | Flash data out (CIPO) | AD2 |
+   | 6 | GND | GND |
+   | 7 | Flash data in (COPI) | AD1 |
+   | 8 | +3.3 V (leave unconnected) | |
 
-Load [difnift/difnift.ino](difnift/difnift.ino) with the Arduino IDE and
-PJRC's Teensy board support, selecting Teensy 4.1.
+   The board must be powered while it's programmed: in a switched-on PS/2,
+   or on the bench with 5 V on the Teensy socket's VIN pin (U13 pin 48).
+5. **Make the disk image.** The drive is a file called `disk0.img`, a whole
+   number of megabytes up to 1023 MB, in the root directory of a FAT32 or
+   exFAT SD card. For 120 MB:
 
-At startup and after each hard reset (each time the PS/2 is switched on),
-the firmware prints its own version and the FPGA's on the serial port; the
-`v` command prints them again.
+       dd if=/dev/zero of=disk0.img bs=1048576 count=120
 
-For register loopback testing with DIFDIAG, comment out the two lines at the
-start of `loop()` that call `esdiReset()` and `mainLoop()`. The serial monitor
-then accepts the single-letter test commands listed at startup.
+   The file may be in up to 32 pieces on the card. The card goes in the
+   board's socket, J3.
+6. **Optional: the serial log.** The board reports what it found on the card
+   (and why, if it can't use the image) on a 1 Mbaud, 8N1 serial line at the
+   Teensy socket: it sends on the pin where a Teensy 4.1's pin 16 would go,
+   and listens on pin 17's. Use a 3.3 V USB-serial adapter (never RS-232
+   levels): the FT232H when it isn't programming (AD1 to pin 16, AD0 to pin
+   17, and GND), or a Teensy running
+   [fw/teensy_log/teensy_log.ino](fw/teensy_log/teensy_log.ino). Any key
+   prints the summary again; `v` traces every command; `p` changes the bus
+   release time after another device's -PREEMPT (6 us by default).
+7. **Fit it in the PS/2.** In the Model 70, check the orientation first: its
+   drive socket isn't keyed, and the board fitted upside down puts +12 V on
+   signal pins. The component side (where `A01` is printed) faces the same way
+   as the side of the IBM drive's board that faces the drive casing. The 55SX
+   socket is keyed. The first start gives error 165 (configuration changed):
+   run the Reference Diskette's automatic configuration. Then let it create
+   the reference partition if the machine needs one, and install DOS or OS/2
+   as on a new drive.
+8. **Check it.** [tools/copytest](tools/copytest/) copies test files back
+   and forth under DOS (`TEST.BAT`, or `FOREVER.BAT` overnight), and
+   `copytest.py check` verifies every copy by reading `disk0.img` on another
+   computer afterwards.
 
-### FPGA
+## The Teensy build
 
-The FPGA design is built with the open-source iCE40 tools (yosys, nextpnr and
-icestorm, for example from
-[oss-cad-suite](https://github.com/YosysHQ/oss-cad-suite-build)). In
-`verilog/`:
+The same board with a Teensy 4.1 in its socket, as Eric designed it. The SD
+card goes in the Teensy's slot instead of J3.
 
-    make                  # ThinkPad board
-    make BOARD=ps2        # PS/2 desktop board
+- Load [difnift/difnift.ino](difnift/difnift.ino) with the Arduino IDE and
+  PJRC's Teensy support (Teensy 4.1).
+- Build the FPGA with `make BOARD=ps2` and program it with
+  `make prog BOARD=ps2` (the Teensy's USB powers the board on the bench).
+- [difbench/difbench.ino](difbench/difbench.ino) tests the Teensy-to-FPGA
+  link on the bench, before the board goes in a PS/2.
+- [docs/formfactor-review.md](docs/formfactor-review.md), "Bring-up", takes
+  a new board from first power to a PS/2 one step at a time.
 
-The PS/2 build turns on the POS registers, so the card reports its `DF9F`
-ID. Each build goes into its own folder, `build/thinkpad/` or `build/ps2/`.
+## What's in the repository
 
-The FPGA loads its program from an SPI flash chip on the board, which is
-written through header J2 with an FTDI FT232H or FT2232H adapter and
-`iceprog`:
+| | |
+|---|---|
+| [pcb_formfactor/](pcb_formfactor/) | the PS/2 board (KiCad), with fab files in `fab/` |
+| [verilog/](verilog/) | the FPGA design: `mcabus.v` (the Micro Channel interface and ESDI registers), `sectorbuf.v`, and for the FPGA-only build `soc.v` (the processor), `sdhost.v` and `sdbridge.v` (the SD card); `teensy.v` for the Teensy build |
+| [fw/](fw/) | the FPGA-only build's firmware (C, RISC-V) |
+| [difnift/](difnift/) | the Teensy build's firmware |
+| [tools/](tools/) | `timing_budget.py` (checks the design against IBM's bus timing), `copytest/`, and board-checking scripts |
+| [mech/](mech/) | 3D-printed sled and carriers |
+| [pcb_thinkpad/](pcb_thinkpad/) | Eric's ThinkPad 700C board |
+| [docs/](docs/) | the design notes below |
 
-    make prog BOARD=ps2
+The simulations: in `verilog/`, `./run_sim72.sh` runs a model of the PS/2's
+bus against the design at IBM's timing limits (`./run_sim72.sh cpu` for the
+FPGA-only build, with its firmware and an SD card model), and
+`./run_sdsim.sh` and `./run_socsim.sh` test the SD controller and the
+processor's start-up. They need Icarus Verilog.
 
-| J2 pin | Signal | FT232H pin |
-|---|---|---|
-| 1 | Flash chip select | AD4 |
-| 2 | CDONE | AD6 |
-| 3 | SCK | AD0 |
-| 4 | CRESET | AD7 |
-| 5 | Flash data out (CIPO) | AD2 |
-| 6 | GND | GND |
-| 7 | Flash data in (COPI) | AD1 |
-| 8 | +3.3 V (board supply, leave unconnected) | |
+## Design notes
 
-The board must be powered while programming. The Teensy's USB connection can
-power it on the bench.
-
-The source files are:
-
-- `difnif_top.v`: top level, wiring up the other modules.
-- `mcabus.v`: the Micro Channel bus interface, with the ESDI registers, POS
-  registers and DMA.
-- `teensy.v`: the register interface that lets the Teensy, in its own clock
-  domain, reach the ESDI mailbox registers and flags.
-
-- `version.vh`: the FPGA version, which the Teensy can read.
-
-The self-checking bus simulation for the PS/2 board is `difnif72_t.v`, run with
-`./run_sim72.sh` (needs Icarus Verilog).
-
-### FPGA-only build (no Teensy)
-
-The same Rev P2 board runs without a Teensy: a RISC-V processor (PicoRV32)
-in the FPGA runs the ESDI command handling, and the SD card goes in the
-board's own socket, J3. The processor's firmware is in `fw/` and is built
-into the FPGA image, so it needs a RISC-V C compiler as well
-(`riscv64-elf-gcc`, for example from Homebrew). In `verilog/`:
-
-    make BOARD=ps2 CPU=1          # firmware and FPGA, into build/ps2-cpu/
-    make prog BOARD=ps2 CPU=1
-
-To program it on the bench without a Teensy, the board needs 5 V on the
-Teensy socket's VIN pin (U13 pin 48); in a PS/2, it's powered from the
-machine.
-
-A serial log is optional. It runs at 1 Mbaud, 8N1, on the Teensy socket,
-where a Teensy 4.1's pins 16 and 17 go (its Serial4 RX and TX): the FPGA
-sends on Teensy pin 16 and listens on Teensy pin 17. Either a Teensy running
-[fw/teensy_log/teensy_log.ino](fw/teensy_log/teensy_log.ino), which passes
-it to USB, or a 3.3 V USB-serial adapter (its RX to pin 16, TX to pin 17,
-and ground) will do. It shows a start-up summary, and takes single keys:
-any key prints the summary again, `v` turns on a trace of every command,
-and `p` changes the bus release time after another device's -PREEMPT
-(6 us by default). Don't run difnift or difbench on a Teensy with this
-image: the FPGA drives one of the lines they use.
-
-The simulations for this build are `./run_sim72.sh cpu` (the bus, with the
-firmware and an SD card model), `./run_socsim.sh` (start-up) and
-`./run_sdsim.sh` (the SD controller), and `tools/timing_budget.py --pos
---cpu` checks its bus timing.
-
-### Testing a board
-
-The bring-up checklist in [docs/formfactor-review.md](docs/formfactor-review.md)
-takes a new board from first power to a PS/2, one step at a time. Two tools
-go with it:
-
-- [difbench/difbench.ino](difbench/difbench.ino): a bench test of the
-  Teensy-to-FPGA link, run with the board out of the PS/2.
-- [tools/copytest](tools/copytest/): DOS batch files that copy test files
-  back and forth, and a script that checks the results by reading
-  `disk0.img` on another computer.
-
-## Drive images
-
-The Teensy firmware uses a file called `disk0.img` in the root of the SD card.
-Its size must be a whole number of megabytes, up to 1023 MB; for example, for
-120 MB:
-
-    dd if=/dev/zero of=disk0.img bs=1048576 count=120
-
-Then use the machine's reference disk to create the IML and reference
-partitions, and install DOS to partition and format the rest of the disk.
-
-The FPGA-only build uses the same file, on a FAT32 or exFAT card (the
-filesystem on the whole card or in its first partition). The image may be
-in up to 32 pieces on the card; copying it onto a freshly formatted card
-with a Mac typically leaves it in 15-20. The start-up summary on the serial
-port shows how many, or why the image can't be used.
-
-## DIFDIAG
-
-[difdiag/DIFDIAG.CPP](difdiag/DIFDIAG.CPP) is a diagnostic utility for
-DBA-ESDI drives that works directly with the drive hardware at a very low
-level. Don't use it on drives containing data you care about, but it can help
-with troubleshooting dead drives. It compiles with Borland C++ using the Large
-memory model.
-
-Menus:
-
-- **Settings:** DMA configuration. Autoconfigure tries to get the DMA channel
-  through a BIOS call, and failing that from the extended BIOS data area
-  (EBDA). The channel can also be set by hand, or PIO mode chosen instead.
-- **Mailbox tests:** not for real drives. With DifNif in loopback test mode
-  (see "Teensy firmware"), runs millions of register cycles to look for timing
-  problems.
-- **Low level commands:** the lowest-level commands, which must be run in the
-  sequence given by the flowcharts in the
-  [ESDI spec](https://ardent-tool.com/docs/pdf/j_mcspec.pdf).
-- **Drive information:** query commands; generally safe on real drives.
-- **POST tests:** modelled on the drive tests run by the PS/2 BIOS.
-- **Run diagnostics:** the DBA-ESDI interface's own low-level hardware
-  diagnostic command.
-- **Int13 tests:** destructive. Writes data through the BIOS int13 routines,
-  reads it back and compares.
-- **Read sector:** reads one or more sectors and shows them in hex.
+- [docs/fpga-only.md](docs/fpga-only.md): the FPGA-only build, how it works
+  and how it was tested and tuned.
+- [docs/formfactor-review.md](docs/formfactor-review.md): the review of
+  Eric's Rev P1 board, the Rev P2 changes, bring-up, and the speed work on
+  the Teensy build.
+- [docs/os2.md](docs/os2.md): what it took to boot OS/2 1.1.
+- [docs/verify-findings.md](docs/verify-findings.md): how to check each
+  finding against Eric's files and IBM's documents.
 
 ## Reference documents
 
