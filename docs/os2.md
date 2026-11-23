@@ -178,7 +178,7 @@ disk, it resets twice and goes straight on to reads; in the earlier logs from
 installing it in the 55SX, it reset once and then read the drive's
 configuration. Either way the reset looks like how OS/2 handles a missing
 second drive, rather than a sign that the answer is wrong. Whether a real IBM drive
-answers this way hasn't been checked: DIFDIAG only addresses devices 0 and 7.
+answers this way hasn't been checked: DIFDIAG (Eric's, on the `main` branch) only addresses devices 0 and 7.
 
 Eric's firmware never cleared the command error code, so after the device 1
 rejection every later status block, including successful reads and writes,

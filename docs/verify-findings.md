@@ -106,8 +106,9 @@ editor, click a pad; the Properties panel shows its net.
 
 - **Board (file fact):** in the PCB editor, turn on the `User.Drawings` layer: a
   line marks the slot between pins 2 and 3. On `Edge.Cuts` there's no slot.
-- **Fab files (file fact):** open `pcb_formfactor/fab/DifNifFormFactor-RevP1.zip`'s
-  `DifNif-Edge_Cuts.gbr` in KiCad's GerbView. It's a plain rectangle.
+- **Fab files (file fact):** open `DifNif-Edge_Cuts.gbr` from
+  `pcb_formfactor/fab/DifNifFormFactor-RevP1.zip` (Eric's, on the `main`
+  branch) in KiCad's GerbView. It's a plain rectangle.
 - **Physical:** your WD-3158 and the 55SX cable are both keyed.
 
 ### 9. Write data is captured when -CMD falls
@@ -151,7 +152,7 @@ editor, click a pad; the Properties panel shows its net.
 - **Inference from Verilog:** `dma_cycle` (line 370) only changes when `ARB/-GNT`
   rises, so after winning, the card treats I/O cycles as DMA until the next
   arbitration. That's fine if the planar always re-arbitrates after a transfer.
-  Eric's own testbench (`mcabus_t.v`, around line 408) notes seeing that on the real
+  Eric's own testbench (`verilog/mcabus_t.v` on the `main` branch, around line 408) notes seeing that on the real
   50Z. A logic analyzer on real hardware would confirm it.
 
 ### 14. The "16-bit transfer" flag tracks every bus cycle

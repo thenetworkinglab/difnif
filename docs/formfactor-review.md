@@ -240,7 +240,7 @@ After winning arbitration, the card stays "DMA selected" for any I/O cycle
 until `ARB/-GNT` next goes high (`dma_cycle` only updates on that edge). If a
 planar handed the bus back to the CPU without an arbitration cycle, the card
 would treat the CPU's next I/O cycles as DMA transfers. IBM's timing (T41) and
-Eric's note about the real 50Z in `mcabus_t.v` indicate the planar does
+Eric's note about the real 50Z in `mcabus_t.v` (on the `main` branch) indicate the planar does
 re-arbitrate after each transfer, and the simulation models it that way. This
 is worth confirming with a logic analyzer on real hardware.
 
@@ -437,7 +437,8 @@ To try on real hardware:
 - **Look at a damaged sector.** Whether the shift is really one byte or one
   16-bit word points in different directions: a word shift means a transfer
   lost or repeated, a byte shift needs some byte-wide event.
-- **Reproduce it with DIFDIAG's Int13 test** (writes, reads back and compares)
+- **Reproduce it with DIFDIAG's Int13 test** (writes, reads back and compares;
+  DIFDIAG is on the `main` branch)
   while capturing the bus with a logic analyzer.
 - **Copy test:** [tools/copytest](../tools/copytest/) has DOS batch files that
   copy test files D: -> C: -> D: 20 times, comparing every copy with `FC /B`,
@@ -1140,7 +1141,7 @@ buffer, burst DMA and measuring writes.
      sooner (the 720 us wait).
 3. **The one-byte shift:** keep the copy test running on other machines and
    with other workloads (Windows 3.1, large compiles); run DIFDIAG's Int13
-   test.
+   test (on the `main` branch).
 4. **Other adapters:** a 3Com EtherLink/MC wasn't recognised after
    reconfiguring the 55SX with the DifNif fitted. Probably the adapter's ADF
    or its configuration rather than the DifNif, but not yet checked.
@@ -1156,7 +1157,7 @@ devel), installed in `/opt/oss-cad-suite`.
   timing estimate is about 80 MHz worst case, against the 50 MHz internal clock.
   The Makefile now takes `BOARD=thinkpad` (the default) or `BOARD=ps2`
   (the 72-pin board, POS registers on) and builds each into `build/<board>/`.
-- **Simulation (`verilog/sim.sh`)** failed with Icarus 14: `mcabus.v` used six
+- **Simulation (`verilog/sim.sh`, Eric's, since removed from this branch)** failed with Icarus 14: `mcabus.v` used six
   signals before declaring them, which newer Icarus rejects. The declarations
   were moved to the top of the module. A Yosys formal equivalence check
   (`equiv_make`/`equiv_induct`) proved the reordered module identical to the
@@ -1209,8 +1210,9 @@ input is modelled as "unknown", so on real hardware finding 1 would show up as
 intermittent failures rather than constant ones. That matches "some sort of
 timing error".
 
-The existing [verilog/sim.sh](../verilog/sim.sh) (Eric's DMA-focused testbench)
-still runs as before.
+Eric's DMA-focused testbench, `verilog/sim.sh`, ran as before; it has since
+been removed from this branch (it's on `main`), as `difnif72_t.v` covers
+everything it did.
 
 To make `difnif_top.v` and `teensy.v` compile in Icarus, two trailing commas
 were removed and two `wire`s assigned in `always` blocks became `reg`s
