@@ -30,26 +30,40 @@ leaves about 36 FPGA pins for the additions below.
 
 ### USB-C: programming and serial console
 
-One USB-C port with an FTDI FT2232H, as on the iCEBreaker and similar iCE40
-boards:
+One USB-C port with an RP2040 as the board's USB chip, as on the pico-ice and
+pico2-ice boards (iCE40 or similar plus an RP2040/RP2350), whose open-source
+firmware already does most of this:
 
-- **Channel A** (MPSSE) to the configuration flash's SPI lines, CRESET and
-  CDONE, wired as J2 is now, so `iceprog` and `make prog` work unchanged.
-  Programming the flash holds the FPGA in reset, as now.
-- **Channel B** (UART) to two FPGA pins: the processor's 1 Mbaud log out and
-  its keys in. A terminal on the second serial device replaces teensy_log
-  and the FT232H.
-- No bootstrapping: a blank FT2232H works with iceprog's defaults. An EEPROM
-  (93C46) is optional, only to give the device its own name.
+- **Programming:** the board appears as a USB drive; copying an FPGA image
+  onto it writes the configuration flash (the RP2040 drives the flash's SPI
+  lines, CRESET and CDONE, as the FT232H does through J2 now), then lets
+  the FPGA boot. `make prog` becomes that copy (or `picotool`/`dfu-util`).
+- **Serial console:** a USB serial device bridged to two FPGA pins, the
+  processor's 1 Mbaud log out and its keys in, replacing teensy_log and the
+  FT232H. Both use the operating system's own drivers.
+- **Its own firmware** goes on through the RP2040's USB bootloader in ROM
+  (hold BOOTSEL while plugging in), so the board can't be bricked from USB
+  and needs no other programmer. Fit a BOOTSEL button and SWD test pads.
+- **Parts:** the RP2040, a QSPI flash for its firmware (2 MB is plenty), a
+  12 MHz crystal and decoupling.
+- **Power-up:** the RP2040's pins come up as inputs with weak pull-downs.
+  CRESET and the configuration flash's chip select need firm pull-ups (and
+  series resistors on the shared SPI lines), so the FPGA boots from its
+  flash whether the RP2040 is running, held in reset or unpowered, and the
+  RP2040 must leave those lines undriven except while programming.
+- **Room for later:** reading or replacing disk0.img over USB while the PS/2
+  is off (the SD card's lines would need to reach the RP2040 too, with the
+  FPGA letting go of them; decide before the schematic), watching the
+  power-fail signal, a status display, a small logic analyser on spare
+  pins.
 - 5.1 kOhm pull-downs on CC1 and CC2 so USB-C sources supply 5 V; USB 2.0
-  data only; ESD protection on D+/D- (for example a USBLC6-2).
+  full speed; ESD protection on D+/D- (for example a USBLC6-2).
 - Keep a 2 x 4 programming header footprint (J2's pinout), unfitted, as a
   fallback if the USB side doesn't work on a new board.
 
-Alternative: an RP2040 in place of the FT2232H (as on the pico-ice), with
-USB CDC serial and flash programming in its firmware, and room for later
-features such as reading the SD card over USB while the PS/2 is off. Cheaper
-in parts, but it's firmware to maintain; decide before the schematic.
+Alternative: an FTDI FT2232H (as on the iCEBreaker), one channel for `iceprog`
+and one for the serial port. No firmware at all and `make prog` unchanged,
+but about $4-5 more per board and nothing beyond those two jobs.
 
 ### Power
 
@@ -117,7 +131,8 @@ in parts, but it's firmware to maintain; decide before the schematic.
 
 ## Open questions
 
-- **FT2232H or RP2040** for USB (above).
+- **SD card over USB:** wire the card to the RP2040 as well, for copying
+  disk0.img over USB while the PS/2 is off, or leave it for a later board?
 - **Processor RAM:** see "FPGA and RAM" below.
 - **USB-C position:** reachable with the board in its sled in each machine
   (the 55SX's drive bay and the Model 70's riser), or only on the bench?
@@ -147,7 +162,8 @@ Costs some logic cells for the PSRAM controller and cache; 2700 are free.
 - The same open-source tools (yosys, nextpnr-ecp5, prjtrellis), so the
   Verilog, simulations and `timing_budget.py`/`sdfpath.py` carry over; the
   iCE40 primitives (`SB_IO` for the pads, `SB_PLL40_PAD`) change to the
-  ECP5's. Programmed through the FT2232H by `openFPGALoader` or `ecpprog`.
+  ECP5's. Programmed through the RP2040 (or an FT2232H with
+  `openFPGALoader` or `ecpprog`).
 - The board needs a 1.1 V core supply and 2.5 V auxiliary supply as well as
   3.3 V, and the BGA probably needs a 4-layer board.
 - Price (November 2026, quantity 1): about $16-21 at Western distributors
@@ -161,7 +177,7 @@ also have more RAM, but their tools (Quartus, Vivado) don't run on macOS
 and nothing of the timing tooling would carry over.
 
 Recommendation: neither, yet. The firmware fits in 12 KB today, and the P3
-additions hardly add to it (the FT2232H handles USB itself; LEDs,
+additions hardly add to it (the RP2040 handles USB itself; LEDs,
 write-protect and power-fail are a few lines each). Keep the iCE40 and the
 2-layer board, and put option A's PSRAM footprint on the board unfitted:
 six pins and no cost until the firmware needs it. B is the fallback if RAM,
@@ -176,9 +192,8 @@ board, parts and assembly included, for a run of a few boards. The Teensy
 design has already removed it. For the rest:
 
 - 2-layer board and the iCE40HX4K-TQ144 (about $10), as on Rev P2.
-- The FT2232H (about $5-6, plus a crystal) for USB-C; an RP2040 (about
-  $1-1.50 with its flash) would save about $4 a board at the cost of more
-  firmware to maintain.
+- The RP2040 (about $1-1.50 with its flash, plus a crystal) for USB-C,
+  about $4 a board less than an FT2232H, and with room for later features.
 - The PSRAM footprint unfitted (about $2-3 if it's ever needed).
 - The full-size SD socket and LEDs cost about the same as Rev P2's microSD
   socket.
