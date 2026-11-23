@@ -78,6 +78,12 @@
 #define UART_RXHAVE  (1u << 9)
 #define LEDS         REG32(0x10000304u)
 #define MICROS       REG32(0x10000308u)
+// Rev P3: the RP2040 (USB chip) asks for the SD card and is told when it's
+// free; and the PS/2's 5 V failing. Reads 0 on Rev P2 (tied low).
+#define P3_IO        REG32(0x10000310u)
+#define P3_SD_REQ    (1u << 0)            // the RP2040 wants the card
+#define P3_PFAIL     (1u << 1)            // the PS/2's 5 V is failing
+#define P3_SD_REL    (1u << 2)            // write: the card is the RP2040's
 
 // The processor's sector buffer: 256 words of 16 bits, 4 bytes apart
 #define CBUF(i)      REG32(0x20000000u + 4u * (i))

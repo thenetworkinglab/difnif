@@ -88,13 +88,13 @@ IBM = {
 }
 
 
-def build(tmp, pos, probes=False, cpu=False, seed=None):
+def build(tmp, pos, probes=False, cpu=False, seed=None, p3=False):
     files = ["difnif_top.v", "mcabus.v", "teensy.v", "sectorbuf.v"]
     if cpu:
         files += ["soc.v", "picorv32.v", "sdhost.v", "sdbridge.v"]
     sources = [os.path.join(VERILOG, f) for f in files]
     define = (("-DMCA_USE_POS " if pos else "") + ("-DDIFNIF_PROBES " if probes else "") +
-              ("-DDIFNIF_CPU " if cpu else ""))
+              ("-DDIFNIF_CPU " if cpu else "") + ("-DDIFNIF_P3 " if p3 else ""))
     json_path = os.path.join(tmp, "difnif.json")
     run(["yosys", "-q", "-p",
          "read_verilog %s%s; synth_ice40 -top difnif_top -json %s"
@@ -102,7 +102,7 @@ def build(tmp, pos, probes=False, cpu=False, seed=None):
     report = os.path.join(tmp, "report.json")
     sdf = os.path.join(tmp, "difnif.sdf")
     run(["nextpnr-ice40", "--hx8k", "--package", "tq144:4k", "-q",
-         "--pcf", os.path.join(VERILOG, "difnif.pcf"), "--json", json_path,
+         "--pcf", os.path.join(VERILOG, "difnif_p3.pcf" if p3 else "difnif.pcf"), "--json", json_path,
          "--asc", os.path.join(tmp, "difnif.asc"), "--report", report, "--sdf", sdf] +
         (["--no-promote-ce"] if cpu else []) +   # as the Makefile, CPU=1
         (["--seed", str(seed)] if seed is not None else []))
@@ -178,13 +178,17 @@ def main():
     ap.add_argument("--cpu", action="store_true",
                     help="build with -DDIFNIF_CPU (make CPU=1, the FPGA-only build; needs verilog/fw.hex)")
     ap.add_argument("--seed", type=int, help="nextpnr placement seed (as make PNR_SEED=)")
+    ap.add_argument("--p3", action="store_true",
+                    help="Rev P3 (make BOARD=p3): processor build, POS on, difnif_p3.pcf")
     args = ap.parse_args()
+    if args.p3:
+        args.cpu = args.pos = True
     if args.probes:
         GBUF.update(PROBE_GBUF)
 
     with tempfile.TemporaryDirectory() as tmp:
         seed = args.seed if args.seed is not None else (7 if args.cpu else None)   # Makefile's PNR_SEED
-        report, sdf = build(tmp, args.pos, args.probes, args.cpu, seed)
+        report, sdf = build(tmp, args.pos, args.probes, args.cpu, seed, args.p3)
         find_gbufs(sdf)
         w = path_classes(report)
         ins_cmd = clock_insertion(sdf, "cmd_l")

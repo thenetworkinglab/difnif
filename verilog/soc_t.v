@@ -70,7 +70,8 @@ module soc_t;
         .t_buf_go(t_buf_go), .t_buf_done(t_buf_done), .t_buf_rdata(t_buf_rdata),
         .t_buf_ready(t_buf_ready), .t_buf_can_arm(t_buf_can_arm), .t_buf_h_idle(t_buf_h_idle),
         .buf_clear(buf_clear),
-        .buf_h_ev(1'b0), .buf_h_rdata(16'h0000), .hold_ovr()
+        .buf_h_ev(1'b0), .buf_h_rdata(16'h0000), .hold_ovr(),
+        .sd_req(1'b0), .pfail(1'b0), .sd_rel()
     );
 
     sectorbuf sb (

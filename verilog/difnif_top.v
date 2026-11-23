@@ -58,6 +58,19 @@ module difnif_top(
     output led0,
     output led1,
 
+`ifdef DIFNIF_P3
+    // Rev P3 (make BOARD=p3): no Teensy
+    output data_dir_hi, // U7's direction: the upper byte lane, 16-bit cycles only
+    output uart_tx,     // the processor's log, to the RP2040 (USB serial)
+    input  uart_rx,     // keys from the RP2040
+    input  sd_req,      // the RP2040 asks for the SD card
+    output sd_rel,      // the processor has let go of it
+    input  pfail,       // the PS/2's 5 V is failing (from the RP2040)
+    output ps_clk,      // QSPI PSRAM, not used yet: held deselected
+    output ps_cs_l,
+    inout  [3:0]ps_d,
+    output [3:0]tp      // test points
+`else
     // Teensy
     input tn_rd,
     input tn_wr,
@@ -66,6 +79,7 @@ module difnif_top(
     output tn_int,
     output tn_clk,
     input tn30
+`endif
     );
 
     reg[22:0] counter;
@@ -221,6 +235,9 @@ module difnif_top(
 `ifdef DIFNIF_CPU
         , .hold_ovr(hold_ovr)
 `endif
+`ifdef DIFNIF_P3
+        , .data_dir_hi(data_dir_hi)
+`endif
     );
 
 `ifdef DIFNIF_CPU
@@ -232,7 +249,9 @@ module difnif_top(
     wire [1:0] soc_leds;
     wire sd_clk_w, sd_cmd_out, sd_cmd_oe;
     wire [3:0] sd_dat_out, sd_dat_oe;
+`ifndef DIFNIF_P3
     wire uart_tx;
+`endif
     // The processor starts once the PLL has locked and the SD card's supply
     // has had 2.6 ms to settle (a few clocks in simulation)
 `ifdef SYNTHESIS
@@ -270,6 +289,32 @@ module difnif_top(
     // the card, 15 -PREEMPT on the bus, 22 the card wants the bus or has the
     // next word, 23 the card drives -PREEMPT, 20 the card drives -BURST (high
     // = bursting). Don't run any other Teensy sketch with that image.
+`ifdef DIFNIF_P3
+    // Rev P3: the serial lines go to the RP2040; its input has a pull-up so
+    // it idles high while the RP2040 is starting. The PSRAM is held
+    // deselected (its data lines inputs with pull-ups) until there's a
+    // controller for it. Explicit pads, so nothing is driven by accident
+    // (see the Teensy lines below). Test points: low, or with PROBES=1 the
+    // bus signals: tp[0] -CMD, tp[1] ARB/-GNT, tp[2] the card drives
+    // -BURST (high = bursting), tp[3] a DMA cycle to the card.
+    wire uart_rx_in;
+    SB_IO #(.PIN_TYPE(6'b0000_01), .PULLUP(1'b1)) rx_pad (
+        .PACKAGE_PIN(uart_rx), .D_IN_0(uart_rx_in));
+    assign ps_clk = 1'b0;
+    assign ps_cs_l = 1'b1;
+    genvar psi;
+    generate
+        for (psi = 0; psi < 4; psi = psi + 1) begin : ps_pad
+            SB_IO #(.PIN_TYPE(6'b0000_01), .PULLUP(1'b1)) pad (
+                .PACKAGE_PIN(ps_d[psi]), .D_IN_0());
+        end
+    endgenerate
+`ifdef DIFNIF_PROBES
+    assign tp = {pr_bus[2], ~burst_o_l, pr_gnt, pr_cmd};
+`else
+    assign tp = 4'b0000;
+`endif
+`else
     wire [15:0] tn_din;
 `ifdef DIFNIF_PROBES
     localparam [15:0] TN_OE = 16'h078F;
@@ -294,12 +339,23 @@ module difnif_top(
         end
     endgenerate
     assign tn_int = 1'b0;
+`endif
 
     soc cpu1 (
         .clk(clk),
         .rst(soc_rst),
         .uart_tx(uart_tx),
+`ifdef DIFNIF_P3
+        .uart_rx(uart_rx_in),
+        .sd_req(sd_req),
+        .pfail(pfail),
+        .sd_rel(sd_rel),
+`else
         .uart_rx(tn_din[6]),
+        .sd_req(1'b0),
+        .pfail(1'b0),
+        .sd_rel(),
+`endif
         .leds(soc_leds),
         .sd_clk(sd_clk_w),
         .sd_cmd_in(sd_cmd),
@@ -406,8 +462,10 @@ module difnif_top(
     assign clk = clk_10m;
     `endif
 
+`ifndef DIFNIF_P3
     assign tn_clk = 1'b0; // No clock for now
     //assign tn_clk = clk; // Clock to Teensy in case I want to make a synchronous interface
+`endif
 
 //    assign led0 = counter[22];
 `ifdef DIFNIF_CPU

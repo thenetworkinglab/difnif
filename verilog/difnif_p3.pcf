@@ -1,0 +1,124 @@
+# Rev P3 (docs/rev-p3-spec.md): Rev P2's pins without the Teensy, plus the
+# RP2040 link, the QSPI PSRAM, U7's own direction line and test points.
+# The new signals use pins the Teensy freed on the FPGA's left side (bank 3),
+# next to the SD card's; data_dir_hi sits beside data_dir (130).
+
+### icetest
+
+### Copyright (c) 2021 Eric Schlaepfer
+### This work is licensed under CERN-OHL-S-2.0.
+
+### Clock
+set_io clk_10m      49
+
+### Micro Channel bus
+set_io chreset_l    52 # Probably not actually chreset_l!
+
+set_io cd_ds16_l    73
+set_io irq14_l      74
+set_io cd_chrdy_l   75
+set_io chreset      76
+set_io sbhe_l       78
+set_io s0_w_l       79
+set_io s1_r_l       80
+set_io cmd_l        81
+set_io bus_a[3]     82
+set_io bus_a[2]     83
+set_io arb_o[3]     84
+set_io arb_o[2]     85
+set_io arb_o[1]     87
+set_io arb_o[0]     88
+set_io burst_o_l    90
+set_io preempt_o_l  91
+set_io bus_a[1]     93
+set_io m_io_l       94
+set_io bus_a[0]     95
+set_io arb_gnt_l    96
+set_io tc_l         97
+set_io arb[3]       98
+set_io arb[2]       99
+set_io arb[1]       101
+set_io arb[0]       102
+set_io burst_l      104
+set_io preempt_l    105
+set_io cd_setup_l   106
+set_io addr_sel_in_l 107
+set_io bus_d[13]    110
+set_io bus_d[11]    112
+set_io bus_d[10]    113
+set_io bus_d[7]     114
+set_io bus_d[6]     115
+set_io bus_d[5]     116
+set_io bus_d[2]     117
+set_io bus_d[0]     118
+set_io bus_d[15]    119
+set_io bus_d[14]    120
+set_io bus_d[12]    121
+set_io bus_d[9]     122
+set_io bus_d[8]     124
+set_io bus_d[4]     125
+set_io bus_d[3]     128
+set_io bus_d[1]     129
+set_io data_dir     130
+
+# Extended address lines
+# 72-pin interface only
+set_io bus_a[4]     39
+set_io bus_a[5]     41
+set_io bus_a[6]     42
+set_io bus_a[7]     43
+set_io bus_a[8]     44
+set_io bus_a[9]     45
+set_io bus_a[10]    47
+set_io bus_a[11]    48
+set_io bus_a[12]    55
+set_io bus_a[13]    56
+set_io bus_a[14]    60
+set_io bus_a[15]    61
+
+set_io fulladdr_l   62
+
+# Card selected feedback, 72-pin only. Needs Rev P2: drives the input of the
+# spare 74VHCT125 section (U12 pin 12, /OE grounded), push-pull to J1 B08.
+# Pin 134 is unconnected on Rev P1.
+set_io cd_sfdbk_l   134
+
+### Teensy connections
+# Data port (bidirectional)
+
+# Address pins
+
+# Control pins
+
+# Spares
+
+### LEDs
+set_io led0         37
+set_io led1         38
+
+### SD card
+set_io sd_clk       1
+set_io sd_cmd       2
+set_io sd_switch    3
+set_io sd_d[1]      4
+set_io sd_d[0]      7
+set_io sd_d[3]      8
+set_io sd_d[2]      9
+
+# Rev P3 additions
+set_io data_dir_hi  135
+set_io uart_tx      25
+set_io uart_rx      26
+set_io sd_req       33
+set_io sd_rel       34
+set_io pfail        31
+set_io ps_clk       17
+set_io ps_cs_l      18
+set_io ps_d[0]      21
+set_io ps_d[1]      23
+set_io ps_d[2]      28
+set_io ps_d[3]      29
+set_io tp[0]        32
+set_io tp[1]        11
+set_io tp[2]        12
+set_io tp[3]        16

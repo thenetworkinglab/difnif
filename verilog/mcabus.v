@@ -37,6 +37,13 @@ module mcabus #(
 
     inout[15:0]bus_d,   // Bidirectional data bus
     output data_dir,    // Data bus buffer direction control. 0=in, 1=out
+`ifdef DIFNIF_P3
+    // Rev P3: the upper byte's transceiver (U7) has its own direction line.
+    // It drives D8-D15 only in 16-bit cycles (-CD DS 16 asserted, -SBHE
+    // low); on 8-bit reads (POS, BSR, ISR) a 32-bit planar copies D0-D7
+    // there itself (finding 16), so U7 has to stay off.
+    output data_dir_hi,
+`endif
 
     output irq14_l,     // Interrupt line
 
@@ -626,6 +633,9 @@ module mcabus #(
     // Address, status and byte enables are latched on the falling edge of
     // -CMD. They are guaranteed valid for only 30 ns after it (T9, T10).
     reg la_data_read;
+`ifdef DIFNIF_P3
+    reg la_word = 1'b0;     // a 16-bit cycle: the upper byte lane is the card's
+`endif
 
     always @ (negedge cmd_l) begin
         la_addr <= bus_a;
@@ -636,6 +646,9 @@ module mcabus #(
         la_read <= ~s1_r_l;
 
         la_data_read <= ~s1_r_l & (addressed | dma_selected);
+`ifdef DIFNIF_P3
+        la_word <= ~cd_ds16_l & ~sbhe_l;
+`endif
         //la_data_read <= ~s1_r_l & (addressed | dma_selected) & cd_setup_l; // Use this to disable POS
         la_dma_selected <= dma_selected;
     end
@@ -696,6 +709,9 @@ module mcabus #(
     wire [15:0] dreg_in = buf_mode ? buf_h_rdata : t_dreg_in;
     assign bus_d = data_dir ? data_out : 16'bZ;
     assign data_dir = la_data_read & ~cmd_l & (card_enable | ~la_cd_setup_l); // Read mode; only when CMD is low.
+`ifdef DIFNIF_P3
+    assign data_dir_hi = data_dir & la_word;
+`endif
 
     // Data output mux
     // 8-bit reads (POS, BSR, ISR) put the byte on both D0-D7 and D8-D15.

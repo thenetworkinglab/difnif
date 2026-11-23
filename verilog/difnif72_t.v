@@ -26,6 +26,8 @@
 // Parameters (override with iverilog -P difnif72_t.NAME=value):
 //   CYCLE        default I/O cycle in ns: 300 = 50Z, 250 = 55SX, 200 = Model 70
 //   WORST        0 = typical 50Z timing, 1 = Figure 2-34 limits
+//   BOARD        3 = Rev P3 (make BOARD=p3, DIFNIF_P3): as Rev P2, with U7 (the
+//                upper byte lane) on its own direction line;
 //   BOARD        0 = Rev P1 as built, 1 = Rev P1 with U8 pins 14/15 bridged,
 //                2 = Rev P2 (bridged, plus -CD SFDBK wired to J1 B08)
 //   SEED         selects the per-pin level-shifter delays and clock phase
@@ -195,19 +197,25 @@ module difnif72_t;
     endgenerate
     assign h_preempt_l = comp_want ? 1'b0 : 1'bz;
 
-    // Data bus: U6/U7, DIR driven by the FPGA (high = FPGA to connector)
+    // Data bus: U6/U7, DIR driven by the FPGA (high = FPGA to connector).
+    // Rev P3 gives U7 (D8-D15) its own DIR, data_dir_hi.
     wire [15:0] f_d;
     wire [15:0] d_to_f, d_to_h;
-    wire b_dir;
+    wire b_dir, b_dir_hi;
+    wire f_data_dir_hi;
     lvl #(.D10(pin_delay(SEED, 200))) u_dir (.a(f_data_dir), .y(b_dir));
+    lvl #(.D10(pin_delay(SEED, 201))) u_dir_hi (.a(f_data_dir_hi), .y(b_dir_hi));
+    wire b_dir_u = (BOARD == 3) ? b_dir_hi : b_dir;     // U7's direction
     generate
         for (gi = 0; gi < 16; gi = gi + 1) begin : data_path
             lvl #(.D10(pin_delay(SEED, 300 + gi))) u_hf (.a(h_d[gi]), .y(d_to_f[gi]));
             lvl #(.D10(pin_delay(SEED, 400 + gi))) u_fh (.a(f_d[gi]), .y(d_to_h[gi]));
         end
     endgenerate
-    assign f_d = (b_dir === 1'b0) ? d_to_f : 16'bz;
-    assign h_d = (b_dir === 1'b1) ? d_to_h : 16'bz;
+    assign f_d[7:0] = (b_dir === 1'b0) ? d_to_f[7:0] : 8'bz;
+    assign h_d[7:0] = (b_dir === 1'b1) ? d_to_h[7:0] : 8'bz;
+    assign f_d[15:8] = (b_dir_u === 1'b0) ? d_to_f[15:8] : 8'bz;
+    assign h_d[15:8] = (b_dir_u === 1'b1) ? d_to_h[15:8] : 8'bz;
 
     // ------------------------------------------------------------------
     // Teensy side
@@ -243,6 +251,15 @@ module difnif72_t;
     wire sd_clk, sd_cmd, led0, led1;
     wire [3:0] sd_d;
 
+`ifdef DIFNIF_P3
+    reg  sd_req = 1'b0;         // the RP2040 asking for the SD card
+    wire sd_rel;
+    wire [3:0] ps_d;            // the QSPI PSRAM's data lines, pulled up as on the board
+    pullup (ps_d[0]);
+    pullup (ps_d[1]);
+    pullup (ps_d[2]);
+    pullup (ps_d[3]);
+`endif
     difnif_top dut (
         .clk_10m(clk),              // simulation bypasses the PLL: this is the 50 MHz clock
         .chreset_l(f_chreset_l),
@@ -276,6 +293,20 @@ module difnif72_t;
         .sd_switch(1'b0),
         .led0(led0),
         .led1(led1),
+`ifdef DIFNIF_P3
+        // Rev P3: the RP2040's serial lines, on the signals the Teensy's
+        // lines 7 and 6 carried, so the log and key tasks work unchanged
+        .data_dir_hi(f_data_dir_hi),
+        .uart_tx(tn_d[7]),
+        .uart_rx(cpu_rx),
+        .sd_req(sd_req),
+        .sd_rel(sd_rel),
+        .pfail(1'b0),
+        .ps_clk(),
+        .ps_cs_l(),
+        .ps_d(ps_d),
+        .tp()
+`else
         .tn_rd(tn_rd),
         .tn_wr(tn_wr),
         .tn_addr(tn_addr),
@@ -283,7 +314,11 @@ module difnif72_t;
         .tn_int(tn_int),
         .tn_clk(tn_clk),
         .tn30(1'b0)
+`endif
     );
+`ifndef DIFNIF_P3
+    assign f_data_dir_hi = 1'b0;
+`endif
 
 `ifdef DIFNIF_CPU
     // ------------------------------------------------------------------
@@ -526,9 +561,14 @@ module difnif72_t;
                 // so anything else the card drives there fights that copy.
                 // (Status that changes during the read, finding 11, is
                 // reported by the T20 check below instead.)
-                if (!card16 && b_dir === 1'b1 && early === raw && raw[15:8] !== raw[7:0])
+                if (BOARD != 3 && !card16 && b_dir === 1'b1 && early === raw && raw[15:8] !== raw[7:0])
                     fail($sformatf("8-bit read of %h: card drives %h on D8-D15, not a copy of D0-D7 (%h)",
                                    addr, raw[15:8], raw[7:0]));
+                // Rev P3: U7 stays off on 8-bit reads, leaving D8-D15 to the planar
+                if (BOARD == 3 && !card16 && b_dir_hi === 1'b1)
+                    fail($sformatf("8-bit read of %h: U7 drives D8-D15", addr));
+                if (BOARD == 3 && card16 && (word || addr[0]) && b_dir_hi !== 1'b1)
+                    fail($sformatf("16-bit read of %h: U7 not driving D8-D15", addr));
                 if (card16 && word) rdata = raw;
                 else if (card16 && addr[0]) rdata = {8'h00, raw[15:8]};
                 else rdata = {8'h00, raw[7:0]};
@@ -536,7 +576,7 @@ module difnif72_t;
                     spec($sformatf("read of %h not valid %0.0f ns after -CMD (T20): %h then %h",
                                    addr, T_RD, early, raw));
                 wait_until(t_rise + T_RD_OFF);
-                if (b_dir === 1'b1)
+                if (b_dir === 1'b1 || b_dir_u === 1'b1)
                     spec($sformatf("card still driving data %0.0f ns after -CMD rose (T22)", T_RD_OFF));
             end
         end
@@ -1821,6 +1861,39 @@ module difnif72_t;
         end
     endtask
 
+`ifdef DIFNIF_P3
+    // Rev P3: the RP2040 borrows the SD card (USB drive, PS/2 off) and gives
+    // it back. Meanwhile disk commands fail; afterwards the firmware has
+    // started the card again (the model is power-cycled, as the RP2040 would
+    // leave it re-initialised) and reads work.
+    task automatic test_p3_handover;
+        integer i;
+        begin
+            begin_test("P3: the card is let go when the RP2040 asks");
+            sd_req = 1'b1;
+            for (i = 0; i < 400 && sd_rel !== 1'b1; i = i + 1) #5000;
+            if (sd_rel !== 1'b1) fail("sd_rel not raised within 2 ms");
+            end_test;
+            begin_test("P3: a read while the card is lent fails");
+            cblk[0] = 16'h4601;
+            cblk[1] = 1;
+            cblk[2] = 16;
+            cblk[3] = 16'h0000;
+            esdi_command(8'h00, 4);
+            esdi_complete(8'h00, 8'h0C, 7, "read while lent");
+            end_test;
+            card.power_cycle;
+            begin_test("P3: the card is taken back when the RP2040 lets go");
+            sd_req = 1'b0;
+            for (i = 0; i < 400 && sd_rel !== 1'b0; i = i + 1) #5000;
+            if (sd_rel !== 1'b0) fail("sd_rel still high 2 ms after the request ended");
+            end_test;
+            #20000000;                  // the card started again, disk0.img found
+            test_cpu_rw(0, 16, 8, "P3: a read after the card came back from USB");
+        end
+    endtask
+`endif
+
     task automatic test_cpu_range;
         begin
             begin_test("read past the end of the image: command failed, RBA out of range");
@@ -1913,7 +1986,7 @@ module difnif72_t;
 
         $display("difnif72_t: CYCLE=%0d ns, %0s timing, board %0s, POS %0s, seed %0d",
                  CYCLE, WORST ? "Figure 2-34 limit" : "typical 50Z",
-                 BOARD == 2 ? "Rev P2" : BOARD == 1 ? "Rev P1 with U8 14/15 bridged" : "Rev P1 as built",
+                 BOARD == 3 ? "Rev P3" : BOARD == 2 ? "Rev P2" : BOARD == 1 ? "Rev P1 with U8 14/15 bridged" : "Rev P1 as built",
 `ifdef MCA_USE_POS
                  "enabled",
 `else
@@ -1945,6 +2018,9 @@ module difnif72_t;
         test_cpu_rw(0, 2040, 8, "read the last 8 sectors after the reset");
         test_cpu_readahead;
         test_cpu_release;
+`ifdef DIFNIF_P3
+        test_p3_handover;
+`endif
         // The card taken out and put back while the board stays powered (on
         // the bench the Teensy's USB keeps it running): the firmware has to
         // notice and start the card again

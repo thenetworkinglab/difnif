@@ -45,6 +45,13 @@ module soc #(
     output reg         uart_tx = 1'b1,
     input  wire        uart_rx,
     output reg  [1:0]  leds = 2'b00,
+    // Rev P3's USB chip (RP2040): it asks for the SD card (sd_req) and is
+    // told it's been let go (sd_rel); pfail: the PS/2's 5 V is failing.
+    // Register 0x1000_0310: read bit 0 sd_req, bit 1 pfail, bit 2 sd_rel;
+    // write bit 2 sd_rel. Unused (tied low) on Rev P2.
+    input  wire        sd_req,
+    input  wire        pfail,
+    output reg         sd_rel = 1'b0,
 
     // SD card
     output wire        sd_clk,
@@ -413,6 +420,12 @@ module soc #(
     reg [7:0]  tx_div = 8'd0;
     wire       tx_ready = tx_bits == 4'd0;
 
+    reg [1:0]  s_req = 2'b00, s_pfail = 2'b00;   // from the RP2040, synchronized
+    always @(posedge clk) begin
+        s_req <= {s_req[0], sd_req};
+        s_pfail <= {s_pfail[0], pfail};
+    end
+
     reg [1:0]  rx_s = 2'b11;
     reg [7:0]  rx_div = 8'd0;
     reg [3:0]  rx_bits = 4'd0;
@@ -482,6 +495,8 @@ module soc #(
     always @(posedge clk) begin
         if (rst) leds <= 2'b00;
         else if (wr && is_misc && rn == 4'd1) leds <= mem_wdata[1:0];
+        if (rst) sd_rel <= 1'b0;
+        else if (wr && is_misc && rn == 4'd4) sd_rel <= mem_wdata[2];
     end
 
     // ------------------------------------------------------------------
@@ -515,6 +530,7 @@ module soc #(
                         4'd1: per_rdata <= {30'd0, leds};
                         4'd2: per_rdata <= us;
                         4'd3: per_rdata <= {22'd0, rx_have, tx_ready, rx_byte};
+                        4'd4: per_rdata <= {29'd0, sd_rel, s_pfail[1], s_req[1]};
                         default: per_rdata <= 32'd0;
                     endcase
                 end else per_rdata <= 32'd0;   // cbuf comes from block RAM below

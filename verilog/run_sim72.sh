@@ -34,7 +34,11 @@ machine() {
 # ./run_sim72.sh cpu: the processor build (make CPU=1) on the Rev P2 board
 # with POS on: the firmware (../fw) against the SD card model, at typical
 # and limit timing for each machine. Needs the RISC-V compiler.
-if [ "${1:-}" = "cpu" ]; then
+# ./run_sim72.sh p3: the same for Rev P3 (make BOARD=p3): U7 on its own
+# direction line (BOARD=3), the RP2040's serial lines in the Teensy's place.
+if [ "${1:-}" = "cpu" ] || [ "${1:-}" = "p3" ]; then
+    XDEF=""; BRD=2
+    if [ "$1" = "p3" ]; then XDEF="-DDIFNIF_P3"; BRD=3; fi
     make -s -C ../fw || exit 1
     DEFS=$(python3 mksdimg.py "$TMP/sdimg.hex")
     cp fw.hex "$TMP/"
@@ -42,9 +46,9 @@ if [ "${1:-}" = "cpu" ]; then
     for cycle in 300 250 200; do
       for run in "0 1" "1 4" "1 7"; do
         set -- $run
-        iverilog -g2012 -DMCA_USE_POS -DDIFNIF_CPU $DEFS -DSDIMG="\"$TMP/sdimg.hex\"" \
+        iverilog -g2012 -DMCA_USE_POS -DDIFNIF_CPU $XDEF $DEFS -DSDIMG="\"$TMP/sdimg.hex\"" \
             -o "$TMP/sim" -s difnif72_t \
-            -Pdifnif72_t.CYCLE=$cycle -Pdifnif72_t.WORST=$1 -Pdifnif72_t.BOARD=2 -Pdifnif72_t.SEED=$2 \
+            -Pdifnif72_t.CYCLE=$cycle -Pdifnif72_t.WORST=$1 -Pdifnif72_t.BOARD=$BRD -Pdifnif72_t.SEED=$2 \
             $SRC soc.v picorv32.v sdhost.v sdbridge.v sdcard_model.v 2>/dev/null || {
               echo "compile failed"; exit 1; }
         (cd "$TMP" && vvp -n sim) > "$TMP/log" 2>&1

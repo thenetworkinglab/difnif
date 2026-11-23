@@ -152,7 +152,7 @@ static int      x_resume;
 // current read once its blocks are through; ra_active: between commands,
 // the card is held with image block ra_next ready. A read of exactly that
 // block resumes it with a bridge restart and no card command, which saves
-// the card's access time (about 180 us on Tim's card). Anything else
+// the card's access time (about 180 us on the test card). Anything else
 // (another read, a write, a reset) ends it first with CMD12.
 static int      ra_held, ra_active;
 static uint32_t ra_next;
@@ -357,6 +357,30 @@ static void fail_range(void)
     sb_dev_error = 0;
 }
 
+// Rev P3's SD card handover. The RP2040 asks for the card (to show it as a
+// USB drive, which it only does while the PS/2 is off); once no transfer is
+// running, the firmware lets go of it and says so. When the RP2040 gives it
+// back, the card may have been changed in any way: start it again and find
+// disk0.img again. While it's lent out, disk commands fail (not ready).
+static int card_lent;
+
+static void card_handover(void)
+{
+    uint32_t io = P3_IO;
+    if (!card_lent && (io & P3_SD_REQ) && state == TS_IDLE) {
+        ra_cancel();
+        card_lent = 1;
+        P3_IO = P3_SD_REL;
+        puts_("SD card lent to USB\n");
+    } else if (card_lent && !(io & P3_SD_REQ)) {
+        P3_IO = 0;
+        card_lent = 0;
+        puts_("SD card back from USB\n");
+        set_disk(card_restart());
+        logline("drive blocks ", disk_size);
+    }
+}
+
 static void start_disk(int write)
 {
     x_t0 = MICROS;
@@ -374,6 +398,14 @@ static void start_disk(int write)
     if (out_of_range(x_first, x_count)) {
         logline(write ? "W out of range " : "R out of range ", x_first);
         fail_range();
+        return;
+    }
+    if (card_lent) {                   // lent to USB: not ready
+        logline(write ? "W while lent to USB " : "R while lent to USB ", x_first);
+        current_rba = x_first;
+        sb_dev_error = write ? DEV_ERR_WRITE : DEV_ERR_READ;
+        finish(ISR_FAILED);
+        sb_dev_error = 0;
         return;
     }
     // The next sequential read, with the card held there and enough left in
@@ -772,6 +804,7 @@ static void eoi(uint16_t f)
 
 void esdi_run(uint32_t blocks)
 {
+    int pfail_seen = 0;
     int hard_reset = 0, reset_pending = 0;
     uint16_t f;
     uint8_t atn;
@@ -786,6 +819,13 @@ void esdi_run(uint32_t blocks)
 
     for (;;) {
         uart_poll();
+        card_handover();
+        if ((P3_IO & P3_PFAIL) && !pfail_seen) {
+            pfail_seen = 1;
+            puts_("PS/2 power failing\n");
+        } else if (!(P3_IO & P3_PFAIL)) {
+            pfail_seen = 0;
+        }
         if (UART_STAT & UART_RXHAVE) {     // a key from the serial monitor
             uint8_t k = (uint8_t)UART;
             // The Arduino serial monitor sends a line with its line ending:

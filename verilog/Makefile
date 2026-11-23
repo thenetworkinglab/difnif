@@ -14,12 +14,18 @@ DEVICE = hx8k
 #   make                    ThinkPad 700C board (POS registers bypassed)
 #   make BOARD=ps2          72-pin board (pcb_formfactor) for PS/2 desktops such as
 #                           the 50Z, 55SX and 70 (POS registers on)
+#   make BOARD=p3           Rev P3 (docs/rev-p3-spec.md): FPGA-only, no Teensy, so
+#                           always the processor build; its own pins (difnif_p3.pcf)
 # Use the same BOARD for "make prog". Each board builds into its own folder.
 BOARD = thinkpad
 ifeq ($(BOARD),ps2)
 DEFINES = -DMCA_USE_POS
+else ifeq ($(BOARD),p3)
+DEFINES = -DMCA_USE_POS -DDIFNIF_P3
+PIN_DEF = difnif_p3.pcf
+override CPU = 1
 else ifneq ($(BOARD),thinkpad)
-$(error BOARD must be thinkpad or ps2)
+$(error BOARD must be thinkpad, ps2 or p3)
 endif
 # make PROBES=1 also copies bus signals onto the SD card pins for a scope
 # (see the end of mcabus.v), building into build/<board>-probes. Not for releases.
@@ -44,7 +50,7 @@ PNR_SEED ?= 7
 PNR_FLAGS += --seed $(PNR_SEED)
 SOURCES += soc.v picorv32.v sdhost.v sdbridge.v
 INCLUDES += fw.hex
-ODIR = build/$(BOARD)-cpu$(if $(filter 1,$(PROBES)),-probes,)
+ODIR = build/$(BOARD)$(if $(filter p3,$(BOARD)),,-cpu)$(if $(filter 1,$(PROBES)),-probes,)
 endif
 DEPS = $(addprefix $(ODIR)/,$(addsuffix .d,$(IMAGES)))
 
