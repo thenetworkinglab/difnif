@@ -355,7 +355,15 @@ us faster at every size, so they're DiskMeter's own artifact:
 | 64 KB | 2.01 / 2.99 | 1.99 / 2.95 | 1.82 / 2.51 |
 
 So the firmware's default is 6 us whatever POS 4 says (`p` cycles 6 us,
-POS 4, at once, 3 us). Still to check with it: OS/2 on the 70, and the 55SX. The Teensy build is unchanged
+POS 4, at once, 3 us).
+
+OS/2 1.1 on the 70 with 6 us (22 November): boots (twice, and cold with
+the serial lead in and out), from a 19-piece image too. A floppy FORMAT
+while a copy loop kept the DifNif busy failed twice at 84 and 95 percent
+with the drive recalibrating, but then passed with no copy loop, with
+release at once, with 3 us, and three times with 6 us: a freshly recapped
+drive writing old disks for the first time, most likely, not the bus.
+Still to check: the 55SX. The Teensy build is unchanged
 (bit-identical to v2026.11.21-1).
 
 ### Fragmented images
