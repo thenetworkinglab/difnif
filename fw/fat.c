@@ -2,10 +2,11 @@
 //
 // The card holds one FAT32 or exFAT filesystem, either on the whole card or
 // in its first partition, with disk0.img in the root directory, as for the
-// Teensy firmware. The image must be contiguous (one run of clusters), which
-// it is when it's the first large file written to a freshly formatted card,
-// as with dd. Then drive block N is card block img_lba + N, and nothing
-// about the filesystem is needed again.
+// Teensy firmware. The image may be in up to IMG_RUNS pieces: copied onto a
+// fresh card by a Mac it was in 15, threaded between the small files macOS
+// writes there first. Start-up follows its cluster chain once and keeps each
+// run of consecutive clusters; after that nothing about the filesystem is
+// needed again, and img_map() turns a drive block into a card block.
 //
 // This file is part of a fork of DifNif; CERN-OHL-S-2.0.
 
@@ -13,6 +14,9 @@
 
 uint32_t img_lba;
 uint32_t img_blocks;
+uint32_t img_runs;
+static uint32_t run_end[IMG_RUNS];    // drive block just past each run
+static uint32_t run_base[IMG_RUNS];   // card block = run_base + drive block
 
 static uint32_t fat_lba;      // first block of the FAT
 static uint32_t heap_lba;     // block of cluster 2
@@ -55,17 +59,36 @@ static int log2_(uint32_t v)
     return n;
 }
 
-// Checks that clusters first .. first + n - 1 follow each other in the FAT
-static int contiguous(uint32_t first, uint32_t n)
+// The card block for drive block rba, and how many blocks from there are
+// consecutive on the card (to the end of its run)
+uint32_t img_map(uint32_t rba, uint32_t *left)
 {
-    uint32_t c = first, next;
-    while (--n) {
+    uint32_t i = 0;
+    while (i + 1 < img_runs && rba >= run_end[i]) i++;
+    *left = run_end[i] - rba;
+    return run_base[i] + rba;
+}
+
+// Follows the image's n clusters from first and records its runs of
+// consecutive clusters. 1 if the FAT can't be read, the chain isn't n
+// clusters long, or there are more than IMG_RUNS runs.
+static int find_runs(uint32_t first, uint32_t n)
+{
+    uint32_t c = first, prev = 0, next, k;
+
+    img_runs = 0;
+    for (k = 0; k < n; k++) {
+        if (k == 0 || c != prev + 1) {                 // a new run starts here
+            if (img_runs == IMG_RUNS) return 1;
+            run_base[img_runs++] = clus_lba(c) - (k << spc_shift);
+        }
+        run_end[img_runs - 1] = (k + 1) << spc_shift;
         if (fat_entry(c, &next)) return 1;
-        if (next != c + 1) return 1;
+        if (k + 1 < n ? (is_end(next) || next < 2) : !is_end(next)) return 1;
+        prev = c;
         c = next;
     }
-    if (fat_entry(c, &next)) return 1;
-    return !is_end(next);
+    return 0;
 }
 
 static int lower(int ch)
@@ -172,9 +195,16 @@ int find_image(void)
     if (search_root(root, &first, &bytes, &nochain)) return 6;
     img_lba = clus_lba(first);
     img_blocks = bytes >> 9;
-    if (!nochain) {
+    {
         uint32_t cbytes = 512u << spc_shift;
-        if (contiguous(first, (bytes + cbytes - 1) >> (9 + spc_shift))) return 7;
+        uint32_t n = (bytes + cbytes - 1) >> (9 + spc_shift);
+        if (nochain) {                         // exFAT's NoFatChain: one run
+            img_runs = 1;
+            run_base[0] = img_lba;
+            run_end[0] = n << spc_shift;
+        } else if (find_runs(first, n)) {
+            return 7;
+        }
     }
     return 0;
 }

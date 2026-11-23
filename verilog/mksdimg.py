@@ -2,8 +2,12 @@
 """
 Builds a small SD card image for soc_t.v: a 600 MB card with a
 partition table, a FAT32 filesystem with 4 KB clusters, and disk0.img (1 MB
-of random data, contiguous) in its root
-directory, as $readmemh bytes for sdcard_model.v. Only the blocks in use are
+of random data) in its root directory, as $readmemh bytes for
+sdcard_model.v. The image is in 4 runs of clusters, with a cluster of other
+data between them, as a Mac leaves an image copied onto a fresh card: the
+firmware has to follow them (fat.c), and a block mapped wrongly reads junk.
+The runs start at drive blocks 0 and SPLITS, which some of difnif72_t.v's
+transfers cross. Only the blocks in use are
 written; the card model reports CARD_BLOCKS and reads the rest as 0.
 
   mksdimg.py OUT.hex [exfat]      (exFAT: not yet)
@@ -17,6 +21,7 @@ import os, random, struct, sys
 CARD_BLOCKS = 1228800         # 600 MB
 PART = 2048
 IMG_CLUSTERS = 256            # 1 MB with 4 KB clusters
+SPLITS = (304, 320, 408)      # drive blocks where a new run starts (cluster multiples)
 random.seed(1)
 
 blocks = {}                   # block number -> 512 bytes
@@ -64,11 +69,22 @@ heap = fat_lba + NFATS * fatsz
 def clus_lba(c):
     return heap + (c - 2) * SPC
 
-# FAT: root directory in cluster 2, disk0.img in 3 .. 3 + IMG_CLUSTERS - 1
-fat = [0x0FFFFFF8, 0x0FFFFFFF, 0x0FFFFFFF]
+# FAT: root directory in cluster 2, disk0.img from cluster 3, with one
+# cluster of something else before each of its runs after the first
 first = 3
-for c in range(first, first + IMG_CLUSTERS):
-    fat.append(c + 1 if c < first + IMG_CLUSTERS - 1 else 0x0FFFFFFF)
+img_clus = []                 # card cluster of each of the image's clusters
+c = first
+for k in range(IMG_CLUSTERS):
+    if k * SPC in SPLITS:
+        c += 1                # skip a cluster: another file's
+    img_clus.append(c)
+    c += 1
+gaps = [c for c in range(first, img_clus[-1]) if c not in img_clus]
+fat = [0x0FFFFFF8, 0x0FFFFFFF, 0x0FFFFFFF] + [0] * (img_clus[-1] + 1 - 3)
+for k, c in enumerate(img_clus):
+    fat[c] = img_clus[k + 1] if k + 1 < IMG_CLUSTERS else 0x0FFFFFFF
+for c in gaps:
+    fat[c] = 0x0FFFFFFF       # a one-cluster file of its own
 fatbytes = b''.join(struct.pack('<I', e) for e in fat)
 for copy in range(NFATS):
     for i in range(0, len(fatbytes), 512):
@@ -92,13 +108,19 @@ root = (dirent(b'DIFNIF     ', 0x08, 0, 0) +
 put(clus_lba(2), root)
 
 img_lba = clus_lba(first)
-for b in range(IMG_CLUSTERS * SPC):  # noqa
-    put(img_lba + b, bytes(random.getrandbits(8) for _ in range(512)))
+for k, c in enumerate(img_clus):
+    for b in range(SPC):
+        put(clus_lba(c) + b, bytes(random.getrandbits(8) for _ in range(512)))
+for c in gaps:                # junk the firmware mustn't hand over
+    for b in range(SPC):
+        put(clus_lba(c) + b, bytes([0xA5, c & 0xFF]) * 256)
 
 with open(sys.argv[1], 'w') as f:
     for lba in sorted(blocks):
         f.write('@%x\n' % (lba * 512))
         f.write('\n'.join('%02x' % x for x in blocks[lba]))
         f.write('\n')
-print('-DIMG_LBA=%d -DIMG_BLOCKS=%d -DMEM_BLOCKS=%d -DCARD_BLOCKS=%d' %
-      (img_lba, IMG_CLUSTERS * SPC, max(blocks) + 1, CARD_BLOCKS))
+# IMG_GAP and IMG_S1-3: difnif72_t.v's img_blk() maps a drive block the same way
+print('-DIMG_LBA=%d -DIMG_BLOCKS=%d -DMEM_BLOCKS=%d -DCARD_BLOCKS=%d -DIMG_GAP=%d '
+      '-DIMG_S1=%d -DIMG_S2=%d -DIMG_S3=%d' %
+      (img_lba, IMG_CLUSTERS * SPC, max(blocks) + 1, CARD_BLOCKS, SPC, *SPLITS))

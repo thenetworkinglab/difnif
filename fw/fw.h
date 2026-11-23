@@ -37,6 +37,9 @@ uint32_t cbuf_u32(int i);
 // fat.c: finding the disk image
 extern uint32_t img_lba;           // first card block of disk0.img
 extern uint32_t img_blocks;        // its length in blocks
+#define IMG_RUNS 32                // pieces of disk0.img the firmware can follow
+extern uint32_t img_runs;          // how many it's in
+uint32_t img_map(uint32_t rba, uint32_t *left);   // card block, and blocks to its run's end
 extern int img_exfat;              // on exFAT (1) or FAT32 (0)
 int find_image(void);              // 0 if found and contiguous, else a reason
 

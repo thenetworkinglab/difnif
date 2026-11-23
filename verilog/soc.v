@@ -34,7 +34,7 @@
 `default_nettype none
 
 module soc #(
-    parameter RAM_WORDS = 2560,          // 10 KB (20 block RAMs)
+    parameter RAM_WORDS = 3072,          // 12 KB (24 block RAMs)
     parameter FIRMWARE = "fw.hex",
     parameter BAUD_DIV = 50              // 50 MHz / 50 = 1 Mbaud
 ) (

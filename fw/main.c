@@ -42,9 +42,11 @@ void show_status(void)
         puts_(sd_high_capacity ? "SD card ready (high capacity)\n" : "SD card ready\n");
         if (img_err) {
             logline("disk0.img not usable, reason ", img_err);
+            if (img_err == 7) puts_("  (in more than 32 pieces, or its FAT chain is wrong)\n");
         } else {
             puts_(img_exfat ? "exFAT, " : "FAT32, ");
             logline("disk0.img at block ", img_lba);
+            if (img_runs > 1) logline("  in pieces: ", img_runs);
             logline("blocks ", img_blocks);
         }
     }

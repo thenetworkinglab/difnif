@@ -403,7 +403,10 @@ module sdcard_model #(
                     end
                     6'd13: if (state >= S_STBY && a[31:16] == rca) r1(idx);
                     6'd16: if (state == S_TRAN) r1(idx);
-                    6'd17, 6'd18: if (state == S_TRAN) begin
+                    6'd17, 6'd18: if (state != S_TRAN) begin
+                        if ($test$plusargs("cardlog"))
+                            $display("%t SD card: CMD%0d ignored in state %0d", $realtime, idx, state);
+                    end else begin
                         if (a + (idx == 6'd18 ? 1 : 0) > CARD_BLOCKS - 1) begin
                             errbits = errbits | 32'h8000_0000;
                             r1(idx);
@@ -430,11 +433,15 @@ module sdcard_model #(
                             -> wr_ev;
                         end
                     end
-                    6'd12: if (state == S_DATA || state == S_RCV || state == S_PRG) begin
-                        rd_stop = 1;
-                        wr_stop = 1;
-                        r1(idx);
-                        // The write process holds DAT0 busy while it programs
+                    6'd12: begin
+                        if ($test$plusargs("cardlog"))
+                            $display("%t SD card: CMD12 in state %0d", $realtime, state);
+                        if (state == S_DATA || state == S_RCV || state == S_PRG) begin
+                            rd_stop = 1;
+                            wr_stop = 1;
+                            r1(idx);
+                            // The write process holds DAT0 busy while it programs
+                        end
                     end
                     default: errbits = errbits | 32'h0040_0000;
                 endcase

@@ -150,7 +150,7 @@ cases; they stay as a second line of defence.
 `verilog/soc.v` puts a PicoRV32 (RV32IC, from oss-cad-suite's examples;
 ISC licence) in the Teensy's place. Toward `mcabus.v` and the sector buffer
 it has the same ports as `teensy.v`, so the bus side is unchanged. Inside:
-10 KB of RAM loaded with the firmware at power-up, the Teensy's mailbox
+12 KB of RAM loaded with the firmware at power-up, the Teensy's mailbox
 registers (numbered as before, with the strobes `mcabus.v` expects),
 `sdhost` and the bridge, a 512-byte buffer for blocks the processor reads
 itself, a 1 Mbaud serial port for its log, a microsecond timer and the
@@ -167,10 +167,10 @@ clock enables took the last of the FPGA's 8 global buffers, and `ARB/-GNT`
 and `-TC`, which clock parts of `mcabus.v`, were left on ordinary routing.
 `tools/timing_budget.py --pos --cpu` checks the bus timing of this build:
 everything passes, the tightest being T54 (`-BURST` released after `-TC`)
-at 1.0 ns on stacked worst cases (0.8 ns in the normal build). T54 depends
-on placement: with the bus release time logic, about half of seeds 1-16
-fail by up to 0.7 ns, so the processor build uses seed 14 (`PNR_SEED` in the
-Makefile; it was 1, 3, 10 and 7 as the design changed). That's fragile: the -TC to -BURST
+at 1.8 ns on stacked worst cases (0.8 ns in the normal build). T54 depends
+on placement: with 12 KB of RAM, 4 of seeds 1-16 fail by up to 0.3 ns, so
+the processor build uses seed 7 (`PNR_SEED` in the Makefile; it has been 1,
+3, 10, 7 and 14 as the design changed). That's fragile: the -TC to -BURST
 path wants shortening before a release. Check it again
 after any change to the design. Shortening that path (the `-TC` latch next
 to the `-BURST` pin) would make it robust.
@@ -257,7 +257,7 @@ DMA runs at 0.54 us per word for 8 sectors at the Model 70's cycle, as
 with the Teensy build's burst DMA (0.57): the bus is still the limit.
 
 The normal build's matrix (`./run_sim72.sh quick`) is unchanged, and
-`tools/timing_budget.py --pos --cpu` passes (T54 1.0 ns on stacked worst
+`tools/timing_budget.py --pos --cpu` passes (T54 1.8 ns on stacked worst
 cases).
 
 On a P2 board on the bench (21 November) it started first time: card up
@@ -357,6 +357,33 @@ us faster at every size, so they're DiskMeter's own artifact:
 So the firmware's default is 6 us whatever POS 4 says (`p` cycles 6 us,
 POS 4, at once, 3 us). Still to check with it: OS/2 on the 70, and the 55SX. The Teensy build is unchanged
 (bit-identical to v2026.11.21-1).
+
+### Fragmented images
+
+Copied onto a freshly formatted 32 GB card by a Mac, Tim's OS/2 image came
+out in 15 runs of clusters, threaded between the small files macOS writes
+there first (`.Spotlight-V100`, `.fseventsd`, `._disk0.img`), and the
+firmware, which wanted one run, refused it (reason 7). Deleting and copying
+it again made it worse; a dummy file to fill the gaps first got a
+contiguous copy. Now `fat.c` follows the cluster chain at start-up and keeps
+up to 32 runs (the summary says "in pieces: n"); `img_map()` turns a drive
+block into a card block, card commands stop at a run's end, and
+`disk_progress()` carries on at the next run (not a retry, nothing logged).
+Read-ahead only holds the card within a run.
+
+`mksdimg.py` now builds the simulated card's image in 4 runs, with a
+cluster of junk between them, at drive blocks some of the bus tests cross.
+That found a real bug: when a run ended with both sector buffer halves
+full, the next CMD18 went out at once, and the card started sending its
+first block during the command's response (the SD clock has to run for
+it), with no free half: the block was counted but dropped, and the host
+came up a sector short. The same could happen after a CRC retry. A read's
+next card command now waits for a free half (`x_resume`), from the main
+loop so a reset meanwhile is still seen.
+
+The processor's RAM is now 12 KB (24 block RAMs, 31 of 32 in use): the
+firmware had reached 10 KB again. `link.ld` asks for 768 bytes of stack;
+the deepest call chain needs about 450 (gcc's `-fstack-usage`).
 
 ## Next
 

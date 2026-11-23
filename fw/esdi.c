@@ -31,6 +31,7 @@
 #define F_TREQ_STATE   (1u << 8)
 #define F_CLEAR_ALL    (1u << 10)
 #define F_BUF_MODE     (1u << 11)
+#define F_BUF_READY    (1u << 13)   // read: a sector buffer half is free for the card
 #define F_BUF_IDLE     (1u << 15)
 #define F_STORED       (F_CMD_PROG | F_CLEAR_ALL | F_BUF_MODE)
 
@@ -137,6 +138,13 @@ static int      state = TS_IDLE;
 static uint32_t x_first, x_count;    // drive blocks
 static int      x_stopped;           // the card's transfer ended (CMD12 sent)
 static int      x_retries;
+static uint32_t x_cmd_n;             // the card command's block count (to its run's end)
+// A read's next card command (the next run of the image, or a retry) waits
+// for a free sector buffer half: the SD clock has to run for the command
+// and its response, and the card starts sending meanwhile. With both halves
+// full that block was counted but dropped, and the host came up a sector
+// short (found in simulation with a fragmented image).
+static int      x_resume;
 
 // Read-ahead. A read's card command (CMD18) runs on to the end of the image;
 // the bridge holds the card after the command's blocks (its read limit), so
@@ -282,10 +290,11 @@ static void abort_transfer(void)
         sd_stop(1);                    // reads are always CMD18
         buf_end();
     } else if (state == TS_WRITE) {
-        sd_stop(x_count > 1 && !x_stopped);
+        sd_stop(x_cmd_n > 1 && !x_stopped);
         buf_end();
     }
     ra_held = 0;
+    x_resume = 0;
     if (state != TS_READ) ra_cancel();
     ra_active = 0;
     state = TS_IDLE;
@@ -301,11 +310,18 @@ static int out_of_range(uint32_t rba, uint32_t n)
 // again (and find disk0.img again) and try once more. 0 when started.
 // A read asks the card for everything to the end of the image (sdhost
 // counts at most 0xFFFF): see read-ahead above
+// Both stop at the end of the image's run (fat.c): disk_progress() then
+// carries on from the next one.
+
 static int card_cmd(int write, uint32_t rba, uint32_t n)
 {
-    uint32_t to_end = disk_size - rba;
-    if (write) return sd_start_write(img_lba + rba, n);
-    return sd_start_read(img_lba + rba, to_end > 0xFFFF ? 0xFFFF : to_end);
+    uint32_t left, lba = img_map(rba, &left);
+    if (write) {
+        x_cmd_n = n < left ? n : left;
+        return sd_start_write(lba, x_cmd_n);
+    }
+    x_cmd_n = left > 0xFFFF ? 0xFFFF : left;
+    return sd_start_read(lba, x_cmd_n);
 }
 
 static int card_start(int write, uint32_t rba, uint32_t n)
@@ -353,6 +369,7 @@ static void start_disk(int write)
     x_count = cmd_block[1];
     x_stopped = 0;
     x_retries = 0;
+    x_resume = 0;
     ra_held = 0;
     if (out_of_range(x_first, x_count)) {
         logline(write ? "W out of range " : "R out of range ", x_first);
@@ -385,7 +402,7 @@ static void retry(int write)
 {
     uint32_t done = BR_STATUS & 0xFFFF;
     uint32_t left = x_count - done;
-    sd_stop(write ? x_count > 1 : 1);
+    sd_stop(write ? x_cmd_n > 1 : 1);
     logline(write ? "W retry at " : "R retry at ", x_first + done);
     current_rba = x_first + done;
     if (++x_retries > 3) {
@@ -393,7 +410,27 @@ static void retry(int write)
         return;
     }
     BR_CTRL = (write ? BRC_WRITE : 0) | BRC_CLRFAIL;
+    if (!write) {
+        x_resume = 1;
+        return;
+    }
     if (card_start(write, x_first + done, left)) fail_card(write);
+}
+
+// The image's run ended mid-transfer: end that card command and start one
+// at the next run, from where the bridge has got to (not a retry)
+static void next_run(int write)
+{
+    uint32_t done = BR_STATUS & 0xFFFF;
+    sd_stop(write ? x_cmd_n > 1 : 1);
+    if (!write) {
+        x_resume = 1;                  // disk_progress() starts it when there's room
+        return;
+    }
+    if (card_start(write, x_first + done, x_count - done)) {
+        current_rba = x_first + done;
+        fail_card(write);
+    }
 }
 
 static void disk_progress(uint16_t f)
@@ -401,6 +438,17 @@ static void disk_progress(uint16_t f)
     int write = (state == TS_WRITE);
     uint32_t br = BR_STATUS;
 
+    if (x_resume) {
+        uint32_t done;
+        if (!(flags_read() & F_BUF_READY)) return;
+        x_resume = 0;
+        done = BR_STATUS & 0xFFFF;
+        if (card_start(0, x_first + done, x_count - done)) {
+            current_rba = x_first + done;
+            fail_card(0);
+        }
+        return;
+    }
     if (trace) {
         if (!x_t_card && (br & 0xFFFF)) x_t_card = MICROS - x_t0;
         if (!x_t_host && (BR_CK_COUNT >> 16)) x_t_host = MICROS - x_t0;
@@ -422,7 +470,12 @@ static void disk_progress(uint16_t f)
     // so a last block finishing just then isn't taken for a short one.
     if (!x_stopped && (br & 0xFFFF) < x_count && !sd_data_busy()
         && (BR_STATUS & 0xFFFF) < x_count) {
-        retry(write);
+        // The card command's count ran out at the end of a run of the image,
+        // with no error: carry on from the next run. Otherwise it failed.
+        if ((sd_status >> 16) == 0 && !(sd_status & (SDS_CMD_ERRS | SDS_DATA_ERRS)))
+            next_run(write);
+        else
+            retry(write);
         return;
     }
     if (!x_stopped && (br & 0xFFFF) == x_count) {
@@ -430,7 +483,7 @@ static void disk_progress(uint16_t f)
             // Every block is through: end the card's transfer. CMD12's busy
             // (or a single block's) means it's programmed.
             if (!sd_data_busy()) {
-                if (x_count > 1) sd_stop(1);
+                if (x_cmd_n > 1) sd_stop(1);
                 x_stopped = 1;
             }
         } else {

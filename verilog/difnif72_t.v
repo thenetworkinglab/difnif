@@ -1708,8 +1708,14 @@ module difnif72_t;
         end
     endtask
 
+    // The card block of drive block rba: mksdimg.py puts disk0.img in runs,
+    // with a cluster of something else before each run after the first
+    function integer img_blk(input integer rba);
+        img_blk = `IMG_LBA + rba + `IMG_GAP * ((rba >= `IMG_S1) + (rba >= `IMG_S2) + (rba >= `IMG_S3));
+    endfunction
+
     function [15:0] img_word(input integer rba, input integer w);
-        img_word = {card.mem[(`IMG_LBA + rba) * 512 + 2 * w + 1], card.mem[(`IMG_LBA + rba) * 512 + 2 * w]};
+        img_word = {card.mem[img_blk(rba) * 512 + 2 * w + 1], card.mem[img_blk(rba) * 512 + 2 * w]};
     endfunction
 
     task automatic test_cpu_reset(input string name, input is_soft);

@@ -20,7 +20,7 @@ CFLAGS += -DTRACE_AT_START=$(TRACE)
 CFLAGS += $(EXTRA)
 LDFLAGS = -Wl,-T,link.ld -Wl,--gc-sections -Wl,--no-warn-rwx-segments -nostartfiles -lgcc
 SRCS = start.S main.c uart.c sd.c fat.c esdi.c
-RAM_WORDS = 2560
+RAM_WORDS = 3072
 
 all: ../verilog/fw.hex
 
