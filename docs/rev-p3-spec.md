@@ -113,20 +113,56 @@ in parts, but it's firmware to maintain; decide before the schematic.
 | LEDs (activity, status; Rev P2 has two) | 0 |
 | Test points on spare pins | -4 |
 | **Left** | **27** |
+| QSPI PSRAM, if option A below | -6 (leaving 21) |
 
 ## Open questions
 
 - **FT2232H or RP2040** for USB (above).
-- **Processor RAM:** the processor build already uses 31 of the iCE40's 32
-  block RAMs (12 KB of RAM for the firmware). An iCE40HX8K in a larger
-  package has more pins but the same 32 block RAMs; the iCE40UP5K has
-  128 KB of extra RAM but too few pins (39). If the firmware outgrows 12 KB,
-  the options are a smaller sector buffer path, running code from the SPI
-  flash, or an external SPI RAM.
+- **Processor RAM:** see "FPGA and RAM" below.
 - **USB-C position:** reachable with the board in its sled in each machine
   (the 55SX's drive bay and the Model 70's riser), or only on the bench?
 - **SD extension cable:** which cable, and is a sampling margin check on
   the bench enough, or a test in each machine?
+
+## FPGA and RAM
+
+The processor build already uses 31 of the iCE40's 32 block RAMs, 12 KB of
+them for the firmware, so a P3 with more firmware features needs more RAM.
+Other iCE40s don't help: an iCE40HX8K in a larger package has more pins but
+the same 32 block RAMs, and the iCE40UP5K has 128 KB of extra RAM but only
+39 pins. The board will be assembled by a service either way, so package
+(QFP or BGA) isn't a constraint. Two options:
+
+**A. Keep the iCE40, add a QSPI PSRAM.** An APS6404L-3SQR-SN (8 MB, SOP-8,
+about $2-3) on four FPGA pins plus clock and chip select (6 pins, within
+the budget above). The processor runs from the block RAM as now and uses
+the PSRAM through a small cache, or for data only (larger buffers, a FAT
+cache, a log). Everything else stays as it is: board, FPGA, timing work.
+Costs some logic cells for the PSRAM controller and cache; 2700 are free.
+
+**B. Move to a Lattice ECP5** (LFE5U-25F, caBGA-256, 0.8 mm pitch):
+
+- About 126 KB of block RAM (8 times the iCE40's), 24K logic cells and 197
+  I/O pins, so RAM, logic and pins all stop being limits.
+- The same open-source tools (yosys, nextpnr-ecp5, prjtrellis), so the
+  Verilog, simulations and `timing_budget.py`/`sdfpath.py` carry over; the
+  iCE40 primitives (`SB_IO` for the pads, `SB_PLL40_PAD`) change to the
+  ECP5's. Programmed through the FT2232H by `openFPGALoader` or `ecpprog`.
+- The board needs a 1.1 V core supply and 2.5 V auxiliary supply as well as
+  3.3 V, and the BGA probably needs a 4-layer board.
+- Price (November 2026, quantity 1): about $16-21 at Western distributors
+  against about $10 for the iCE40HX4K-TQ144 at Digi-Key, so about $6-12
+  more per board, plus a regulator and the extra layers; LCSC lists the
+  ECP5 at about $5.50, so through an assembly service that buys from LCSC
+  it may cost no more than the iCE40.
+
+Intel's MAX 10 (EQFP-144, configuration flash on-chip) and AMD's Spartan-7
+also have more RAM, but their tools (Quartus, Vivado) don't run on macOS
+and nothing of the timing tooling would carry over.
+
+Recommendation: B for a new board, since it removes every resource limit
+for little cost and keeps the toolchain; A if the board stays close to
+Rev P2.
 
 ## Checking it before ordering
 
