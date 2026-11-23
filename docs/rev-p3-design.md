@@ -4,8 +4,9 @@ The detailed design behind [rev-p3-spec.md](rev-p3-spec.md): which FPGA and
 RP2040 pins do what, the new circuit blocks, and how the FPGA design and
 firmware support them. Status: the FPGA side is done and simulated (`make
 BOARD=p3`, `./run_sim72.sh p3`); the schematic is drawn and checked
-against this document (`pcb_p3/`, see [Schematic](#schematic)); there's no
-layout yet.
+against this document (`pcb_p3/`, see [Schematic](#schematic)); the board
+has every part placed and Rev P2's routing kept, and the new routing is
+being done by hand.
 
 ## Block diagram
 
@@ -187,10 +188,19 @@ BOOTSEL button, LED, 4 test pads, a 5-pin SWD header (not fitted), and
 32 resistors and capacitors (0603; one 4.7 µF 0805). New parts use KiCad's
 own footprint libraries.
 
-`DifNif.kicad_pcb` is Rev P2's board, copied as a starting point for the
-layout: the outline, card edge, holes and bus-side parts. Update it from
-the schematic (Tools > Update PCB from Schematic) to drop the Teensy and
-bring in the new parts.
+`DifNif.kicad_pcb` is made from Rev P2's board by `tools/p3_pcb.py` (run
+with KiCad's own Python), which does what "Update PCB from Schematic"
+would: it drops the Teensy and R23, adds the new parts with KiCad's
+footprints, and puts every pad on its Rev P3 net. Rev P2's tracks stay
+wherever their net is unchanged; the Teensy's nets and the split SD lines
+lose theirs, DATA_DIR keeps its routing except the stub to U7, and the
+Teensy's dead ends on GND and +5VD are trimmed. The new parts are placed
+(RP2040 and USB-C in the Teensy's space, USB-C on the outer edge above the
+microSD socket, the bus switches between the FPGA and the socket, the
+PSRAM beside bank 3), with no new routing. DRC then shows no clearance or
+courtyard errors and 149 unconnected items, and the board matches the
+schematic. Rerunning the script overwrites the board, so it's only for
+starting again before hand routing.
 
 ERC: the same findings as Rev P2 (its footprint libraries `Passive` and
 `Active` aren't in the repo, its library symbols differ from KiCad 9's,
