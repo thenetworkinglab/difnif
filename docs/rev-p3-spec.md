@@ -90,9 +90,11 @@ The card stays inside the machine; images are managed over USB.
 - **Ownership:** the FPGA has the card by default, to run the drive. The
   RP2040 takes it only when the PS/2 is off (it senses the PS/2's +5 V on a
   pin, through a resistor divider; the board then runs from USB power), or when the drive is idle and
-  the FPGA hands it over through a two-wire handshake. A computer writing
-  the image while the PS/2 is using it would corrupt it, so USB access while
-  the PS/2 is on is at most read-only, if allowed at all.
+  the FPGA hands it over through a two-wire handshake. **No USB access at
+  all while the PS/2 is on:** a computer writing (or even reading) the image
+  while the PS/2 is using it could corrupt it or read it half-written, and
+  that's too easy a mistake to make. The USB drive simply doesn't appear
+  until the PS/2 is switched off.
 - **The card as a USB drive:** the RP2040 presents the whole card (its
   FAT32 or exFAT filesystem) as USB mass storage, so a computer can copy,
   replace or back up disk0.img. USB full speed gives about 1 MB/s: a 150 MB
@@ -101,14 +103,13 @@ The card stays inside the machine; images are managed over USB.
   it, the handshake tells the FPGA, whose firmware finds disk0.img again
   (it may have moved, been replaced or be in new pieces) before it answers
   the PS/2. The firmware can already restart the card and search again.
-- **External port:** a USB-C extension cable (male to female, through a
-  slot cover or the back panel) brings the port outside the case, so images
-  can be swapped without opening the machine. USB full speed is fine over a
-  cable of a metre or two.
-- **Socket:** with USB access, a microSD socket (as on Rev P2) is enough and
-  the cheapest. A full-size socket's one advantage left would be its
-  write-protect switch (the firmware would make the drive read-only); an SD
-  extension cable is no longer needed.
+- **External port:** a USB-C extension cable can bring the port outside the
+  case, so images can be swapped without opening the machine; USB full speed
+  is fine over a cable of a metre or two. Which cable and bracket is left
+  for later.
+- **Socket:** a microSD socket, as on Rev P2: with USB access it's rarely
+  touched, and it's the smallest and cheapest. (A full-size socket would add
+  only a write-protect switch.) No SD extension cable is needed.
 - Keep the 4-bit wiring, pull-ups, and short traces; the bus switch adds a
   few ohms and well under a nanosecond. Check the read sampling margin
   (`sample_late`, docs/fpga-only.md) on the new board.
@@ -143,25 +144,18 @@ The card stays inside the machine; images are managed over USB.
 | Unused on Rev P2 | +11 |
 | USB-C UART (out, in) | -2 |
 | SD card handshake with the RP2040 (request, released) | -2 |
-| SD write-protect (full-size socket only) | -1 |
 | Power-fail | -1 |
 | U7 direction / enable | -1 |
 | LEDs (activity, status; Rev P2 has two) | 0 |
 | Test points on spare pins | -4 |
-| **Left** | **25** |
-| QSPI PSRAM, if option A below | -6 (leaving 19) |
+| **Left** | **26** |
+| QSPI PSRAM, if option A below | -6 (leaving 20) |
 
 ## Open questions
 
-- **USB access while the PS/2 is on:** none, or read-only when the drive is
-  idle? (Read-only still risks reading an image mid-write.)
-- **microSD or full-size socket:** microSD is cheaper; full-size adds the
-  write-protect switch.
 - **Processor RAM:** see "FPGA and RAM" below.
 - **USB-C position:** reachable with the board in its sled in each machine
   (the 55SX's drive bay and the Model 70's riser), or only on the bench?
-- **USB-C extension:** which cable and bracket, for the 55SX's and the
-  Model 70's cases.
 
 ## FPGA and RAM
 
@@ -202,7 +196,7 @@ and nothing of the timing tooling would carry over.
 
 Recommendation: neither, yet. The firmware fits in 12 KB today, and the P3
 additions hardly add to it (the RP2040 handles USB itself; LEDs,
-write-protect and power-fail are a few lines each). Keep the iCE40 and the
+power-fail and the card handshake are a few lines each). Keep the iCE40 and the
 2-layer board, and put option A's PSRAM footprint on the board unfitted:
 six pins and no cost until the firmware needs it. B is the fallback if RAM,
 logic or pins ever run out; it costs an extra regulator, probably two more
