@@ -23,7 +23,7 @@ void show_status(void)
     puthex(MBOX(MB_VER_DATE) & 0xFF, 2);
     putch('-');
     putdec(MBOX(MB_VER_COUNT));
-    putch('\n');
+    puts_(MBOX(MB_VARIANT) & 1 ? " (ps2)\n" : " (thinkpad)\n");
     {
         // As the BIOS set them (0 until POST has run: press Enter after boot)
         uint32_t p23 = MBOX(MB_POS23);

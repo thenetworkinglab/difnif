@@ -42,7 +42,7 @@ The boards share the FPGA design (`verilog/`) and the Teensy firmware
 | Machines | ThinkPad 700C | PS/2 desktops that take a 72-pin DBA-ESDI drive, such as the 50Z, 55SX and 70 |
 | Connector | 2 mm header, wired to the flex cable taken from a stock 700-series 2.5" drive | 72-pin (2 x 36) card edge, plugging straight into the drive socket |
 | Carrier | [mech/df9f_carrier.STL](mech/df9f_carrier.STL) | [mech/difnif_PS2_drive_sled.STL](mech/difnif_PS2_drive_sled.STL), replacing the IBM drive sled |
-| FPGA build | `make` | `make BOARD=ps2` |
+| FPGA build | `make` | `make BOARD=ps2`, or `make BOARD=ps2 CPU=1` with no Teensy |
 
 There are also debugging aids:
 
@@ -89,6 +89,15 @@ There are also debugging aids:
     can lose the last sector written before the PS/2 is switched off
     (finding 17).
   - **Not yet tested in a 50Z.**
+- **PS/2 desktop board, Rev P2, without a Teensy** (FPGA-only build
+  v2026.11.22-1): a RISC-V processor in the FPGA takes the Teensy's place,
+  with the SD card in the board's own socket, J3. It boots DOS 6.22 and
+  OS/2 1.1 in the Model 70 and DOS in the 55SX (on a second board with no
+  Teensy fitted), and passed the copy test in the 55SX. DiskMeter measures
+  3.2-3.6 MB/s in the Model 70 and 2.2-2.4 MB/s in the 55SX, faster than
+  the Teensy build, and in the Model 70 than an IDE adapter (McIDE, 2.5
+  MB/s). See [CHANGELOG.md](CHANGELOG.md) and
+  [docs/fpga-only.md](docs/fpga-only.md). Not yet tested in a 50Z.
 - Both boards' original design powers the 74LVC4245A level shifters the wrong
   way round, putting 5V on a supply pin rated for 4.6V at most. Rev P2 uses
   the TI SN74LVC8T245 instead, which accepts 5V on either side and fits the
@@ -183,6 +192,37 @@ The source files are:
 The self-checking bus simulation for the PS/2 board is `difnif72_t.v`, run with
 `./run_sim72.sh` (needs Icarus Verilog).
 
+### FPGA-only build (no Teensy)
+
+The same Rev P2 board runs without a Teensy: a RISC-V processor (PicoRV32)
+in the FPGA runs the ESDI command handling, and the SD card goes in the
+board's own socket, J3. The processor's firmware is in `fw/` and is built
+into the FPGA image, so it needs a RISC-V C compiler as well
+(`riscv64-elf-gcc`, for example from Homebrew). In `verilog/`:
+
+    make BOARD=ps2 CPU=1          # firmware and FPGA, into build/ps2-cpu/
+    make prog BOARD=ps2 CPU=1
+
+To program it on the bench without a Teensy, the board needs 5 V on the
+Teensy socket's VIN pin (U13 pin 48); in a PS/2, it's powered from the
+machine.
+
+A serial log is optional. It runs at 1 Mbaud, 8N1, on the Teensy socket,
+where a Teensy 4.1's pins 16 and 17 go (its Serial4 RX and TX): the FPGA
+sends on Teensy pin 16 and listens on Teensy pin 17. Either a Teensy running
+[fw/teensy_log/teensy_log.ino](fw/teensy_log/teensy_log.ino), which passes
+it to USB, or a 3.3 V USB-serial adapter (its RX to pin 16, TX to pin 17,
+and ground) will do. It shows a start-up summary, and takes single keys:
+any key prints the summary again, `v` turns on a trace of every command,
+and `p` changes the bus release time after another device's -PREEMPT
+(6 us by default). Don't run difnift or difbench on a Teensy with this
+image: the FPGA drives one of the lines they use.
+
+The simulations for this build are `./run_sim72.sh cpu` (the bus, with the
+firmware and an SD card model), `./run_socsim.sh` (start-up) and
+`./run_sdsim.sh` (the SD controller), and `tools/timing_budget.py --pos
+--cpu` checks its bus timing.
+
 ### Testing a board
 
 The bring-up checklist in [docs/formfactor-review.md](docs/formfactor-review.md)
@@ -205,6 +245,12 @@ Its size must be a whole number of megabytes, up to 1023 MB; for example, for
 
 Then use the machine's reference disk to create the IML and reference
 partitions, and install DOS to partition and format the rest of the disk.
+
+The FPGA-only build uses the same file, on a FAT32 or exFAT card (the
+filesystem on the whole card or in its first partition). The image may be
+in up to 32 pieces on the card; copying it onto a freshly formatted card
+with a Mac typically leaves it in 15-20. The start-up summary on the serial
+port shows how many, or why the image can't be used.
 
 ## DIFDIAG
 

@@ -30,7 +30,7 @@ else
 ODIR = build/$(BOARD)
 endif
 # make BOARD=ps2 CPU=1: the FPGA-only build, a processor in the Teensy's place
-# (soc.v, firmware from ../fw), into build/<board>-cpu. Work in progress.
+# (soc.v, firmware from ../fw), into build/<board>-cpu. docs/fpga-only.md.
 ifeq ($(CPU),1)
 DEFINES += -DDIFNIF_CPU
 # Without this the processor's clock enables take the last global buffers,

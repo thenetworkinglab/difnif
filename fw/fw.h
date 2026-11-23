@@ -8,7 +8,9 @@
 #include <stdint.h>
 #include "hw.h"
 
-#define FW_VERSION "cpu-dev"
+// The FPGA-only build's version: the release date and a count of releases
+// that day, as verilog/version.vh's FPGA_CPU_VERSION (the two normally match)
+#define FW_VERSION "v2026.11.22-1"
 
 // uart.c: the log
 void putch(char c);

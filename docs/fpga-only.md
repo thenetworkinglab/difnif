@@ -1,28 +1,27 @@
-# An FPGA-only DifNif (work in progress)
+# An FPGA-only DifNif
 
 The Rev P2 board can run without the Teensy. The FPGA has its own SD card
 socket (J3, wired for 4-bit SD mode: clock, command, four data lines and the
 card-detect switch, with pull-ups), its own 3.3 V and 1.2 V regulators fed
-from the PS/2's 5 V, its oscillator and its configuration flash. The
-current design uses about 800 of the FPGA's 7680 logic cells.
+from the PS/2's 5 V, its oscillator and its configuration flash.
 
-What the Teensy does now would move into the FPGA in three parts:
+What the Teensy did is now in the FPGA, in three parts:
 
-1. **An SD card host controller** (`verilog/sdhost.v`): sends commands and
-   moves 512-byte blocks, and a bridge (`verilog/sdbridge.v`) between it
-   and the sector buffer the PS/2 side already uses. Done in simulation;
-   see below.
-2. **A small processor** (PicoRV32, RISC-V) running a C port of the
-   command handling in `difnift.ino`: the ESDI commands and status blocks,
-   the card's start-up sequence, and the sync after writes. Not started.
-3. **The disk image** as one contiguous run of sectors on the card, found
-   once at start-up, so that drive sector N is card sector start + N. Not
-   started.
+1. **An SD card host controller** (`verilog/sdhost.v`), and a bridge
+   (`verilog/sdbridge.v`) between it and the sector buffer the PS/2 side
+   already uses.
+2. **A small processor** (PicoRV32, RISC-V, `verilog/soc.v`) running a C
+   port of the command handling in `difnift.ino` (`fw/`).
+3. **The disk image** found once at start-up, as up to 32 runs of sectors
+   on the card, so that no filesystem work is needed after that.
 
-During development a Teensy stays in its socket as a USB serial port for
-the processor's log; its pins are already wired to the FPGA. Without a
-Teensy, the board needs 5 V on the socket's VIN pin (U13 pin 48) to be
-programmed on the bench.
+`make BOARD=ps2 CPU=1` builds it; the first release is v2026.11.22-1
+(CHANGELOG.md). It works in the Model 70 and the 55SX, the latter on a
+second board with no Teensy fitted. A Teensy in its socket (running
+`fw/teensy_log`), or a 3.3 V USB-serial adapter, serves as the processor's
+serial port; without either, the board needs 5 V on the socket's VIN pin
+(U13 pin 48) to be programmed on the bench. This document follows the work
+in the order it was done, with what each step found.
 
 ## The SD host controller
 

@@ -238,9 +238,9 @@ module soc #(
             4'd7:  mbox_q = t_pos_regs[15:0];
             4'd8:  mbox_q = t_pos_regs[31:16];
             4'd9:  mbox_q = {8'h00, t_pos_regs[39:32]};
-            4'd10: mbox_q = `FPGA_VERSION_YEAR;
-            4'd11: mbox_q = `FPGA_VERSION_DATE;
-            4'd12: mbox_q = `FPGA_VERSION_COUNT;
+            4'd10: mbox_q = `FPGA_CPU_VERSION_YEAR;
+            4'd11: mbox_q = `FPGA_CPU_VERSION_DATE;
+            4'd12: mbox_q = `FPGA_CPU_VERSION_COUNT;
             4'd13: mbox_q = VARIANT;
             4'd15: mbox_q = {t_host_diag[15:3], gate_in, t_host_diag[1], ctrl_in};
             default: mbox_q = 16'h0000;

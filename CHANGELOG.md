@@ -1,9 +1,10 @@
 # Changelog
 
 The Teensy firmware (`difnift/`) and the FPGA design (`verilog/`) have separate
-versions, so that a problem report can say which of each was running. The
-firmware prints both when it starts and after each hard reset (each time the
-PS/2 is switched on), and on the `v` command:
+versions (the FPGA-only build, below, has one for both), so that a problem
+report can say which of each was running. The firmware prints both when it
+starts and after each hard reset (each time the PS/2 is switched on), and on
+the `v` command:
 
     DifNif firmware v2026.11.18-1, FPGA v2026.11.18-1 (ps2)
 
@@ -15,6 +16,70 @@ and add an entry here.
 
 Earlier code (Eric Schlaepfer's, on `main`) has no version; an FPGA built from
 it, or from this fork before v2026.11.18-1, is reported as "has no version".
+
+## FPGA-only build (no Teensy)
+
+The Rev P2 board without a Teensy: a RISC-V processor in the FPGA runs the
+ESDI command handling, with its own SD card socket (J3). Built with `make
+BOARD=ps2 CPU=1`; its firmware (`fw/`) is part of the FPGA image, so one
+version covers both, and the start-up summary on the serial port shows it:
+
+    DifNif FPGA-only firmware v2026.11.22-1, FPGA v2026.11.22-1 (ps2)
+
+Git tags for it are `cpu-v…`. [docs/fpga-only.md](docs/fpga-only.md) has
+the design and how each part was tested.
+
+### v2026.11.22-1
+
+The first release. In the Model 70 it's faster than the Teensy build and
+than an IDE adapter (McIDE) in the same machine:
+
+| | Teensy build (fw v2026.11.21-5) | FPGA-only build |
+|---|---|---|
+| DiskMeter, Model 70 (KB/s) | 1941.7 / 2035.6 / 2010.0 | 3555.5 / 3206.4 / 3212.8 |
+| DiskMeter, 55SX (KB/s) | 2108.0 / 2266.2 / 2305.4 | 2222.2 / 2240.8 / 2431.6 |
+| sunbench raw 64 KB read / write, Model 70 (MB/s) | 1.87 / 1.95 | 2.99 / 2.50 |
+| sunbench raw 1 KB sequential read, Model 70 (MB/s) | 0.90 | 1.36 |
+
+(The McIDE gives 2476.7 KB/s in DiskMeter on the Model 70.)
+
+- **The disk image** is `disk0.img` in the root of a FAT32 or exFAT card
+  (on the whole card or in its first partition), as for the Teensy, in up
+  to 32 pieces: a Mac copying it onto a fresh card typically leaves it in
+  15-20.
+- **Read-ahead:** after a read the card is held at the next block, so a
+  sequential read starts without the card's access time (about 180 us).
+- **Bus release time after -PREEMPT** (IBM DASD spec, POS 4 bits 2:1): the
+  card carries on bursting for 6 us after another device asks for the bus,
+  instead of letting go at once. The Model 70's system board asks about
+  1.3 us into every grant, and letting go at once lost about a quarter of
+  the bus time to arbitration. 6 us is the default whatever POS 4 says;
+  `p` on the serial port changes it (6 us, as POS 4, at once, 3 us).
+- **Writes** are on the card before the command's completion interrupt, so
+  switching off straight after a write loses nothing.
+- **A card swapped while the board stays powered** (from USB on the bench)
+  is started again, and disk0.img found again, at the next hard reset or
+  failed command.
+- **Serial port** (1 Mbaud, 8N1, where a Teensy 4.1's pins 16 and 17 go in
+  its socket: a Teensy running `fw/teensy_log`, or a 3.3 V USB-serial
+  adapter): the
+  start-up summary, any key prints it again; `v` turns on a trace of every
+  command with checksums of the data on each side of the sector buffer and
+  timings; `p` the release time.
+
+Tested:
+
+- **Model 70:** DOS 6.22 and OS/2 1.1 boot (OS/2 from a 19-piece image
+  too); 3 rounds of the copy test, with every transfer's data checked on
+  both sides of the sector buffer (an overnight run is pending); power off
+  just after a 1 MB copy; a card swapped with
+  the board powered; floppy formats under OS/2 while the disk is busy.
+- **55SX,** on a second board with no Teensy fitted: DOS 6.22, DiskMeter,
+  sunbench and the 20-round copy test.
+- In simulation: the bus model at typical and limit timing for the 50Z,
+  55SX and Model 70, with a fragmented image and card swaps.
+
+Not yet tested: the 50Z, the ThinkPad, write-heavy use over days.
 
 ## Firmware
 
