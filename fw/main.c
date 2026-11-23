@@ -46,7 +46,11 @@ void show_status(void)
         } else {
             puts_(img_exfat ? "exFAT, " : "FAT32, ");
             logline("disk0.img at block ", img_lba);
-            if (img_runs > 1) logline("  in pieces: ", img_runs);
+            if (img_runs > 1) {
+                puts_("  in ");
+                putdec(img_runs);
+                puts_(" pieces\n");
+            }
             logline("blocks ", img_blocks);
         }
     }
