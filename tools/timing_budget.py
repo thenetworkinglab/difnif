@@ -35,6 +35,9 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sdfpath  # noqa: E402
+
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VERILOG = os.path.join(REPO, "verilog")
 
@@ -186,6 +189,10 @@ def main():
         w = path_classes(report)
         ins_cmd = clock_insertion(sdf, "cmd_l")
         ins_gnt = clock_insertion(sdf, "arb_gnt_l")
+        r = sdfpath.longest(open(sdf).read(), "tc_l", "burst_o_l")
+        if not r:
+            sys.exit("no -TC to -BURST route in the SDF")
+        t54_fpga = r[0]
 
     missing = set()
 
@@ -257,8 +264,13 @@ def main():
     row("T43", "-BURST active after ARB/-GNT low", IBM["T43"],
         max(clk_gnt_max + d("negedge arb_gnt_l", "<async>"), xin_max + PAD_IN + comb)
         + PAD_OUT + BOARD["lcx07"])
+    # T54 used to take comb, the slowest pin-to-pin path anywhere in the
+    # design, which belongs to something else and moved with every placement
+    # (the processor build had to hunt for seeds). The actual -TC to -BURST
+    # route, from the SDF (sdfpath.py), slowest way round: through the
+    # tc_seen latch's clock, though the direct route releases -BURST first.
     row("T54", "-BURST released after -TC active", IBM["T54"],
-        xin_max + PAD_IN + comb + PAD_OUT + BOARD["lcx07"])
+        xin_max + PAD_IN + t54_fpga + PAD_OUT + BOARD["lcx07"])
     # The card lets go of -BURST from the 50 MHz domain after a transfer has
     # gone through the buffer: at most six clocks after that I/O cycle's
     # -CMD rose (synchronizer, buffer update, decision). The next I/O cycle

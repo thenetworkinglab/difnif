@@ -167,13 +167,17 @@ clock enables took the last of the FPGA's 8 global buffers, and `ARB/-GNT`
 and `-TC`, which clock parts of `mcabus.v`, were left on ordinary routing.
 `tools/timing_budget.py --pos --cpu` checks the bus timing of this build:
 everything passes, the tightest being T54 (`-BURST` released after `-TC`)
-at 1.8 ns on stacked worst cases (0.8 ns in the normal build). T54 depends
-on placement: with 12 KB of RAM, 4 of seeds 1-16 fail by up to 0.3 ns, so
-the processor build uses seed 7 (`PNR_SEED` in the Makefile; it has been 1,
-3, 10, 7 and 14 as the design changed). That's fragile: the -TC to -BURST
-path wants shortening before a release. Check it again
-after any change to the design. Shortening that path (the `-TC` latch next
-to the `-BURST` pin) would make it robust.
+at 3.3 ns on stacked worst cases (5.2 ns in the normal build).
+
+T54 seemed to depend on placement, and the processor build kept needing a
+new seed: but `timing_budget.py` took T54 from the slowest pin-to-pin path
+anywhere in the design, which belongs to something else entirely and
+moves with every placement. `tools/sdfpath.py` now measures the actual
+-TC to -BURST route from nextpnr's SDF (9.7 ns inside the FPGA for seed 7,
+the slow way round, through the `tc_seen` latch's clock): T54 then passes
+with 3.0-6.0 ns to spare for every seed from 1 to 16 in the processor
+build, 5.2 ns in the Teensy build. The Makefile keeps seed 7 only so that a
+build is reproducible.
 
 The log goes out on Teensy data line 7 (FPGA pin 25), which is the
 Teensy's pin 16, its Serial4 input; Teensy pin 17 (Serial4 output) comes
@@ -257,8 +261,8 @@ DMA runs at 0.54 us per word for 8 sectors at the Model 70's cycle, as
 with the Teensy build's burst DMA (0.57): the bus is still the limit.
 
 The normal build's matrix (`./run_sim72.sh quick`) is unchanged, and
-`tools/timing_budget.py --pos --cpu` passes (T54 1.8 ns on stacked worst
-cases).
+`tools/timing_budget.py --pos --cpu` passes (T54 3.3 ns on stacked worst
+cases, measured on the -TC to -BURST route).
 
 On a P2 board on the bench (21 November) it started first time: card up
 on the 4-bit bus at 25 MHz, FAT32 in a partition at block 8192, disk0.img
@@ -395,9 +399,15 @@ the deepest call chain needs about 450 (gcc's `-fstack-usage`).
 
 ## Next
 
-- Then in a PS/2: DOS, the copy test, DiskMeter.
-- Moving CMD12 after the write's interrupt, like v2026.11.21-5's sync.
-- The pacing bits in POS register 3 (see below).
+- An overnight copy test (`FOREVER.BAT`) on the Model 70, trace off, and
+  the copy test on the 55SX (DOS and DiskMeter there already: 2222.2 /
+  2240.8 / 2431.6 KB/s, against 2108.0 / 2266.2 / 2305.4 for the Teensy
+  build).
+- Release housekeeping: a version for this build (it says `cpu-dev`), the
+  CHANGELOG, the README.
+- Maybe: ending a write's card command after its interrupt, like
+  v2026.11.21-5's sync (small writes; costs some power-off safety).
+- Maybe: the pacing bits in POS register 3 (see below).
 
 ## POS 3 pacing
 
@@ -409,6 +419,6 @@ stores POS 3 but uses only bit 6 (finding 19), so the setting makes no
 difference to it: it bursts whenever the firmware allows bursts. Honouring
 "Burst disabled" at least would match IBM's drives, and the pauses would
 keep it from holding the bus against other bus masters (network or SCSI
-cards) on a busy machine.
-- On hardware: a test build that starts the card and reads a sector, with
-  the result on the LEDs or through the Teensy's serial port.
+cards) on a busy machine. Pacing only applies when POS 4 bit 0 is set,
+though, and the Model 70's BIOS writes POS 4 = 00, so as configured an
+IBM drive wouldn't pace there either.

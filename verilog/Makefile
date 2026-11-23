@@ -36,10 +36,10 @@ DEFINES += -DDIFNIF_CPU
 # Without this the processor's clock enables take the last global buffers,
 # and ARB/-GNT and -TC (clocks for mcabus.v) go on ordinary routing
 PNR_FLAGS += --no-promote-ce
-# T54 (-BURST released after -TC, tools/timing_budget.py --pos --cpu) passes
-# for some placements and not others; seed 7 gives 1.8 ns (the normal build
-# has 0.8), and some seeds fail. Check it again after changing the design:
-# make PNR_SEED=n to try others. (To do: a shorter -TC to -BURST path.)
+# A fixed placement seed, so the same source gives the same image. (T54
+# used to pass for some seeds and not others; that was the timing budget
+# using the slowest path in the whole design. Measured on the actual -TC to
+# -BURST route, every seed from 1 to 16 passes with 3.0-6.0 ns to spare.)
 PNR_SEED ?= 7
 PNR_FLAGS += --seed $(PNR_SEED)
 SOURCES += soc.v picorv32.v sdhost.v sdbridge.v
