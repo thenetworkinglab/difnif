@@ -24,12 +24,12 @@ ESDI command handling, with its own SD card socket (J3). Built with `make
 BOARD=ps2 CPU=1`; its firmware (`fw/`) is part of the FPGA image, so one
 version covers both, and the start-up summary on the serial port shows it:
 
-    DifNif FPGA-only firmware v2026.11.22-1, FPGA v2026.11.22-1 (ps2)
+    DifNif FPGA-only firmware v2026.11.23-1, FPGA v2026.11.23-1 (ps2)
 
 Git tags for it are `cpu-v…`. [docs/fpga-only.md](docs/fpga-only.md) has
 the design and how each part was tested.
 
-### v2026.11.22-1
+### v2026.11.23-1
 
 The first release. In both machines it's faster than the Teensy build and
 than an IDE adapter (McIDE) in the same machine:
@@ -71,9 +71,10 @@ on the Model 70 and 1866.9 / 1875.7 / 2005.0 on the 55SX.)
 Tested:
 
 - **Model 70:** DOS 6.22 and OS/2 1.1 boot (OS/2 from a 19-piece image
-  too); 3 rounds of the copy test, with every transfer's data checked on
-  both sides of the sector buffer (an overnight run is pending); power off
-  just after a 1 MB copy; a card swapped with
+  too); the copy test overnight (`FOREVER.BAT`, about 367 rounds, 2,204
+  file comparisons, all identical, every copy's checksum correct), and 3
+  rounds with every transfer's data checked on both sides of the sector
+  buffer; power off just after a 1 MB copy; a card swapped with
   the board powered; floppy formats under OS/2 while the disk is busy.
 - **55SX,** on a second board with no Teensy fitted: DOS 6.22, DiskMeter,
   sunbench and the 20-round copy test.

@@ -15,7 +15,7 @@ What the Teensy did is now in the FPGA, in three parts:
 3. **The disk image** found once at start-up, as up to 32 runs of sectors
    on the card, so that no filesystem work is needed after that.
 
-`make BOARD=ps2 CPU=1` builds it; the first release is v2026.11.22-1
+`make BOARD=ps2 CPU=1` builds it; the first release is v2026.11.23-1
 (CHANGELOG.md). It works in the Model 70 and the 55SX, the latter on a
 second board with no Teensy fitted. A Teensy in its socket (running
 `fw/teensy_log`), or a 3.3 V USB-serial adapter, serves as the processor's
@@ -396,14 +396,20 @@ The processor's RAM is now 12 KB (24 block RAMs, 31 of 32 in use): the
 firmware had reached 10 KB again. `link.ld` asks for 768 bytes of stack;
 the deepest call chain needs about 450 (gcc's `-fstack-usage`).
 
+## Released
+
+v2026.11.23-1 (CHANGELOG.md), after:
+
+- the 20-round copy test on the 55SX, on a second board with no Teensy
+  (DiskMeter there 2222.2 / 2240.8 / 2431.6 KB/s, against 2108.0 / 2266.2 /
+  2305.4 for the Teensy build);
+- an overnight copy test (`FOREVER.BAT`) on the Model 70 with the trace
+  off: about 367 rounds, 2,204 file comparisons, all identical, and every
+  copy's checksum correct.
+
 ## Next
 
-- An overnight copy test (`FOREVER.BAT`) on the Model 70, trace off, and
-  the copy test on the 55SX (DOS and DiskMeter there already: 2222.2 /
-  2240.8 / 2431.6 KB/s, against 2108.0 / 2266.2 / 2305.4 for the Teensy
-  build).
-- Release housekeeping: a version for this build (it says `cpu-dev`), the
-  CHANGELOG, the README.
+- Rev P3 (docs/rev-p3-spec.md).
 - Maybe: ending a write's card command after its interrupt, like
   v2026.11.21-5's sync (small writes; costs some power-off safety).
 - Maybe: the pacing bits in POS register 3 (see below).

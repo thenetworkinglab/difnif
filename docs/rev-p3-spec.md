@@ -148,14 +148,18 @@ The card stays inside the machine; images are managed over USB.
 | U7 direction / enable | -1 |
 | LEDs (activity, status; Rev P2 has two) | 0 |
 | Test points on spare pins | -4 |
-| **Left** | **26** |
-| QSPI PSRAM, if option A below | -6 (leaving 20) |
+| QSPI PSRAM (option A below) | -6 |
+| **Left** | **20** |
 
-## Open questions
+## Connector placement
 
-- **Processor RAM:** see "FPGA and RAM" below.
-- **USB-C position:** reachable with the board in its sled in each machine
-  (the 55SX's drive bay and the Model 70's riser), or only on the bench?
+The USB-C port and the microSD socket go on the board's edge opposite the
+72-pin card edge, the only side that's reachable with the board installed:
+the 55SX has very little room either side of the drive, and so do the Model
+70 and 50Z (a Rev P2 board in the Model 70 needed a right-angle micro-USB
+cable to reach the Teensy). Both facing outwards, close to the edge, so a
+straight or right-angle USB-C cable and a fingertip on the card both fit
+with the board in its sled.
 
 ## FPGA and RAM
 
@@ -166,7 +170,7 @@ the same 32 block RAMs, and the iCE40UP5K has 128 KB of extra RAM but only
 39 pins. The board will be assembled by a service either way, so package
 (QFP or BGA) isn't a constraint. Two options:
 
-**A. Keep the iCE40, add a QSPI PSRAM.** An APS6404L-3SQR-SN (8 MB, SOP-8,
+**A. Keep the iCE40, add a QSPI PSRAM** (chosen). An APS6404L-3SQR-SN (8 MB, SOP-8,
 about $2-3) on four FPGA pins plus clock and chip select (6 pins, within
 the budget above). The processor runs from the block RAM as now and uses
 the PSRAM through a small cache, or for data only (larger buffers, a FAT
@@ -194,13 +198,14 @@ Intel's MAX 10 (EQFP-144, configuration flash on-chip) and AMD's Spartan-7
 also have more RAM, but their tools (Quartus, Vivado) don't run on macOS
 and nothing of the timing tooling would carry over.
 
-Recommendation: neither, yet. The firmware fits in 12 KB today, and the P3
-additions hardly add to it (the RP2040 handles USB itself; LEDs,
-power-fail and the card handshake are a few lines each). Keep the iCE40 and the
-2-layer board, and put option A's PSRAM footprint on the board unfitted:
-six pins and no cost until the firmware needs it. B is the fallback if RAM,
-logic or pins ever run out; it costs an extra regulator, probably two more
-board layers and BGA assembly.
+Decision: A, fitted. The firmware fits in 12 KB today, but with 31 of 32
+block RAMs in use the margin is thin, and at $2-3 the PSRAM buys a large
+one: 8 MB, against about 2700 free logic cells for its controller. Keep the
+iCE40 and the 2-layer board. The firmware and soc.v need a QSPI controller
+(and a cache, if code runs from it) before it's any use; until then the
+board works as Rev P2 does. B remains the fallback if logic or pins ever
+run out; it costs an extra regulator, probably two more board layers and
+BGA assembly.
 
 ## Cost
 
@@ -212,7 +217,7 @@ design has already removed it. For the rest:
 - 2-layer board and the iCE40HX4K-TQ144 (about $10), as on Rev P2.
 - The RP2040 (about $1-1.50 with its flash, plus a crystal) for USB-C,
   about $4 a board less than an FT2232H, and with room for later features.
-- The PSRAM footprint unfitted (about $2-3 if it's ever needed).
+- The QSPI PSRAM (about $2-3).
 - The SD bus switch (two SN74CBTLV3257 or similar, well under $1 each),
   a microSD socket as on Rev P2, and the LEDs.
 

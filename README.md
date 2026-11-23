@@ -40,12 +40,13 @@ The Rev P2 board for PS/2 desktops (this fork) can be built two ways from
 the same board:
 
 - **FPGA-only** (recommended): no Teensy; the SD card goes in the board's
-  own socket. Release v2026.11.22-1.
+  own socket. Release v2026.11.23-1.
 - **With a Teensy 4.1**, Eric's arrangement, with this fork's fixes; the SD
   card goes in the Teensy. Firmware v2026.11.21-5 and FPGA v2026.11.21-1.
 
 Both work in a PS/2 55SX and a Model 70: they're set up with the Reference
-Diskette, boot DOS 6.22, and pass a copy test that checks every file written.
+Diskette, boot DOS 6.22, and pass a copy test that checks every file written
+(the FPGA-only build overnight in the Model 70: about 367 rounds, no errors).
 OS/2 1.1 installs and boots with the Teensy build in both machines, and boots
 with the FPGA-only build in the Model 70 (not yet tried in its 55SX). With
 the FPGA-only build, switching the PS/2 off straight after a write loses

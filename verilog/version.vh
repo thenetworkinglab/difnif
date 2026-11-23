@@ -18,7 +18,7 @@
 // firmware (fw/, FW_VERSION in fw/fw.h) is built into the same image, so
 // the two change together and normally carry the same version.
 `define FPGA_CPU_VERSION_YEAR  16'h2026
-`define FPGA_CPU_VERSION_DATE  16'h1122
+`define FPGA_CPU_VERSION_DATE  16'h1123
 `define FPGA_CPU_VERSION_COUNT 16'h0001
 
 `endif
