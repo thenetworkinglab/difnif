@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>body{margin:0}</style>
+</head>
+<body>
+<title>DifNif P3 Routing</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: one working column; a sticky bar with progress and filters; groups in routing order, each net a row you tick. */
+:root {
+  --bg: #f4f5f1; --surface: #ffffff; --fg: #1c211e; --muted: #5b6560; --line: #d8dcd4;
+  --copper: #b0601c; --copper-soft: #f3e3d3; --done: #2e7a4d; --done-soft: #dcefe2;
+  --chip: #eef0ea; --chip-routed: #e4ece6;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #121513; --surface: #1a1e1b; --fg: #e5e8e3; --muted: #9aa49e; --line: #2d332f;
+  --copper: #e0924e; --copper-soft: #3a2a1c; --done: #5cbf84; --done-soft: #1d3326;
+  --chip: #242a26; --chip-routed: #1f2c24; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #121513; --surface: #1a1e1b; --fg: #e5e8e3; --muted: #9aa49e; --line: #2d332f;
+  --copper: #e0924e; --copper-soft: #3a2a1c; --done: #5cbf84; --done-soft: #1d3326;
+  --chip: #242a26; --chip-routed: #1f2c24; color-scheme: dark }
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--sans); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface) }
+.wrap { max-width: 880px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 24px 64px }
+header h1 { font-size: 1.6rem; margin: 0 0 4px; letter-spacing: -0.01em; text-wrap: balance }
+header p { margin: 0; color: var(--muted); max-width: 65ch }
+code, .mono { font-family: var(--mono); font-size: 0.92em }
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); margin: 20px calc(-1 * max(16px, env(safe-area-inset-left, 0px))) 0; padding: 12px max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px)) }
+.bar-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center }
+.count { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap }
+.meter { flex: 1 1 200px; height: 8px; background: var(--chip); border-radius: 4px; overflow: hidden; min-width: 120px }
+.meter > span { display: block; height: 100%; background: var(--copper); width: 0; transition: width .3s }
+.controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 10px }
+.controls input[type=search] { flex: 1 1 220px; min-width: 0; font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg) }
+.controls label { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 0.9rem; cursor: pointer }
+.saved { font-size: 0.82rem; color: var(--muted) }
+nav.jump { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px }
+nav.jump a { font-size: 0.8rem; text-decoration: none; color: var(--fg); background: var(--chip); padding: 2px 8px; border-radius: 999px; white-space: nowrap }
+nav.jump a.full { background: var(--done-soft); color: var(--done) }
+nav.jump a .n { font-family: var(--mono); color: var(--muted); margin-left: 4px }
+section.group { margin-top: 32px; scroll-margin-top: 150px }
+section.group h2 { font-size: 1.1rem; margin: 0; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap }
+section.group h2 .n { font-family: var(--mono); font-size: 0.85rem; color: var(--muted); font-weight: 500 }
+section.group > p { margin: 4px 0 12px; color: var(--muted); max-width: 70ch; font-size: 0.93rem }
+.items { display: flex; flex-direction: column; gap: 8px }
+.item { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px }
+.item.done { background: var(--done-soft); border-color: transparent }
+.item.done .net { text-decoration: line-through; text-decoration-color: var(--done) }
+.item input[type=checkbox] { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--done); cursor: pointer }
+.body { min-width: 0 }
+.head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline }
+.net { font-family: var(--mono); font-weight: 600; overflow-wrap: anywhere }
+.w { font-family: var(--mono); font-size: 0.76rem; color: var(--copper); background: var(--copper-soft); padding: 0 6px; border-radius: 4px; white-space: nowrap }
+.note { margin: 2px 0 0; font-size: 0.9rem; color: var(--muted) }
+.pieces { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px }
+.piece { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px; border-radius: 6px; border: 1px dashed var(--line) }
+.piece.routed { border-style: solid; background: var(--chip-routed) }
+.piece.routed::after { content: "copper"; font-size: 0.68rem; color: var(--muted); align-self: center; padding: 0 4px; letter-spacing: 0.04em; text-transform: uppercase }
+.pad { font-family: var(--mono); font-size: 0.78rem; background: var(--chip); padding: 1px 6px; border-radius: 4px; white-space: nowrap }
+.pad small { color: var(--muted); font-size: 0.72rem; margin-left: 4px }
+.join { color: var(--muted); font-size: 0.8rem }
+.mynote { margin-top: 6px; width: 100%; font: 0.88rem var(--sans); padding: 4px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--fg) }
+.mynote:hover, .mynote:focus { border-color: var(--line); background: var(--bg) }
+.mynote::placeholder { color: var(--muted); opacity: 0.7 }
+.empty { color: var(--muted); font-style: italic; margin: 8px 0 }
+:focus-visible { outline: 2px solid var(--copper); outline-offset: 2px }
+@media (prefers-reduced-motion: reduce) { .meter > span { transition: none } }
+@media (max-width: 520px) { .pad small { display: none } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>DifNif Rev P3 routing</h1>
+    <p>What's left to route on <code>pcb_p3/DifNif.kicad_pcb</code>: the new parts are placed and Rev P2's routing is kept, with nothing new routed. Groups are in a sensible order. Each row lists the pads to join; pads already joined by copper are boxed together. Widths are suggestions in mm.</p>
+  </header>
+
+  <div class="bar" id="bar">
+    <div class="bar-row">
+      <span class="count" id="count">0 / 0</span>
+      <div class="meter" aria-hidden="true"><span id="meter"></span></div>
+      <span class="saved" id="saved">Loading saved progress…</span>
+    </div>
+    <div class="controls">
+      <input type="search" id="q" placeholder="Filter by net or pad, e.g. U19 or SD_" aria-label="Filter by net or pad">
+      <label><input type="checkbox" id="hide"> Hide routed</label>
+    </div>
+    <nav class="jump" id="jump" aria-label="Groups"></nav>
+  </div>
+
+  <main id="list"></main>
+</div>
+
+<script>
+const GROUPS = [{"id": "usb", "title": "USB-C and protection", "intro": "J5 on the outer edge, U17 (USBLC6-2) right behind it, then the 27 Ω resistors up to the RP2040. Route this first while the area is clear.", "items": [{"id": "USB_USB_P", "net": "/USB/USB_P", "w": "0.25", "note": "D+ pair with USB_N: join A6/B6 and A7/B7 on the connector (one of the two crosses on B.Cu), through U17 pins 1/6, to R24. Keep the pair together and short.", "pieces": [{"pads": [["J5.A6", "USB_C", "D+"]], "routed": false}, {"pads": [["J5.B6", "USB_C", "D+"]], "routed": false}, {"pads": [["U17.1", "USBLC6-2SC6", "I/O1"]], "routed": false}, {"pads": [["U17.6", "USBLC6-2SC6", "I/O1"]], "routed": false}, {"pads": [["R24.2", "27", ""]], "routed": false}]}, {"id": "USB_USB_N", "net": "/USB/USB_N", "w": "0.25", "note": "D− pair with USB_P: A7/B7, U17 pins 3/4, R25.", "pieces": [{"pads": [["J5.A7", "USB_C", "D-"]], "routed": false}, {"pads": [["J5.B7", "USB_C", "D-"]], "routed": false}, {"pads": [["R25.2", "27", ""]], "routed": false}, {"pads": [["U17.3", "USBLC6-2SC6", "I/O2"]], "routed": false}, {"pads": [["U17.4", "USBLC6-2SC6", "I/O2"]], "routed": false}]}, {"id": "USB_RP_DP", "net": "/USB/RP_DP", "w": "0.15", "note": "R24 to RP2040 pin 47. Fine-pitch pins: 0.15 mm at the chip.", "pieces": [{"pads": [["U19.47", "RP2040", "USB_DP"]], "routed": false}, {"pads": [["R24.1", "27", ""]], "routed": false}]}, {"id": "USB_RP_DM", "net": "/USB/RP_DM", "w": "0.15", "note": "R25 to RP2040 pin 46.", "pieces": [{"pads": [["U19.46", "RP2040", "USB_DM"]], "routed": false}, {"pads": [["R25.1", "27", ""]], "routed": false}]}, {"id": "USB_CC1", "net": "/USB/CC1", "w": "0.2", "note": "A5 to R26 (5.1 k to GND).", "pieces": [{"pads": [["J5.A5", "USB_C", "CC1"]], "routed": false}, {"pads": [["R26.1", "5.1K", ""]], "routed": false}]}, {"id": "USB_CC2", "net": "/USB/CC2", "w": "0.2", "note": "B5 to R27 (5.1 k to GND).", "pieces": [{"pads": [["J5.B5", "USB_C", "CC2"]], "routed": false}, {"pads": [["R27.1", "5.1K", ""]], "routed": false}]}]}, {"id": "power", "title": "Power", "intro": "VBUS and +5VD carry the board on USB power; size them for about 200 mA. +3V3 reaches every new part.", "items": [{"id": "VBUS", "net": "VBUS", "w": "0.5", "note": "All four VBUS pads (A4/B9 and A9/B4 overlap in pairs), U17 pin 5, U18 (LM66100) VIN, C51 4.7 µF, and R38 for the VBUS detect divider.", "pieces": [{"pads": [["R38.1", "10K", ""]], "routed": false}, {"pads": [["J5.A4", "USB_C", "VBUS"]], "routed": false}, {"pads": [["J5.A9", "USB_C", "VBUS"]], "routed": false}, {"pads": [["J5.B4", "USB_C", "VBUS"]], "routed": false}, {"pads": [["J5.B9", "USB_C", "VBUS"]], "routed": false}, {"pads": [["C51.1", "4.7uF", ""]], "routed": false}, {"pads": [["U17.5", "USBLC6-2SC6", "VBUS"]], "routed": false}, {"pads": [["U18.1", "LM66100", "VIN"]], "routed": false}]}, {"id": "_5VD", "net": "+5VD", "w": "0.8", "note": "U18 VOUT to the regulators’ +5VD (C4/C5/U4/U5/D3). Rev P2’s Teensy feed ran down the right edge on B.Cu and along y≈117 to the regulators: the same path works.", "pieces": [{"pads": [["C4.1", "4.7u", ""], ["C5.1", "4.7u", ""], ["D3.1", "PMEG10010ELR", "K"], ["U4.1", "AP2114HA-3.3", "VI"], ["U5.1", "AP2114HA-1.2", "VI"]], "routed": true}, {"pads": [["U18.6", "LM66100", "VOUT"]], "routed": false}]}, {"id": "_3V3", "net": "+3V3", "w": "0.4 (0.15 at the RP2040)", "note": "Every new part’s 3.3 V pin to the existing +3V3. At the RP2040, each 3V3 pin (1, 10, 22, 33, 42, 43, 44, 48, 49) to its 0.1 µF cap C38-C46 with a short stub; C47 (1 µF) on pin 44, VREG_IN.", "pieces": [{"pads": [["C12.1", "1u", ""], ["C15.1", "1u", ""], ["C18.1", "1u", ""], ["C20.1", "4.7u", ""], ["C23.1", "0.1uF", ""], ["C25.1", "0.1uF", ""], ["C27.1", "0.1uF", ""], ["C29.1", "0.1uF", ""], ["C3.1", "0.1uF", ""], ["C31.1", "0.1uF", ""], ["C34.1", "1u", ""], ["C6.1", "4.7u", ""], ["C9.1", "1u", ""], ["D1.2", "LED0", "A"], ["D2.2", "LED1", "A"], ["J2.8", "PROG", "Pin_8"], ["R10.1", "10K", ""], ["R11.1", "10K", ""], ["R14.1", "47K", ""], ["R15.1", "47K", ""], ["R16.1", "47K", ""], ["R17.1", "47K", ""], ["R18.1", "47K", ""], ["R19.1", "0", ""], ["R2.1", "10", ""], ["R4.1", "10K", ""], ["R8.1", "10K", ""], ["R9.1", "10K", ""], ["U1.100", "ICE40HX4K-TQ144", "VCCIO_1"], ["U1.108", "ICE40HX4K-TQ144", "VPP_2V5"], ["U1.123", "ICE40HX4K-TQ144", "VCCIO_0"], ["U1.131", "ICE40HX4K-TQ144", "VCCIO_0"], ["U1.30", "ICE40HX4K-TQ144", "VCCIO_3"], ["U1.46", "ICE40HX4K-TQ144", "VCCIO_2"], ["U1.57", "ICE40HX4K-TQ144", "VCCIO_2"], ["U1.6", "ICE40HX4K-TQ144", "VCCIO_3"], ["U1.72", "ICE40HX4K-TQ144", "VCC_SPI"], ["U1.89", "ICE40HX4K-TQ144", "VCCIO_1"], ["U10.1", "74LVC8T245", "VCCA"], ["U14.1", "74LVC8T245", "VCCA"], ["U2.8", "SST26VF080A-104I/SN", "VCC"], ["U3.3", "APX803S00-29SA-7", "VCC"], ["U4.3", "AP2114HA-3.3", "VO"], ["U6.1", "74LVC8T245", "VCCA"], ["U7.1", "74LVC8T245", "VCCA"], ["U8.1", "74LVC8T245", "VCCA"], ["U9.1", "74LVC8T245", "VCCA"]], "routed": true}, {"pads": [["R40.1", "10K", ""]], "routed": false}, {"pads": [["C38.1", "0.1uF", ""]], "routed": false}, {"pads": [["U21.8", "APS6404L-3SQR-SN", "VDD"]], "routed": false}, {"pads": [["C44.1", "0.1uF", ""]], "routed": false}, {"pads": [["C46.1", "0.1uF", ""]], "routed": false}, {"pads": [["U15.16", "74CBTLV3257", "VCC"]], "routed": false}, {"pads": [["U19.1", "RP2040", "IOVDD"]], "routed": false}, {"pads": [["U19.10", "RP2040", "IOVDD"]], "routed": false}, {"pads": [["U19.22", "RP2040", "IOVDD"]], "routed": false}, {"pads": [["U19.33", "RP2040", "IOVDD"]], "routed": false}, {"pads": [["U19.42", "RP2040", "IOVDD"]], "routed": false}, {"pads": [["U19.43", "RP2040", "ADC_AVDD"]], "routed": false}, {"pads": [["U19.44", "RP2040", "VREG_IN"]], "routed": false}, {"pads": [["U19.48", "RP2040", "USB_VDD"]], "routed": false}, {"pads": [["U19.49", "RP2040", "IOVDD"]], "routed": false}, {"pads": [["C39.1", "0.1uF", ""]], "routed": false}, {"pads": [["C36.1", "0.1uF", ""]], "routed": false}, {"pads": [["U20.8", "W25Q16JVSS", "VCC"]], "routed": false}, {"pads": [["C47.1", "1uF", ""]], "routed": false}, {"pads": [["R32.1", "10K", ""]], "routed": false}, {"pads": [["C40.1", "0.1uF", ""]], "routed": false}, {"pads": [["C45.1", "0.1uF", ""]], "routed": false}, {"pads": [["C55.1", "0.1uF", ""]], "routed": false}, {"pads": [["U16.16", "74CBTLV3257", "VCC"]], "routed": false}, {"pads": [["C37.1", "0.1uF", ""]], "routed": false}, {"pads": [["J6.1", "SWD (not fitted)", "Pin_1"]], "routed": false}, {"pads": [["C41.1", "0.1uF", ""]], "routed": false}, {"pads": [["C43.1", "0.1uF", ""]], "routed": false}, {"pads": [["C42.1", "0.1uF", ""]], "routed": false}]}, {"id": "_1V1", "net": "+1V1", "w": "0.3 (0.15 at the chip)", "note": "The RP2040’s own regulator: pin 45 (VREG_VOUT) with C48 1 µF, to DVDD pins 23 and 50, with C49/C50 0.1 µF. Not connected to anything else.", "pieces": [{"pads": [["C48.1", "1uF", ""]], "routed": false}, {"pads": [["C50.1", "0.1uF", ""]], "routed": false}, {"pads": [["U19.23", "RP2040", "DVDD"]], "routed": false}, {"pads": [["U19.45", "RP2040", "VREG_VOUT"]], "routed": false}, {"pads": [["U19.50", "RP2040", "DVDD"]], "routed": false}, {"pads": [["C49.1", "0.1uF", ""]], "routed": false}]}, {"id": "_5V", "net": "+5V", "w": "0.2", "note": "Sense only: R36 (10 k) to the edge connector’s +5 V. Any +5 V copper will do: D3’s anode or a transceiver VCCB.", "pieces": [{"pads": [["C22.1", "0.1uF", ""], ["C24.1", "0.1uF", ""], ["C26.1", "0.1uF", ""], ["C28.1", "0.1uF", ""], ["C30.1", "0.1uF", ""], ["C32.1", "0.1uF", ""], ["C33.1", "0.1uF", ""], ["C35.1", "0.1uF", ""], ["D3.2", "PMEG10010ELR", "A"], ["J1.a15", "DBA-ESDI", "Pin_a15"], ["J1.a23", "DBA-ESDI", "Pin_a23"], ["J1.a31", "DBA-ESDI", "Pin_a31"], ["J1.a7", "DBA-ESDI", "Pin_a7"], ["U10.23", "74LVC8T245", "VCCB"], ["U10.24", "74LVC8T245", "VCCB"], ["U11.14", "74LCX07", "VCC"], ["U12.14", "74VHCT125", "VCC"], ["U14.23", "74LVC8T245", "VCCB"], ["U14.24", "74LVC8T245", "VCCB"], ["U6.23", "74LVC8T245", "VCCB"], ["U6.24", "74LVC8T245", "VCCB"], ["U7.23", "74LVC8T245", "VCCB"], ["U7.24", "74LVC8T245", "VCCB"], ["U8.23", "74LVC8T245", "VCCB"], ["U8.24", "74LVC8T245", "VCCB"], ["U9.23", "74LVC8T245", "VCCB"], ["U9.24", "74LVC8T245", "VCCB"]], "routed": true}, {"pads": [["R36.1", "10K", ""]], "routed": false}]}]}, {"id": "rp2040", "title": "RP2040 core", "intro": "Crystal, QSPI flash, reset, debug and the status LED. Keep the crystal and QSPI tracks short, with ground pour round them.", "items": [{"id": "USB_XIN", "net": "/USB/XIN", "w": "0.15", "note": "Pin 20 to Y1 pin 1 and C52 (15 pF). Short, no vias if you can.", "pieces": [{"pads": [["U19.20", "RP2040", "XIN"]], "routed": false}, {"pads": [["C52.1", "15pF", ""]], "routed": false}, {"pads": [["Y1.1", "12MHz", "1"]], "routed": false}]}, {"id": "USB_XOUT", "net": "/USB/XOUT", "w": "0.15", "note": "Pin 21 to R33 (1 k).", "pieces": [{"pads": [["U19.21", "RP2040", "XOUT"]], "routed": false}, {"pads": [["R33.1", "1K", ""]], "routed": false}]}, {"id": "USB_XTAL", "net": "/USB/XTAL", "w": "0.15", "note": "R33 to Y1 pin 3 and C53 (15 pF).", "pieces": [{"pads": [["Y1.3", "12MHz", "3"]], "routed": false}, {"pads": [["R33.2", "1K", ""]], "routed": false}, {"pads": [["C53.1", "15pF", ""]], "routed": false}]}, {"id": "USB_QSPI_SCLK", "net": "/USB/QSPI_SCLK", "w": "0.15", "note": "Pin 52 to U20 pin 6. The flash’s far row (pins 5-7) needs B.Cu or a path round its side.", "pieces": [{"pads": [["U19.52", "RP2040", "QSPI_SCLK"]], "routed": false}, {"pads": [["U20.6", "W25Q16JVSS", "CLK"]], "routed": false}]}, {"id": "USB_QSPI_SD0", "net": "/USB/QSPI_SD0", "w": "0.15", "note": "Pin 53 to U20 pin 5.", "pieces": [{"pads": [["U19.53", "RP2040", "QSPI_SD0"]], "routed": false}, {"pads": [["U20.5", "W25Q16JVSS", "DI/IO_{0}"]], "routed": false}]}, {"id": "USB_QSPI_SD1", "net": "/USB/QSPI_SD1", "w": "0.15", "note": "Pin 55 to U20 pin 2.", "pieces": [{"pads": [["U19.55", "RP2040", "QSPI_SD1"]], "routed": false}, {"pads": [["U20.2", "W25Q16JVSS", "DO/IO_{1}"]], "routed": false}]}, {"id": "USB_QSPI_SD2", "net": "/USB/QSPI_SD2", "w": "0.15", "note": "Pin 54 to U20 pin 3.", "pieces": [{"pads": [["U19.54", "RP2040", "QSPI_SD2"]], "routed": false}, {"pads": [["U20.3", "W25Q16JVSS", "~{WP}/IO_{2}"]], "routed": false}]}, {"id": "USB_QSPI_SD3", "net": "/USB/QSPI_SD3", "w": "0.15", "note": "Pin 51 to U20 pin 7.", "pieces": [{"pads": [["U19.51", "RP2040", "QSPI_SD3"]], "routed": false}, {"pads": [["U20.7", "W25Q16JVSS", "~{HOLD}/~{RESET}/IO_{3}"]], "routed": false}]}, {"id": "USB_QSPI_SS", "net": "/USB/QSPI_SS", "w": "0.15", "note": "Pin 56 to U20 pin 1 (CS) and R34 (1 k) to the BOOTSEL button.", "pieces": [{"pads": [["U19.56", "RP2040", "QSPI_SS"]], "routed": false}, {"pads": [["U20.1", "W25Q16JVSS", "~{CS}"]], "routed": false}, {"pads": [["R34.1", "1K", ""]], "routed": false}]}, {"id": "USB_BOOTSEL", "net": "/USB/BOOTSEL", "w": "0.2", "note": "R34 to SW1.", "pieces": [{"pads": [["R34.2", "1K", ""]], "routed": false}, {"pads": [["SW1.1", "BOOTSEL", "1"]], "routed": false}]}, {"id": "USB_RP_RUN", "net": "/USB/RP_RUN", "w": "0.15", "note": "Pin 26 to R32 (10 k pull-up) and J6 pin 5. Caps C40/C50/C46 sit below the chip: leave a gap for this and the SWD pair.", "pieces": [{"pads": [["U19.26", "RP2040", "RUN"]], "routed": false}, {"pads": [["R32.2", "10K", ""]], "routed": false}, {"pads": [["J6.5", "SWD (not fitted)", "Pin_5"]], "routed": false}]}, {"id": "USB_SWCLK", "net": "/USB/SWCLK", "w": "0.15", "note": "Pin 24 to J6 pin 2 (header not fitted).", "pieces": [{"pads": [["U19.24", "RP2040", "SWCLK"]], "routed": false}, {"pads": [["J6.2", "SWD (not fitted)", "Pin_2"]], "routed": false}]}, {"id": "USB_SWDIO", "net": "/USB/SWDIO", "w": "0.15", "note": "Pin 25 to J6 pin 4.", "pieces": [{"pads": [["U19.25", "RP2040", "SWD"]], "routed": false}, {"pads": [["J6.4", "SWD (not fitted)", "Pin_4"]], "routed": false}]}, {"id": "USB_RP_LED", "net": "/USB/RP_LED", "w": "0.15", "note": "Pin 37 to R35, up by D1/D2 at the top edge. A long run, any path.", "pieces": [{"pads": [["U19.37", "RP2040", "GPIO25"]], "routed": false}, {"pads": [["R35.1", "330", ""]], "routed": false}]}, {"id": "USB_LED_A", "net": "/USB/LED_A", "w": "0.2", "note": "R35 to D4’s anode.", "pieces": [{"pads": [["R35.2", "330", ""]], "routed": false}, {"pads": [["D4.2", "GRN", "A"]], "routed": false}]}]}, {"id": "sense", "title": "Sensing", "intro": "Slow signals into the RP2040’s right side.", "items": [{"id": "USB_VBUS_DET", "net": "/USB/VBUS_DET", "w": "0.15", "note": "R38/R39 divider (10 k / 15 k) to pin 34, GPIO22.", "pieces": [{"pads": [["R38.2", "10K", ""]], "routed": false}, {"pads": [["U19.34", "RP2040", "GPIO22"]], "routed": false}, {"pads": [["R39.1", "15K", ""]], "routed": false}]}, {"id": "USB_V5_SENSE", "net": "/USB/V5_SENSE", "w": "0.15", "note": "R36/R37 divider and C54 to pin 38, GPIO26/ADC0.", "pieces": [{"pads": [["U19.38", "RP2040", "GPIO26_ADC0"]], "routed": false}, {"pads": [["R37.1", "15K", ""]], "routed": false}, {"pads": [["C54.1", "0.1uF", ""]], "routed": false}, {"pads": [["R36.2", "10K", ""]], "routed": false}]}]}, {"id": "fpga", "title": "FPGA to RP2040", "intro": "Bank 3 (U1 pins 1-36, the FPGA’s right side) to the RP2040’s left side. The PSRAM and SD switches share this corridor: plan the fan-out before routing any of the three groups.", "items": [{"id": "FPGA_TX", "net": "FPGA_TX", "w": "0.15", "note": "U1 pin 25 to RP2040 pin 3 (GPIO1, UART0 RX).", "pieces": [{"pads": [["U19.3", "RP2040", "GPIO1"]], "routed": false}, {"pads": [["U1.25", "ICE40HX4K-TQ144", "IOL_18A"]], "routed": false}]}, {"id": "FPGA_RX", "net": "FPGA_RX", "w": "0.15", "note": "U1 pin 26 to RP2040 pin 2 (GPIO0, UART0 TX).", "pieces": [{"pads": [["U19.2", "RP2040", "GPIO0"]], "routed": false}, {"pads": [["U1.26", "ICE40HX4K-TQ144", "IOL_18B"]], "routed": false}]}, {"id": "SD_REQ", "net": "SD_REQ", "w": "0.15", "note": "U1 pin 33 to RP2040 pin 11 (GPIO8).", "pieces": [{"pads": [["U19.11", "RP2040", "GPIO8"]], "routed": false}, {"pads": [["U1.33", "ICE40HX4K-TQ144", "IOL_25A"]], "routed": false}]}, {"id": "SD_REL", "net": "SD_REL", "w": "0.15", "note": "U1 pin 34 to RP2040 pin 12 (GPIO9).", "pieces": [{"pads": [["U19.12", "RP2040", "GPIO9"]], "routed": false}, {"pads": [["U1.34", "ICE40HX4K-TQ144", "IOL_25B"]], "routed": false}]}, {"id": "PFAIL", "net": "PFAIL", "w": "0.15", "note": "U1 pin 31 to RP2040 pin 13 (GPIO10).", "pieces": [{"pads": [["U19.13", "RP2040", "GPIO10"]], "routed": false}, {"pads": [["U1.31", "ICE40HX4K-TQ144", "IOL_24A"]], "routed": false}]}]}, {"id": "config", "title": "Configuration flash sharing", "intro": "The RP2040 reaches U2’s SPI lines, CRESET and CDONE. Each new pad joins an existing Rev P2 net: route to the nearest copper of that net (U2, J2 or their tracks).", "items": [{"id": "USB_RP_SCK", "net": "/USB/RP_SCK", "w": "0.15", "note": "RP2040 pin 4 to R28 (33 Ω).", "pieces": [{"pads": [["U19.4", "RP2040", "GPIO2"]], "routed": false}, {"pads": [["R28.1", "33", ""]], "routed": false}]}, {"id": "USB_RP_COPI", "net": "/USB/RP_COPI", "w": "0.15", "note": "RP2040 pin 5 to R29 (33 Ω).", "pieces": [{"pads": [["U19.5", "RP2040", "GPIO3"]], "routed": false}, {"pads": [["R29.1", "33", ""]], "routed": false}]}, {"id": "USB_RP_CS", "net": "/USB/RP_CS", "w": "0.15", "note": "RP2040 pin 7 to R30 (33 Ω).", "pieces": [{"pads": [["U19.7", "RP2040", "GPIO5"]], "routed": false}, {"pads": [["R30.1", "33", ""]], "routed": false}]}, {"id": "SPI_SCK", "net": "SPI_SCK", "w": "0.15", "note": "R28’s far side to the existing SPI_SCK.", "pieces": [{"pads": [["J2.3", "PROG", "Pin_3"], ["R11.2", "10K", ""], ["U1.70", "ICE40HX4K-TQ144", "IOB_107_SCK"], ["U2.6", "SST26VF080A-104I/SN", "SCK"]], "routed": true}, {"pads": [["R28.2", "33", ""]], "routed": false}]}, {"id": "SPI_COPI", "net": "SPI_COPI", "w": "0.15", "note": "R29’s far side to the existing SPI_COPI.", "pieces": [{"pads": [["J2.7", "PROG", "Pin_7"], ["U1.67", "ICE40HX4K-TQ144", "IOB_105_SDO"], ["U2.5", "SST26VF080A-104I/SN", "MOSI"]], "routed": true}, {"pads": [["R29.2", "33", ""]], "routed": false}]}, {"id": "SPI___CS_", "net": "SPI_~CS", "w": "0.15", "note": "R30’s far side to the existing SPI_~{CS}.", "pieces": [{"pads": [["J2.1", "PROG", "Pin_1"], ["R8.2", "10K", ""], ["U1.71", "ICE40HX4K-TQ144", "IOB_108_SS"], ["U2.1", "SST26VF080A-104I/SN", "~{CS}"]], "routed": true}, {"pads": [["R30.2", "33", ""]], "routed": false}]}, {"id": "SPI_CIPO", "net": "SPI_CIPO", "w": "0.15", "note": "RP2040 pin 6 straight to the existing SPI_CIPO (no resistor).", "pieces": [{"pads": [["U19.6", "RP2040", "GPIO4"]], "routed": false}, {"pads": [["J2.5", "PROG", "Pin_5"], ["U1.68", "ICE40HX4K-TQ144", "IOB_106_SDI"], ["U2.2", "SST26VF080A-104I/SN", "MISO"]], "routed": true}]}, {"id": "__CRESET_", "net": "~CRESET", "w": "0.15", "note": "RP2040 pin 8 to the existing ~{CRESET} (open-drain, shared with U3).", "pieces": [{"pads": [["U19.8", "RP2040", "GPIO6"]], "routed": false}, {"pads": [["J2.4", "PROG", "Pin_4"], ["R4.2", "10K", ""], ["U1.66", "ICE40HX4K-TQ144", "~{CRESET}"], ["U3.2", "APX803S00-29SA-7", "~{RESET}"]], "routed": true}]}, {"id": "CDONE", "net": "CDONE", "w": "0.15", "note": "RP2040 pin 9 to the existing CDONE.", "pieces": [{"pads": [["U19.9", "RP2040", "GPIO7"]], "routed": false}, {"pads": [["J2.2", "PROG", "Pin_2"], ["U1.65", "ICE40HX4K-TQ144", "CDONE"]], "routed": true}]}]}, {"id": "sd", "title": "SD card and bus switches", "intro": "U15/U16 (74CBTLV3257) sit between the FPGA and J3. Each line has three parts: the FPGA side (B1, also on J4 for the logic probe), the RP2040 side (B2) and the card side (A, with its pull-up). Rev P2’s card routing was removed where it crossed the switches.", "items": [{"id": "SD_CLK", "net": "/SD_CLK", "w": "0.15", "note": "FPGA side: U1 pin 1, J4 pin 3, U15 pin 2.", "pieces": [{"pads": [["U15.2", "74CBTLV3257", ""]], "routed": false}, {"pads": [["U1.1", "ICE40HX4K-TQ144", "IOL_2A"]], "routed": false}, {"pads": [["J4.3", "HPLA_PORT", "CLK"]], "routed": false}]}, {"id": "SD_CMD", "net": "/SD_CMD", "w": "0.15", "note": "FPGA side: U1 pin 2, J4 pin 19, U15 pin 5.", "pieces": [{"pads": [["U15.5", "74CBTLV3257", ""]], "routed": false}, {"pads": [["U1.2", "ICE40HX4K-TQ144", "IOL_2B"]], "routed": false}, {"pads": [["J4.19", "HPLA_PORT", "D0"]], "routed": false}]}, {"id": "SD_D0", "net": "/SD_D0", "w": "0.15", "note": "FPGA side: U1 pin 7, J4 pin 18, U15 pin 11.", "pieces": [{"pads": [["U15.11", "74CBTLV3257", ""]], "routed": false}, {"pads": [["U1.7", "ICE40HX4K-TQ144", "IOL_4A"]], "routed": false}, {"pads": [["J4.18", "HPLA_PORT", "D1"]], "routed": false}]}, {"id": "SD_D1", "net": "/SD_D1", "w": "0.15", "note": "FPGA side: U1 pin 4, J4 pin 17, U15 pin 14.", "pieces": [{"pads": [["U15.14", "74CBTLV3257", ""]], "routed": false}, {"pads": [["U1.4", "ICE40HX4K-TQ144", "IOL_3B"]], "routed": false}, {"pads": [["J4.17", "HPLA_PORT", "D2"]], "routed": false}]}, {"id": "SD_D2", "net": "/SD_D2", "w": "0.15", "note": "FPGA side: U1 pin 9, J4 pin 16, U16 pin 2.", "pieces": [{"pads": [["U1.9", "ICE40HX4K-TQ144", "IOL_5A"]], "routed": false}, {"pads": [["U16.2", "74CBTLV3257", ""]], "routed": false}, {"pads": [["J4.16", "HPLA_PORT", "D3"]], "routed": false}]}, {"id": "SD_D3", "net": "/SD_D3", "w": "0.15", "note": "FPGA side: U1 pin 8, J4 pin 15, U16 pin 5.", "pieces": [{"pads": [["U1.8", "ICE40HX4K-TQ144", "IOL_4B"]], "routed": false}, {"pads": [["U16.5", "74CBTLV3257", ""]], "routed": false}, {"pads": [["J4.15", "HPLA_PORT", "D4"]], "routed": false}]}, {"id": "RP_SD_CLK", "net": "RP_SD_CLK", "w": "0.15", "note": "RP2040 pin 27 (GPIO16) to U15 pin 3.", "pieces": [{"pads": [["U15.3", "74CBTLV3257", ""]], "routed": false}, {"pads": [["U19.27", "RP2040", "GPIO16"]], "routed": false}]}, {"id": "RP_SD_CMD", "net": "RP_SD_CMD", "w": "0.15", "note": "RP2040 pin 28 (GPIO17) to U15 pin 6.", "pieces": [{"pads": [["U15.6", "74CBTLV3257", ""]], "routed": false}, {"pads": [["U19.28", "RP2040", "GPIO17"]], "routed": false}]}, {"id": "RP_SD_D0", "net": "RP_SD_D0", "w": "0.15", "note": "RP2040 pin 29 (GPIO18) to U15 pin 10.", "pieces": [{"pads": [["U15.10", "74CBTLV3257", ""]], "routed": false}, {"pads": [["U19.29", "RP2040", "GPIO18"]], "routed": false}]}, {"id": "RP_SD_D1", "net": "RP_SD_D1", "w": "0.15", "note": "RP2040 pin 30 (GPIO19) to U15 pin 13.", "pieces": [{"pads": [["U15.13", "74CBTLV3257", ""]], "routed": false}, {"pads": [["U19.30", "RP2040", "GPIO19"]], "routed": false}]}, {"id": "RP_SD_D2", "net": "RP_SD_D2", "w": "0.15", "note": "RP2040 pin 31 (GPIO20) to U16 pin 3.", "pieces": [{"pads": [["U19.31", "RP2040", "GPIO20"]], "routed": false}, {"pads": [["U16.3", "74CBTLV3257", ""]], "routed": false}]}, {"id": "RP_SD_D3", "net": "RP_SD_D3", "w": "0.15", "note": "RP2040 pin 32 (GPIO21) to U16 pin 6.", "pieces": [{"pads": [["U19.32", "RP2040", "GPIO21"]], "routed": false}, {"pads": [["U16.6", "74CBTLV3257", ""]], "routed": false}]}, {"id": "SDCard_CARD_CLK", "net": "/SDCard/CARD_CLK", "w": "0.15", "note": "Card side: U15 pin 4 to J3 pin 5. Keep it short.", "pieces": [{"pads": [["J3.5", "SDCARD_DM3AT-SF-PEJM5", "CLK"]], "routed": false}, {"pads": [["U15.4", "74CBTLV3257", ""]], "routed": false}]}, {"id": "SDCard_CARD_CMD", "net": "/SDCard/CARD_CMD", "w": "0.15", "note": "Card side: U15 pin 7, R17 pull-up, J3 pin 3.", "pieces": [{"pads": [["J3.3", "SDCARD_DM3AT-SF-PEJM5", "DI/CMD"]], "routed": false}, {"pads": [["U15.7", "74CBTLV3257", ""]], "routed": false}, {"pads": [["R17.2", "47K", ""]], "routed": false}]}, {"id": "SDCard_CARD_D0", "net": "/SDCard/CARD_D0", "w": "0.15", "note": "Card side: U15 pin 9, R16 pull-up, J3 pin 7.", "pieces": [{"pads": [["J3.7", "SDCARD_DM3AT-SF-PEJM5", "DO/DAT0"]], "routed": false}, {"pads": [["U15.9", "74CBTLV3257", ""]], "routed": false}, {"pads": [["R16.2", "47K", ""]], "routed": false}]}, {"id": "SDCard_CARD_D1", "net": "/SDCard/CARD_D1", "w": "0.15", "note": "Card side: U15 pin 12, R15 pull-up, J3 pin 8.", "pieces": [{"pads": [["J3.8", "SDCARD_DM3AT-SF-PEJM5", "DAT1"]], "routed": false}, {"pads": [["R15.2", "47K", ""]], "routed": false}, {"pads": [["U15.12", "74CBTLV3257", ""]], "routed": false}]}, {"id": "SDCard_CARD_D2", "net": "/SDCard/CARD_D2", "w": "0.15", "note": "Card side: U16 pin 4, R18 pull-up, J3 pin 1.", "pieces": [{"pads": [["J3.1", "SDCARD_DM3AT-SF-PEJM5", "DAT2"]], "routed": false}, {"pads": [["R18.2", "47K", ""]], "routed": false}, {"pads": [["U16.4", "74CBTLV3257", ""]], "routed": false}]}, {"id": "SDCard_CARD_D3", "net": "/SDCard/CARD_D3", "w": "0.15", "note": "Card side: U16 pin 7 to J3 pin 2.", "pieces": [{"pads": [["J3.2", "SDCARD_DM3AT-SF-PEJM5", "CS#/CD/DAT3"]], "routed": false}, {"pads": [["U16.7", "74CBTLV3257", ""]], "routed": false}]}, {"id": "SD_SEL", "net": "SD_SEL", "w": "0.15", "note": "RP2040 pin 14 (GPIO11) to both switches’ S (pin 1) and R31 (10 k pull-down).", "pieces": [{"pads": [["U15.1", "74CBTLV3257", "S"]], "routed": false}, {"pads": [["U19.14", "RP2040", "GPIO11"]], "routed": false}, {"pads": [["U16.1", "74CBTLV3257", "S"]], "routed": false}, {"pads": [["R31.1", "10K", ""]], "routed": false}]}, {"id": "SD_CD", "net": "SD_CD", "w": "0.15", "note": "Card detect: J3 pin 9, R14 pull-up, U1 pin 3 and RP2040 pin 15 (GPIO12). Rev P2’s track was removed: it crossed U15.", "pieces": [{"pads": [["J3.9", "SDCARD_DM3AT-SF-PEJM5", "SW_A"]], "routed": false}, {"pads": [["U19.15", "RP2040", "GPIO12"]], "routed": false}, {"pads": [["U1.3", "ICE40HX4K-TQ144", "IOL_3A"]], "routed": false}, {"pads": [["R14.2", "47K", ""]], "routed": false}]}]}, {"id": "psram", "title": "PSRAM", "intro": "U21 (APS6404L) beside the FPGA’s bank 3. Short and direct; length matching isn’t needed at the speeds planned.", "items": [{"id": "PS_CLK", "net": "PS_CLK", "w": "0.15", "note": "U1 pin 17 to U21 pin 6.", "pieces": [{"pads": [["U21.6", "APS6404L-3SQR-SN", "SCLK"]], "routed": false}, {"pads": [["U1.17", "ICE40HX4K-TQ144", "IOL_12A"]], "routed": false}]}, {"id": "PS___CS_", "net": "PS_~CS", "w": "0.15", "note": "U1 pin 18 to U21 pin 1 and R40 (10 k pull-up).", "pieces": [{"pads": [["R40.2", "10K", ""]], "routed": false}, {"pads": [["U21.1", "APS6404L-3SQR-SN", "~{CE}"]], "routed": false}, {"pads": [["U1.18", "ICE40HX4K-TQ144", "IOL_12B"]], "routed": false}]}, {"id": "PS_D0", "net": "PS_D0", "w": "0.15", "note": "U1 pin 21 to U21 pin 5.", "pieces": [{"pads": [["U21.5", "APS6404L-3SQR-SN", "SI/SIO0"]], "routed": false}, {"pads": [["U1.21", "ICE40HX4K-TQ144", "IOL_14A_GBIN6"]], "routed": false}]}, {"id": "PS_D1", "net": "PS_D1", "w": "0.15", "note": "U1 pin 23 to U21 pin 2.", "pieces": [{"pads": [["U21.2", "APS6404L-3SQR-SN", "SO/SIO1"]], "routed": false}, {"pads": [["U1.23", "ICE40HX4K-TQ144", "IOL_17A"]], "routed": false}]}, {"id": "PS_D2", "net": "PS_D2", "w": "0.15", "note": "U1 pin 28 to U21 pin 3.", "pieces": [{"pads": [["U21.3", "APS6404L-3SQR-SN", "SIO2"]], "routed": false}, {"pads": [["U1.28", "ICE40HX4K-TQ144", "IOL_23A"]], "routed": false}]}, {"id": "PS_D3", "net": "PS_D3", "w": "0.15", "note": "U1 pin 29 to U21 pin 7.", "pieces": [{"pads": [["U21.7", "APS6404L-3SQR-SN", "SIO3"]], "routed": false}, {"pads": [["U1.29", "ICE40HX4K-TQ144", "IOL_23B"]], "routed": false}]}]}, {"id": "bus", "title": "Bus side", "intro": "The one change on the PS/2 side (finding 16).", "items": [{"id": "DATA_DIR_HI", "net": "DATA_DIR_HI", "w": "0.15", "note": "U1 pin 135 to U7 pin 2. Rev P2’s DATA_DIR routing is kept; only its stub to U7 pin 2 was removed. The old via at (118.1, 107.3) still serves U6 through B.Cu, so take a new path in to U7.", "pieces": [{"pads": [["U1.135", "ICE40HX4K-TQ144", "IOT_213"]], "routed": false}, {"pads": [["U7.2", "74LVC8T245", "DIR"]], "routed": false}]}]}, {"id": "tp", "title": "Test points", "intro": "TP1-TP4 on spare FPGA pins, for the scope.", "items": [{"id": "TP1", "net": "TP1", "w": "0.15", "note": "U1 pin 32.", "pieces": [{"pads": [["TP1.1", "TP", "1"]], "routed": false}, {"pads": [["U1.32", "ICE40HX4K-TQ144", "IOL_24B"]], "routed": false}]}, {"id": "TP2", "net": "TP2", "w": "0.15", "note": "U1 pin 11.", "pieces": [{"pads": [["TP2.1", "TP", "1"]], "routed": false}, {"pads": [["U1.11", "ICE40HX4K-TQ144", "IOL_8A"]], "routed": false}]}, {"id": "TP3", "net": "TP3", "w": "0.15", "note": "U1 pin 12.", "pieces": [{"pads": [["TP3.1", "TP", "1"]], "routed": false}, {"pads": [["U1.12", "ICE40HX4K-TQ144", "IOL_8B"]], "routed": false}]}, {"id": "TP4", "net": "TP4", "w": "0.15", "note": "U1 pin 16.", "pieces": [{"pads": [["U1.16", "ICE40HX4K-TQ144", "IOL_10B"]], "routed": false}, {"pads": [["TP4.1", "TP", "1"]], "routed": false}]}]}, {"id": "probe", "title": "J4 logic-probe pins (optional)", "intro": "Rev P2 left J4 pins 4-14 without copper. The spec asks for real test points for these bus signals; routing J4 does that.", "items": [{"id": "__CMD_", "net": "/~CMD", "w": "0.15", "note": "J4 pin 4.", "pieces": [{"pads": [["U1.81", "ICE40HX4K-TQ144", "IOR_117"], ["U8.5", "74LVC8T245", "A3"]], "routed": true}, {"pads": [["J4.4", "HPLA_PORT", "D15"]], "routed": false}]}, {"id": "S0", "net": "/S0", "w": "0.15", "note": "J4 pin 5.", "pieces": [{"pads": [["U1.79", "ICE40HX4K-TQ144", "IOR_115"], ["U8.7", "74LVC8T245", "A5"]], "routed": true}, {"pads": [["J4.5", "HPLA_PORT", "D14"]], "routed": false}]}, {"id": "S1", "net": "/S1", "w": "0.15", "note": "J4 pin 6.", "pieces": [{"pads": [["U1.80", "ICE40HX4K-TQ144", "IOR_116"], ["U8.6", "74LVC8T245", "A4"]], "routed": true}, {"pads": [["J4.6", "HPLA_PORT", "D13"]], "routed": false}]}, {"id": "M_slash___IO_", "net": "/M/~IO", "w": "0.15", "note": "J4 pin 7.", "pieces": [{"pads": [["U1.94", "ICE40HX4K-TQ144", "IOR_141_GBIN2"], ["U9.9", "74LVC8T245", "A7"]], "routed": true}, {"pads": [["J4.7", "HPLA_PORT", "D12"]], "routed": false}]}, {"id": "__CD_SETUP_", "net": "/~CD_SETUP", "w": "0.15", "note": "J4 pin 8.", "pieces": [{"pads": [["U1.106", "ICE40HX4K-TQ144", "IOR_166"], ["U10.4", "74LVC8T245", "A2"]], "routed": true}, {"pads": [["J4.8", "HPLA_PORT", "D11"]], "routed": false}]}, {"id": "CHRESET", "net": "/CHRESET", "w": "0.15", "note": "J4 pin 9.", "pieces": [{"pads": [["U1.76", "ICE40HX4K-TQ144", "IOR_112"], ["U8.9", "74LVC8T245", "A7"]], "routed": true}, {"pads": [["J4.9", "HPLA_PORT", "D10"]], "routed": false}]}, {"id": "__CD_DS16_", "net": "/~CD_DS16", "w": "0.15", "note": "J4 pin 10.", "pieces": [{"pads": [["U1.73", "ICE40HX4K-TQ144", "IOR_109"], ["U12.9", "74VHCT125", ""]], "routed": true}, {"pads": [["J4.10", "HPLA_PORT", "D9"]], "routed": false}]}, {"id": "DATA_DIR", "net": "/DATA_DIR", "w": "0.15", "note": "J4 pin 12.", "pieces": [{"pads": [["R7.1", "1K", ""], ["U1.130", "ICE40HX4K-TQ144", "IOT_206"], ["U6.2", "74LVC8T245", "DIR"]], "routed": true}, {"pads": [["J4.12", "HPLA_PORT", "D7"]], "routed": false}]}, {"id": "ARB_slash___GNT_", "net": "/ARB/~GNT", "w": "0.15", "note": "J4 pin 13.", "pieces": [{"pads": [["U1.96", "ICE40HX4K-TQ144", "IOR_146"], ["U9.7", "74LVC8T245", "A5"]], "routed": true}, {"pads": [["J4.13", "HPLA_PORT", "D6"]], "routed": false}]}, {"id": "__PREEMPT_", "net": "/~PREEMPT", "w": "0.15", "note": "J4 pin 14.", "pieces": [{"pads": [["U1.105", "ICE40HX4K-TQ144", "IOR_165"], ["U10.5", "74LVC8T245", "A3"]], "routed": true}, {"pads": [["J4.14", "HPLA_PORT", "D5"]], "routed": false}]}]}, {"id": "finish", "title": "Finishing", "intro": "After the routing.", "items": [{"id": "fin-gnd-tp", "net": "RP2040 pin 19 (TESTEN) to GND", "w": "", "note": "The only ground pad the pour doesn’t reach yet.", "pieces": []}, {"id": "fin-gnd-ep", "net": "Vias under the RP2040’s exposed pad", "w": "", "note": "Four or five to the bottom pour, clear of the paste openings.", "pieces": []}, {"id": "fin-gnd-stitch", "net": "Ground vias by the new parts", "w": "", "note": "Next to each new part’s ground pad, and stitching round the crystal and USB.", "pieces": []}, {"id": "fin-silk", "net": "Silkscreen", "w": "", "note": "Change “REV P2 09/26” to Rev P3; label USB, BOOTSEL, SD, the test points and the status LED.", "pieces": []}, {"id": "fin-edge", "net": "USB-C at the board edge", "w": "", "note": "J5’s front sits flush with the edge (x = 190). Check it against the sled before ordering.", "pieces": []}, {"id": "fin-drc", "net": "DRC clean", "w": "", "note": "Refill zones (B), then Inspect › Design Rules Checker: no unconnected items, no clearance errors.", "pieces": []}, {"id": "fin-check", "net": "tools/p3_check.py", "w": "", "note": "Still passes after any schematic edits made during layout.", "pieces": []}]}];
+const ALL = GROUPS.flatMap(g => g.items);
+let state = {};          // id -> {done, note}
+let mode = 'local';      // 'db' when shared saving works
+let db = null;
+const LS = 'difnif-p3-routing';
+const qEl = document.getElementById('q'), hideEl = document.getElementById('hide');
+
+function loadLocal() { try { return JSON.parse(localStorage.getItem(LS) || '{}') } catch (e) { return {} } }
+function saveLocal() { try { localStorage.setItem(LS, JSON.stringify(state)) } catch (e) {} }
+try { hideEl.checked = localStorage.getItem(LS + '-hide') === '1' } catch (e) {}
+
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e }
+
+function matches(it, q) {
+  if (!q) return true;
+  q = q.toLowerCase();
+  if (it.net.toLowerCase().includes(q)) return true;
+  return it.pieces.some(p => p.pads.some(([pad, val, fn]) => (pad + ' ' + val + ' ' + fn).toLowerCase().includes(q)));
+}
+
+function render() {
+  const q = qEl.value.trim(), hide = hideEl.checked;
+  const done = ALL.filter(it => state[it.id] && state[it.id].done).length;
+  document.getElementById('count').textContent = done + ' / ' + ALL.length;
+  document.getElementById('meter').style.width = (100 * done / ALL.length).toFixed(1) + '%';
+  const jump = document.getElementById('jump'); jump.replaceChildren();
+  const list = document.getElementById('list'); list.replaceChildren();
+  for (const g of GROUPS) {
+    const gd = g.items.filter(it => state[it.id] && state[it.id].done).length;
+    const a = el('a', gd === g.items.length ? 'full' : '', g.title); a.href = '#' + g.id;
+    a.append(el('span', 'n', gd + '/' + g.items.length)); jump.append(a);
+    const items = g.items.filter(it => matches(it, q) && !(hide && state[it.id] && state[it.id].done));
+    if (q && !items.length) continue;
+    const sec = el('section', 'group'); sec.id = g.id;
+    const h = el('h2', null, g.title); h.append(el('span', 'n', gd + ' of ' + g.items.length)); sec.append(h);
+    sec.append(el('p', null, g.intro));
+    const box = el('div', 'items');
+    if (!items.length) box.append(el('p', 'empty', 'All routed.'));
+    for (const it of items) box.append(row(it));
+    sec.append(box); list.append(sec);
+  }
+}
+
+function row(it) {
+  const s = state[it.id] || {};
+  const r = el('div', 'item' + (s.done ? ' done' : ''));
+  const cb = el('input'); cb.type = 'checkbox'; cb.checked = !!s.done; cb.id = 'cb-' + it.id;
+  cb.setAttribute('aria-label', 'Routed: ' + it.net);
+  cb.addEventListener('change', () => save(it.id, { done: cb.checked }));
+  const b = el('div', 'body');
+  const head = el('div', 'head');
+  const name = el('label', 'net', it.net); name.htmlFor = cb.id; head.append(name);
+  if (it.w) head.append(el('span', 'w', it.w));
+  b.append(head);
+  if (it.note) b.append(el('p', 'note', it.note));
+  if (it.pieces.length) {
+    const ps = el('div', 'pieces');
+    it.pieces.forEach((p, i) => {
+      if (i) ps.append(el('span', 'join', '↔'));
+      const pc = el('span', 'piece' + (p.routed ? ' routed' : ''));
+      for (const [pad, val, fn] of p.pads) {
+        const c = el('span', 'pad', pad);
+        const extra = [fn, val].filter(Boolean).join(' · ');
+        if (extra) c.append(el('small', null, extra));
+        pc.append(c);
+      }
+      ps.append(pc);
+    });
+    b.append(ps);
+  }
+  const n = el('input', 'mynote'); n.type = 'text'; n.id = 'note-' + it.id; n.value = s.note || '';
+  n.placeholder = 'Add a note'; n.setAttribute('aria-label', 'Note for ' + it.net);
+  n.addEventListener('change', () => save(it.id, { note: n.value }));
+  b.append(n);
+  r.append(cb, b);
+  return r;
+}
+
+const chains = {};
+function save(id, patch) {
+  state[id] = Object.assign({}, state[id], patch, { at: new Date().toISOString() });
+  render();
+  if (mode !== 'db') { saveLocal(); return }
+  const body = Object.assign({}, state[id]);
+  chains[id] = (chains[id] || Promise.resolve()).then(() => db.collection('routed').doc(id).set(body))
+    .catch(e => { setSaved('Couldn’t save that change (' + (e && e.code || 'error') + '). It’s kept in this browser.'); saveLocal() });
+}
+
+function setSaved(t) { document.getElementById('saved').textContent = t }
+
+qEl.addEventListener('input', render);
+hideEl.addEventListener('change', () => { try { localStorage.setItem(LS + '-hide', hideEl.checked ? '1' : '0') } catch (e) {} render() });
+
+state = loadLocal();
+render();
+setSaved('Saved in this browser');
+
+(async () => {
+  if (!window.claude || !window.claude.use) return;
+  try { db = await window.claude.use('db') } catch (e) { db = null }
+  if (!db) return;
+  let timer = setTimeout(() => setSaved('Saved progress can’t be reached yet; showing this browser’s copy.'), 10000);
+  db.collection('routed').onSnapshot(snap => {
+    mode = 'db';
+    const next = {};
+    for (const d of snap.docs) if (d.exists) next[d.id] = Object.assign({}, d.data());
+    state = next;
+    if (!snap.metadata.fromCache) { clearTimeout(timer); setSaved('Progress is saved with the page') }
+    render();
+  }, e => { clearTimeout(timer); mode = 'local'; setSaved('Saved in this browser only (' + e.code + ')') });
+})();
+</script>
+
+</body>
+</html>
