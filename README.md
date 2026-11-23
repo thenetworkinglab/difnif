@@ -202,6 +202,8 @@ processor's start-up. They need Icarus Verilog.
 - [docs/os2.md](docs/os2.md): what it took to boot OS/2 1.1.
 - [docs/verify-findings.md](docs/verify-findings.md): how to check each
   finding against Eric's files and IBM's documents.
+- [docs/rev-p3-spec.md](docs/rev-p3-spec.md): a draft specification for
+  the next board: FPGA-only, USB-C, full-size SD socket.
 
 ## Reference documents
 
