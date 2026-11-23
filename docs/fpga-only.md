@@ -265,7 +265,7 @@ cases, measured on the -TC to -BURST route).
 
 On a P2 board on the bench (21 November) it started first time: card up
 on the 4-bit bus at 25 MHz, FAT32 in a partition at block 8192, disk0.img
-at block 0xA0FC0, contiguous, 311,296 blocks (Tim's 152 MB image). The
+at block 0xA0FC0, contiguous, 311,296 blocks (a 152 MB image). The
 serial input (any key reprints the summary) didn't work in that image,
 because of the driven Teensy lines above; fixed since.
 
@@ -371,7 +371,7 @@ Still to check: the 55SX. The Teensy build is unchanged
 
 ### Fragmented images
 
-Copied onto a freshly formatted 32 GB card by a Mac, Tim's OS/2 image came
+Copied onto a freshly formatted 32 GB card by a Mac, an OS/2 image came
 out in 15 runs of clusters, threaded between the small files macOS writes
 there first (`.Spotlight-V100`, `.fseventsd`, `._disk0.img`), and the
 firmware, which wanted one run, refused it (reason 7). Deleting and copying

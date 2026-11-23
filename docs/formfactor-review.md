@@ -1041,7 +1041,7 @@ random / sequential / buffered, KB/s):
 | 55SX | 1107 / 1100 / 1151 | 2108 / 2266 / 2305 | 120 of 120 identical |
 | Model 70 | 1110 / 1062 / 1108 | 1956 / 2067 / 2102 | 120 of 120 identical |
 
-Other adapters in the same machines, measured by Tim with DiskMeter 1.3:
+Other adapters in the same machines, measured with DiskMeter 1.3:
 
 | Adapter | 55SX | Model 70 |
 |---|---|---|
@@ -1075,7 +1075,7 @@ the faster processor, and is a little slower in the 70 than in the 55SX.
 
 ## Speed: writes
 
-Measured in the Model 70 with sunbench (Tim's disk benchmark, DOS version),
+Measured in the Model 70 with sunbench (a disk benchmark, DOS version),
 on a 32 MB file through DOS, with FPGA v2026.11.21-1 and the development
 builds of firmware v2026.11.21-5: -3 syncs first, as earlier releases do,
 and -4 is the same code as the release:
