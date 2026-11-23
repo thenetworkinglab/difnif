@@ -1,9 +1,9 @@
 # Rev P3: draft specification
 
 A draft for the next PS/2 board, before any schematic work. Rev P3 is the
-FPGA-only design (docs/fpga-only.md) on a board made for it: no Teensy, USB-C
-for programming and a serial console, a full-size SD socket, activity LEDs,
-and the fixes Rev P2's bring-up called for. The bus side doesn't change:
+FPGA-only design (docs/fpga-only.md) on a board made for it: no Teensy, a
+USB-C port for programming, a serial console and access to the SD card,
+activity LEDs, and the fixes Rev P2's bring-up called for. The bus side doesn't change:
 `mcabus.v`, the sector buffer and burst DMA are what's been checked against
 IBM's timing and tested in the 55SX and Model 70.
 
@@ -51,11 +51,9 @@ firmware already does most of this:
   series resistors on the shared SPI lines), so the FPGA boots from its
   flash whether the RP2040 is running, held in reset or unpowered, and the
   RP2040 must leave those lines undriven except while programming.
-- **Room for later:** reading or replacing disk0.img over USB while the PS/2
-  is off (the SD card's lines would need to reach the RP2040 too, with the
-  FPGA letting go of them; decide before the schematic), watching the
-  power-fail signal, a status display, a small logic analyser on spare
-  pins.
+- **The SD card as a USB drive** while the PS/2 is off (see "SD card").
+- **Room for later:** watching the power-fail signal, a status display, a
+  small logic analyser on spare pins.
 - 5.1 kOhm pull-downs on CC1 and CC2 so USB-C sources supply 5 V; USB 2.0
   full speed; ESD protection on D+/D- (for example a USBLC6-2).
 - Keep a 2 x 4 programming header footprint (J2's pinout), unfitted, as a
@@ -82,15 +80,38 @@ but about $4-5 more per board and nothing beyond those two jobs.
 
 ### SD card
 
-- **A full-size SD socket** in place of the microSD (J3), with its
-  card-detect and write-protect switches on FPGA pins. Full-size cards and
-  adapters, and extension cables that bring the slot out to the case, are
-  then possible.
-- Keep the 4-bit wiring and pull-ups, and short, matched traces to the
-  socket. Check the read sampling margin (`sample_late`, docs/fpga-only.md)
-  with an extension cable fitted, since the cable adds delay.
-- **Write-protect:** the firmware makes the drive read-only when the switch
-  is on (writes fail with a write fault), for keeping a known-good OS image.
+The card stays inside the machine; images are managed over USB.
+
+- **Shared between the FPGA and the RP2040** through a FET bus switch (two
+  quad 2:1 switches, for example SN74CBTLV3257, for clock, command and the
+  four data lines). The command and data lines are bidirectional, so a
+  switch, not wiring the two chips together: no stubs, and the two can
+  never drive the card at once. The RP2040 drives the switch's select line.
+- **Ownership:** the FPGA has the card by default, to run the drive. The
+  RP2040 takes it only when the PS/2 is off (it senses the PS/2's +5 V on a
+  pin, through a resistor divider; the board then runs from USB power), or when the drive is idle and
+  the FPGA hands it over through a two-wire handshake. A computer writing
+  the image while the PS/2 is using it would corrupt it, so USB access while
+  the PS/2 is on is at most read-only, if allowed at all.
+- **The card as a USB drive:** the RP2040 presents the whole card (its
+  FAT32 or exFAT filesystem) as USB mass storage, so a computer can copy,
+  replace or back up disk0.img. USB full speed gives about 1 MB/s: a 150 MB
+  image copies in 2-3 minutes, 1 GB in 15-20.
+- **Card changed:** when the RP2040 gives the card back after writing to
+  it, the handshake tells the FPGA, whose firmware finds disk0.img again
+  (it may have moved, been replaced or be in new pieces) before it answers
+  the PS/2. The firmware can already restart the card and search again.
+- **External port:** a USB-C extension cable (male to female, through a
+  slot cover or the back panel) brings the port outside the case, so images
+  can be swapped without opening the machine. USB full speed is fine over a
+  cable of a metre or two.
+- **Socket:** with USB access, a microSD socket (as on Rev P2) is enough and
+  the cheapest. A full-size socket's one advantage left would be its
+  write-protect switch (the firmware would make the drive read-only); an SD
+  extension cable is no longer needed.
+- Keep the 4-bit wiring, pull-ups, and short traces; the bus switch adds a
+  few ohms and well under a nanosecond. Check the read sampling margin
+  (`sample_late`, docs/fpga-only.md) on the new board.
 
 ### LEDs
 
@@ -121,23 +142,26 @@ but about $4-5 more per board and nothing beyond those two jobs.
 | Freed: Teensy socket | +25 |
 | Unused on Rev P2 | +11 |
 | USB-C UART (out, in) | -2 |
-| SD write-protect | -1 |
+| SD card handshake with the RP2040 (request, released) | -2 |
+| SD write-protect (full-size socket only) | -1 |
 | Power-fail | -1 |
 | U7 direction / enable | -1 |
 | LEDs (activity, status; Rev P2 has two) | 0 |
 | Test points on spare pins | -4 |
-| **Left** | **27** |
-| QSPI PSRAM, if option A below | -6 (leaving 21) |
+| **Left** | **25** |
+| QSPI PSRAM, if option A below | -6 (leaving 19) |
 
 ## Open questions
 
-- **SD card over USB:** wire the card to the RP2040 as well, for copying
-  disk0.img over USB while the PS/2 is off, or leave it for a later board?
+- **USB access while the PS/2 is on:** none, or read-only when the drive is
+  idle? (Read-only still risks reading an image mid-write.)
+- **microSD or full-size socket:** microSD is cheaper; full-size adds the
+  write-protect switch.
 - **Processor RAM:** see "FPGA and RAM" below.
 - **USB-C position:** reachable with the board in its sled in each machine
   (the 55SX's drive bay and the Model 70's riser), or only on the bench?
-- **SD extension cable:** which cable, and is a sampling margin check on
-  the bench enough, or a test in each machine?
+- **USB-C extension:** which cable and bracket, for the 55SX's and the
+  Model 70's cases.
 
 ## FPGA and RAM
 
@@ -195,8 +219,8 @@ design has already removed it. For the rest:
 - The RP2040 (about $1-1.50 with its flash, plus a crystal) for USB-C,
   about $4 a board less than an FT2232H, and with room for later features.
 - The PSRAM footprint unfitted (about $2-3 if it's ever needed).
-- The full-size SD socket and LEDs cost about the same as Rev P2's microSD
-  socket.
+- The SD bus switch (two SN74CBTLV3257 or similar, well under $1 each),
+  a microSD socket as on Rev P2, and the LEDs.
 
 Prices are quantity-1 distributor prices from November 2026; assembly
 services that buy from LCSC are often cheaper. Gold fingers and the
