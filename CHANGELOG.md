@@ -31,7 +31,7 @@ the design and how each part was tested.
 
 ### v2026.11.22-1
 
-The first release. In the Model 70 it's faster than the Teensy build and
+The first release. In both machines it's faster than the Teensy build and
 than an IDE adapter (McIDE) in the same machine:
 
 | | Teensy build (fw v2026.11.21-5) | FPGA-only build |
@@ -41,7 +41,8 @@ than an IDE adapter (McIDE) in the same machine:
 | sunbench raw 64 KB read / write, Model 70 (MB/s) | 1.87 / 1.95 | 2.99 / 2.50 |
 | sunbench raw 1 KB sequential read, Model 70 (MB/s) | 0.90 | 1.36 |
 
-(The McIDE gives 2476.7 KB/s in DiskMeter on the Model 70.)
+(An IDE adapter, the McIDE, gives 2476.7 / 2476.7 / 2476.7 KB/s in DiskMeter
+on the Model 70 and 1866.9 / 1875.7 / 2005.0 on the 55SX.)
 
 - **The disk image** is `disk0.img` in the root of a FAT32 or exFAT card
   (on the whole card or in its first partition), as for the Teensy, in up

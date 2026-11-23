@@ -51,8 +51,10 @@ with the FPGA-only build in the Model 70 (not yet tried in its 55SX). With
 the FPGA-only build, switching the PS/2 off straight after a write loses
 nothing.
 
-Speed, measured with DiskMeter (KB/s) and sunbench (raw BIOS reads and
-writes, 64 KB blocks, MB/s):
+Speed, measured with DiskMeter (random / sequential / buffered, KB/s) and
+sunbench (raw BIOS reads and writes, 64 KB blocks, MB/s), in a Model 70
+(8570-A21: 25 MHz 80386DX, 64 KB cache) and a 55SX (8555-061: 16 MHz
+80386SX, no cache):
 
 | | Model 70 | 55SX |
 |---|---|---|
@@ -60,7 +62,7 @@ writes, 64 KB blocks, MB/s):
 | FPGA-only, sunbench read / write | 2.99 / 2.50 | 2.13 / 1.87 |
 | Teensy build, DiskMeter | 1942 / 2036 / 2010 | 2108 / 2266 / 2305 |
 | Eric's original design, DiskMeter | about 990 | about 690 |
-| McIDE (an IDE adapter), DiskMeter | 2477 | |
+| McIDE (an IDE adapter), DiskMeter | 2477 / 2477 / 2477 | 1867 / 1876 / 2005 |
 
 Not yet tested: the PS/2 50Z, and this fork's FPGA changes on the ThinkPad
 board (Eric's ThinkPad board works with his original design, on the `main`
