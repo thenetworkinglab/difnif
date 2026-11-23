@@ -160,9 +160,34 @@ Intel's MAX 10 (EQFP-144, configuration flash on-chip) and AMD's Spartan-7
 also have more RAM, but their tools (Quartus, Vivado) don't run on macOS
 and nothing of the timing tooling would carry over.
 
-Recommendation: B for a new board, since it removes every resource limit
-for little cost and keeps the toolchain; A if the board stays close to
-Rev P2.
+Recommendation: neither, yet. The firmware fits in 12 KB today, and the P3
+additions hardly add to it (the FT2232H handles USB itself; LEDs,
+write-protect and power-fail are a few lines each). Keep the iCE40 and the
+2-layer board, and put option A's PSRAM footprint on the board unfitted:
+six pins and no cost until the firmware needs it. B is the fallback if RAM,
+logic or pins ever run out; it costs an extra regulator, probably two more
+board layers and BGA assembly.
+
+## Cost
+
+The aim is value, not a product: a target of about $60 per assembled
+board, parts and assembly included, for a run of a few boards. The Teensy
+4.1 (about $31) was the largest single part on Rev P2, and the FPGA-only
+design has already removed it. For the rest:
+
+- 2-layer board and the iCE40HX4K-TQ144 (about $10), as on Rev P2.
+- The FT2232H (about $5-6, plus a crystal) for USB-C; an RP2040 (about
+  $1-1.50 with its flash) would save about $4 a board at the cost of more
+  firmware to maintain.
+- The PSRAM footprint unfitted (about $2-3 if it's ever needed).
+- The full-size SD socket and LEDs cost about the same as Rev P2's microSD
+  socket.
+
+Prices are quantity-1 distributor prices from November 2026; assembly
+services that buy from LCSC are often cheaper. Gold fingers and the
+bevelled edge are a large share of the bare board's cost, and setup fees
+are shared across the boards in an order, so a larger run costs less per
+board.
 
 ## Checking it before ordering
 
