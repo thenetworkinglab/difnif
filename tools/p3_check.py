@@ -13,10 +13,12 @@ This file is part of a fork of DifNif; CERN-OHL-S-2.0.
 """
 
 import os
-import re
 import subprocess
 import sys
 import tempfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import kisexp as K  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KICAD_CLI = os.environ.get('KICAD_CLI', '/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli')
@@ -26,13 +28,21 @@ def netlist(sch):
     out = os.path.join(tempfile.mkdtemp(), 'n.net')
     subprocess.run([KICAD_CLI, 'sch', 'export', 'netlist', '--format', 'kicadsexpr', '-o', out,
                     sch], check=True, capture_output=True)
-    s = open(out).read()
+    t = K.parse(open(out).read())
     nets = {}
-    for chunk in s.split('(net (code ')[1:]:
-        name = re.match(r'"\d+"\) \(name "([^"]*)"\)', chunk).group(1)
-        nets[name] = re.findall(
-            r'\(node \(ref "([^"]*)"\) \(pin "([^"]*)"\)(?: \(pinfunction "([^"]*)"\))?', chunk)
-    vals = dict(re.findall(r'\(comp \(ref "([^"]*)"\)\s*\(value "([^"]*)"\)', s))
+    for n in K.find(K.first(t, 'nets'), 'net'):
+        nodes = []
+        for x in K.find(n, 'node'):
+            r, p = str(K.first(x, 'ref')[1]), str(K.first(x, 'pin')[1])
+            f = K.first(x, 'pinfunction')
+            f = str(f[1]) if f else ''
+            # KiCad 10 appends the pin number: GPIO8_11
+            if f.endswith('_' + p):
+                f = f[:-len(p) - 1]
+            nodes.append((r, p, f))
+        nets[str(K.first(n, 'name')[1])] = nodes
+    vals = {str(K.first(c, 'ref')[1]): str(K.first(c, 'value')[1])
+            for c in K.find(K.first(t, 'components'), 'comp')}
     return nets, vals
 
 
