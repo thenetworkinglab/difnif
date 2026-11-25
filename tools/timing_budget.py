@@ -2,8 +2,8 @@
 """
 Timing budget for the DifNif 72-pin board against IBM's Micro Channel timing.
 
-Builds the FPGA design with yosys and nextpnr (same flags as verilog/Makefile),
-then combines:
+Builds the FPGA design with yosys and nextpnr (the same commands as
+verilog/Makefile, so it checks the image make builds), then combines:
   * nextpnr's worst delay for each class of path (pin to pin, pin to a
     -CMD-clocked flip-flop, flip-flop to pin, ...), taken from its JSON
     report. Using the worst path of a class for every path in that class is
@@ -14,7 +14,8 @@ then combines:
     leaves out (sized from Lattice's HX pin-to-pin figures)
   * worst-case delays of the other chips on the board, from their datasheets
 and prints the margin left for each requirement in IBM Figure 2-34 (I/O
-cycle), 2-40/2-41 (DMA) and 2-46 (arbitration). A negative margin fails.
+cycle), 2-40/2-41 (DMA) and 2-46 (arbitration), and for the processor
+build the 50 MHz clock (nextpnr's estimate). A negative margin fails.
 
 Usage:
   tools/timing_budget.py              # default build (POS bypassed)
@@ -92,13 +93,16 @@ def build(tmp, pos, probes=False, cpu=False, seed=None, p3=False):
     files = ["difnif_top.v", "mcabus.v", "teensy.v", "sectorbuf.v"]
     if cpu:
         files += ["soc.v", "picorv32.v", "sdhost.v", "sdbridge.v"]
-    sources = [os.path.join(VERILOG, f) for f in files]
     define = (("-DMCA_USE_POS " if pos else "") + ("-DDIFNIF_PROBES " if probes else "") +
               ("-DDIFNIF_CPU " if cpu else "") + ("-DDIFNIF_P3 " if p3 else ""))
     json_path = os.path.join(tmp, "difnif.json")
-    run(["yosys", "-q", "-p",
-         "read_verilog %s%s; synth_ice40 -top difnif_top -json %s"
-         % (define, " ".join(sources), json_path)], cwd=VERILOG)   # fw.hex for CPU
+    # Exactly verilog/Makefile's yosys command (defines as options, sources
+    # by name from verilog/): any other spelling gives a netlist that
+    # nextpnr places differently, so the budget would be for a different
+    # image from the one make builds
+    run(["yosys"] + define.split() +
+        ["-p", "synth_ice40 -top difnif_top -json %s -blif %s"
+         % (json_path, os.path.join(tmp, "test.blif"))] + files, cwd=VERILOG)   # fw.hex for CPU
     report = os.path.join(tmp, "report.json")
     sdf = os.path.join(tmp, "difnif.sdf")
     run(["nextpnr-ice40", "--hx8k", "--package", "tq144:4k", "-q",
@@ -187,8 +191,10 @@ def main():
         GBUF.update(PROBE_GBUF)
 
     with tempfile.TemporaryDirectory() as tmp:
-        seed = args.seed if args.seed is not None else (7 if args.cpu else None)   # Makefile's PNR_SEED
+        # verilog/Makefile's PNR_SEED defaults
+        seed = args.seed if args.seed is not None else (10 if args.p3 else 4 if args.cpu else None)
         report, sdf = build(tmp, args.pos, args.probes, args.cpu, seed, args.p3)
+        fmax = {k: v["achieved"] for k, v in json.load(open(report)).get("fmax", {}).items()}
         find_gbufs(sdf)
         w = path_classes(report)
         ins_cmd = clock_insertion(sdf, "cmd_l")
@@ -283,6 +289,14 @@ def main():
     release = clk_cmd_max + 6 * 20.0 + d("posedge clk", "<async>") + PAD_OUT + BOARD["lcx07"]
     row("T56", "-BURST high before the next I/O -CMD rises", IBM["T56"],
         2 * 200 - release, kind="min")
+
+    # The processor build's 50 MHz clock: nextpnr's estimate is all there is
+    # to go on (the Makefile doesn't constrain it, so nextpnr only checks 12)
+    if args.cpu:
+        if "clk" in fmax:
+            row("50 MHz", "processor clock period", 20.0, 1000.0 / fmax["clk"])
+        else:
+            missing.add(("posedge clk", "posedge clk"))
 
     print("FPGA path classes used (nextpnr, worst path of each class):")
     for (f, t), v in sorted(w.items()):

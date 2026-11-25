@@ -175,8 +175,17 @@ moves with every placement. `tools/sdfpath.py` now measures the actual
 -TC to -BURST route from nextpnr's SDF (9.7 ns inside the FPGA for seed 7,
 the slow way round, through the `tc_seen` latch's clock): T54 then passes
 with 3.0-6.0 ns to spare for every seed from 1 to 16 in the processor
-build, 5.2 ns in the Teensy build. The Makefile keeps seed 7 only so that a
+build, 5.2 ns in the Teensy build. The Makefile keeps a fixed seed so that a
 build is reproducible.
+
+The processor's own 50 MHz clock turned out to be the tighter limit: with
+the Rev P3 changes, seed 7 left it at about 50.5 MHz in nextpnr's estimate.
+`timing_budget.py` now checks it too, and it now builds exactly as the
+Makefile does (it used to call yosys slightly differently, so nextpnr
+placed a different netlist and the budget described an image make never
+built). A search of seeds 1-16 gives 50-54 MHz; the Makefile uses seed 4
+for the processor build (53.2 MHz, T22 8.2 ns, T54 6.0 ns to spare) and
+seed 10 for Rev P3 (54.3 MHz, 7.6 ns, 4.9 ns).
 
 The log goes out on Teensy data line 7 (FPGA pin 25), which is the
 Teensy's pin 16, its Serial4 input; Teensy pin 17 (Serial4 output) comes
