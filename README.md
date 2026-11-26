@@ -117,7 +117,9 @@ steps are for the FPGA-only build; the Teensy build differs in steps 4 to 6
        dd if=/dev/zero of=disk0.img bs=1048576 count=120
 
    The file may be in up to 32 pieces on the card. The card goes in the
-   board's socket, J3.
+   board's socket, J3. [docs/sd-card.md](docs/sd-card.md) has the steps for
+   putting an image on a card (erase it, then copy, so the image is in one
+   piece) and what the log means if the board can't use it.
 6. **Optional: the serial log.** The board reports what it found on the card
    (and why, if it can't use the image) on a 1 Mbaud, 8N1 serial line at the
    Teensy socket: it sends on the pin where a Teensy 4.1's pin 16 would go,
@@ -200,6 +202,9 @@ processor's start-up. They need Icarus Verilog.
 - [docs/formfactor-review.md](docs/formfactor-review.md): the review of
   Eric's Rev P1 board, the Rev P2 changes, bring-up, and the speed work on
   the Teensy build.
+- [docs/sd-card.md](docs/sd-card.md): preparing the SD card, backing up
+  an image, and what the start-up log means when the card or image can't
+  be used.
 - [docs/os2.md](docs/os2.md): what it took to boot OS/2 1.1.
 - [docs/verify-findings.md](docs/verify-findings.md): how to check each
   finding against Eric's files and IBM's documents.
